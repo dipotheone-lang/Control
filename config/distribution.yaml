@@ -1,0 +1,25 @@
+# Management report distribution — charter §11
+# Reports are always drafted for approval; the external gate never opens (§10).
+
+management_reports:
+  default_recipients:
+    - ahmed@ubcsis.com      # CEO
+    - ghareeb@ubcsis.com    # COO
+    - accounts@ubcsis.com   # Acting CFO
+    - info@ubcsis.com       # Ahmed Hassan
+  format: xlsx export plus bilingual summary
+  standing_cc: contact.ubcsis@gmail.com   # §3.1 continuity backup
+
+standing_limitation_lines:
+  # Carried verbatim in every management report until the relevant
+  # decisions close.
+  - ref: §3.1a (until O-05)
+    en: >
+      External SLA coverage is limited to threads copied to control@.
+      Traffic in sales@ and procure@ is not visible to this system.
+  - ref: §12.1.4 (permanent)
+    en: >
+      Client-confidential documents are tracked for receipt and timeliness
+      only. Their contents are not assessed. Accuracy, completeness, and
+      manual conformance for these items rest with the responsible
+      department, not with Control.

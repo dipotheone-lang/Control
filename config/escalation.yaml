@@ -1,0 +1,51 @@
+# Escalation schedules — charter §2, §8.1, §8.2
+# Class determines escalation speed, not report type.
+
+class_1_statutory:
+  alerts: [T-7, T-3, T-1, day-of]
+  day_of: CEO and CFO immediately
+  suppression: never    # ignores weekends, holidays, leave, reminder limits
+
+class_2_commercial:
+  alerts: [T-14, T-7, T-3, T-1, day-of]
+  day_of: owner and CEO
+  suppression: never
+  tender_deadlines:
+    # Submission and clarification deadlines — the highest-value items in
+    # the system (§2.2).
+    alerts: [T-14, T-7, T-3, T-2, T-1, morning-of]
+  financial_instruments:
+    alerts_days: [60, 30, 14, 7]   # plus retention release dates
+  accreditations:
+    alerts_days: [90, 60, 30]
+
+class_3_operational:
+  ladder:
+    pre_deadline: -24h              # -48h for monthly+; or learned optimum (§14.3)
+    deadline: at due time -> owner
+    L1: { after: 1 working day,  to: [owner, manager] }
+    L2: { after: 3 working days, to: [owner, manager, coo] }   # financial items: CFO
+    L3: { after: 5 working days, to: [owner, manager, coo, ceo] }
+    stop: after L3 — stays open in every management report
+  consolidation: one email per person per day maximum
+  reliability_suppression:
+    # §8.2: reward reliability with silence.
+    rule: >
+      Three consecutive periods at 100% first-pass -> pre-deadline reminders
+      suppressed for that person; reinstated on first miss.
+
+class_4_informational:
+  alerts: [single reminder]
+  escalation: none
+
+disputes:
+  # §8.4: DISPUTE / اعتراض on the first line suspends the escalation clock
+  # on that item and lists it for CEO adjudication. Never argue, never
+  # re-evaluate on own initiative. Every outcome is training signal (§14.3).
+  clock: suspended on receipt
+
+absence:
+  # §3.3: never escalate an item owned by someone on registered leave.
+  # Route to the named delegate; no delegate -> route to manager, and the
+  # recorded finding is "delegation not registered" (a process finding).
+  source: config/absence.yaml

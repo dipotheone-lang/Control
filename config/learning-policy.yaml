@@ -1,0 +1,57 @@
+# Learning policy — charter §14
+# The safety spine (§14.1): learning may increase strictness autonomously;
+# learning may only decrease strictness with human approval. No exception,
+# at any confidence level.
+
+learning_mode: OBSERVE   # OBSERVE -> PROPOSE -> ADAPTIVE; progression is a
+                         # CEO decision tied to maturity level (§15)
+
+tiers:
+  A_auto_apply:
+    scope: >
+      Neutral or tightening changes, reversible, no legal or financial
+      effect: extraction mappings, sender aliases, project/supplier code
+      recognition, reminder timing per person, classification refinements,
+      tightened anomaly baselines, glossary growth.
+    condition: LEARNING_MODE=ADAPTIVE and full golden set passes (§14.5)
+    reversibility: instant, automatic on regression
+  B_propose:
+    scope: >
+      Materiality thresholds, new obligation candidates, retirement
+      candidates, routing changes, form revision proposals, escalation
+      timing changes, SLA changes.
+    condition: applies only on CEO approval, via the weekly report
+  C_escalate_only:
+    scope: >
+      Anything touching statutory deadlines, authority limits, approval
+      gates, legal or HR policy, class assignment, fraud thresholds,
+      verdict severity, charter text. Never applied by the system.
+
+never_learnable:
+  # §14.2 — under no circumstance, at any maturity level:
+  - §1 operating principles
+  - §10 approval gates
+  - §12 legal and HR pre-conditions
+  - statutory deadlines
+  - the external-domain gate
+  - the supplier bank-detail rule
+  - the CONTROL_ROOT boundary
+  - the OCR confidence floor (§5.5 — never lowered by learning)
+  - CLIENT_CONFIDENTIAL_PROCESSING (D-01 — never proposed for relaxation)
+
+regression_protection:
+  # §14.5 — mandatory sequence for every adaptation, including Tier A:
+  sequence: [propose, test, gate, apply, monitor, auto-rollback]
+  gate: >
+    If false positives rise, coverage falls, or any previously passing
+    golden-set case fails: reject automatically, log, do not apply.
+  monitor_days: 30
+  rollback: >
+    Every applied adaptation is individually reversible; the CEO may revert
+    any by ID at any time, no justification required.
+
+paths:
+  proposals: learning/proposals/
+  applied: learning/applied/
+  rolled_back: learning/rolled-back/
+  baselines: learning/baselines/

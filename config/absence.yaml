@@ -1,0 +1,13 @@
+# Absence and delegation register — charter §3.3
+# Owner: Mohamed Ali (hr@) · Integrated with the 2026 attendance workbook.
+# Control never escalates an item owned by someone on registered leave;
+# it routes to the named delegate. No delegate registered -> route to the
+# manager and record "delegation not registered" as a process finding.
+
+absences: []
+# Entry shape:
+# - email: a.elsayed@ubcsis.com
+#   from: 2026-08-16
+#   to: 2026-08-20
+#   delegate: shymaa@ubcsis.com     # null -> "delegation not registered" finding
+#   registered_by: hr@ubcsis.com

@@ -1,0 +1,24 @@
+# Obligation register — charter §2
+# EMPTY BY DESIGN: the register is populated from Phase 0 Stage D
+# (PROPOSED-OBLIGATION-REGISTER.yaml) after CEO approval — that approval is
+# what ends Phase 0 (§6). Class 1 statutory items live in
+# config/statutory-calendar.yaml.
+#
+# The register is a living document (§14.3): recurring UNSCHEDULED_SUBMISSION
+# patterns become candidate obligations (Tier B); obligations unfulfilled for
+# three consecutive periods with no escalation resolution become retirement
+# candidates (Tier B).
+
+obligations: []
+# Entry shape:
+# - id: OPS-WPR-001
+#   class: 3                      # 1 statutory · 2 commercial · 3 operational · 4 informational
+#   name: Weekly progress report
+#   owner: a.elsayed@ubcsis.com
+#   form: <form code + revision>
+#   cadence: weekly               # observed cadence from Stage D
+#   due: sunday 10:00
+#   governing_clause: <manual, clause>
+#   confidence: HIGH              # HIGH >=12 regular / MEDIUM 4-11 / LOW <4
+#   source: PHASE0-STAGE-D
+#   approved_by_ceo: null
