@@ -21,3 +21,9 @@ logs/**
 .env
 *.pst
 *.ost
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/

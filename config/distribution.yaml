@@ -8,7 +8,16 @@ management_reports:
     - accounts@ubcsis.com   # Acting CFO
     - info@ubcsis.com       # Ahmed Hassan
   format: xlsx export plus bilingual summary
-  standing_cc: contact.ubcsis@gmail.com   # §3.1 continuity backup
+  standing_cc: contact.ubcsis@gmail.com   # §3.1 continuity backup — D-04:
+  # sole scoped exception to the external gate. NEVER CC'd on:
+  # SUSPECTED_FRAUD, S1-S4 anomaly flags, SOD itemisations, or anything
+  # referencing a confidential client. Standing monthly recommendation:
+  # replace with a company-controlled mailbox.
+  standing_cc_excluded_classes:
+    - SUSPECTED_FRAUD
+    - S1-S4 flags
+    - SOD itemisations
+    - confidential-client content
 
 standing_limitation_lines:
   # Carried verbatim in every management report until the relevant
