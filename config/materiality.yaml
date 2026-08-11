@@ -13,3 +13,16 @@ metrics: {}
 #   floor_pct: 10
 #   basis: Stage F baseline <ref>
 #   set_by: CEO approval <date / proposal id>
+
+# Minimum sample rule (§7.2, v4.3): a baseline below the minimum sample size
+# for its type is INSUFFICIENT — NOT USED FOR FLAGGING; statistical S1
+# signals stay silent for that metric. Values set from Stage F evidence.
+minimum_samples:
+  supplier_price_range: null
+  metric_variance: null
+  submission_timing: null
+
+# CEO flag-volume budget (§14.5, §13.3, v4.3): a Tier A baseline tightening
+# that pushes weekly S1-S4 flag volume beyond this budget without at least
+# one confirmed-useful flag auto-rolls back. Set from observed Phase 2 load.
+ceo_flag_budget_per_week: null

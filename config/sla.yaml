@@ -4,6 +4,14 @@
 working_calendar:
   working_days: [sunday, monday, tuesday, wednesday, thursday]
   timezone: Africa/Cairo          # IANA zone, never a hardcoded UTC offset (§5.1)
+  # Working hours for the §7.3 S1 out-of-hours signal — open decision O-11:
+  # set by HR, confirmed by CEO. The S1 out-of-hours signal stays SILENT
+  # until both values are set and confirmed (§8.3).
+  working_hours:
+    start: null
+    end: null
+    set_by: null
+    confirmed_by_ceo: false
   # Deadlines move to the next working day; no class 3 reminders on
   # non-working days.
   holidays: []
