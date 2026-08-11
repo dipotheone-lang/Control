@@ -1,0 +1,15 @@
+# Materiality thresholds — charter §7.2
+# Per metric: absolute floor and a percentage, whichever binds.
+# "A 30% swing on EGP 400 is noise; 5% on EGP 4,000,000 is not."
+#
+# PENDING: initial values come from Phase 0 Stage F statistical baselines —
+# learned, not guessed. Refined continuously by §14.3 (threshold changes are
+# Tier B: proposed with evidence, applied only on CEO approval).
+
+metrics: {}
+# Entry shape:
+# metric_id:
+#   floor_abs: 50000        # EGP
+#   floor_pct: 10
+#   basis: Stage F baseline <ref>
+#   set_by: CEO approval <date / proposal id>

@@ -1,0 +1,32 @@
+# Working calendar and external SLAs — charter §8.3, §8.5
+# Class 1 and 2 obligations ignore the working calendar entirely (§8.3).
+
+working_calendar:
+  working_days: [sunday, monday, tuesday, wednesday, thursday]
+  timezone: Africa/Cairo          # IANA zone, never a hardcoded UTC offset (§5.1)
+  # Deadlines move to the next working day; no class 3 reminders on
+  # non-working days.
+  holidays: []
+  # Egyptian public holidays — populate and maintain. Stale by 60+ days -> flag.
+  holidays_last_updated: null
+
+# External watchdog SLAs — §8.5. first_response / final. Notices go ONLY to
+# the internal owner (manager after first breach), never to the external party.
+external_sla:
+  client_complaint:    { first: 2h,  final: same-day, owner: ghareeb@ubcsis.com, backup: ahmed@ubcsis.com }
+  client_rfq_tender:   { first: 4h,  final: 1d,       owner: donia@ubcsis.com,   backup: info@ubcsis.com }
+  sales_enquiry:       { first: 1d,  final: 2d,       owner: info@ubcsis.com,    backup: donia@ubcsis.com }   # sales@ interim
+  supplier:            { first: 1d,  final: 2d,       owner: info@ubcsis.com,    backup: ghareeb@ubcsis.com } # procure@ interim
+  invoice_payment_tax: { first: 4h,  final: 1d,       owner: accounts@ubcsis.com, backup: hadeer@ubcsis.com }
+  authority_bank_legal: { first: 4h, final: 1d,       owner: ahmed@ubcsis.com,   backup: ghareeb@ubcsis.com }
+  hse_inspection_cert: { first: 4h,  final: 1d,       owner: hse@ubcsis.com,     backup: ghareeb@ubcsis.com }
+  recruitment_labour:  { first: 1d,  final: 2d,       owner: hr@ubcsis.com,      backup: ghareeb@ubcsis.com }
+  marketing_platforms: { first: 1d,  final: 2d,       owner: marketing@ubcsis.com, backup: info@ubcsis.com }
+  unclassified:        { first: 1d,  final: 2d,       owner: ghareeb@ubcsis.com, backup: ahmed@ubcsis.com }
+
+# Thread closes on an observed outbound UBCSIS reply, or the owner replying
+# CLOSED (logged with declarant).
+#
+# Scope limitation (§3.1a, decision D-02): coverage is limited to threads
+# copied to control@. Traffic in sales@ and procure@ is not visible.
+# Stated in every management report until the CEO takes decision O-05.

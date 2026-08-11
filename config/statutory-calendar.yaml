@@ -1,0 +1,40 @@
+# Statutory calendar — charter §2.1 (Class 1 obligations)
+# Owner: Mohamed Abdelsadiq (accounts@) · Preparer: Hadeer Mohamed (hadeer@)
+# Escalation: CEO, same day. Alerts T-7, T-3, T-1, and on the day.
+# Class 1 never suppresses for weekends, holidays, leave, or reminder limits.
+#
+# HARD RULE (§2.1): exact deadlines must be confirmed with the company's tax
+# advisor and re-verified every January. Never hardcode a statutory date from
+# assumption. Every rule below is UNVERIFIED until the advisor confirms it
+# (open decision O-03) — unverified rules still alert, erring early.
+# The learning engine may never modify a statutory deadline (§14.2 Tier C).
+
+verified_by_advisor: false
+last_verified: null
+next_annual_verification: null   # set to January after first verification
+
+obligations:
+  - id: STAT-VAT
+    name: VAT return and payment
+    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+  - id: STAT-WHT
+    name: Withholding tax
+    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+  - id: STAT-PAYROLL
+    name: Payroll tax
+    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+  - id: STAT-SOCINS
+    name: Social insurance contributions and headcount declarations
+    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+  - id: STAT-ETA
+    name: ETA electronic invoicing — submission and rejection clearance
+    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+  - id: STAT-CIT
+    name: Corporate income tax return and instalments
+    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+  - id: STAT-REG
+    name: Commercial register, tax card, industrial register renewals
+    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+  - id: STAT-LIC
+    name: Licences, permits, client-required certifications
+    rule: UNVERIFIED — CONFIRM WITH ADVISOR

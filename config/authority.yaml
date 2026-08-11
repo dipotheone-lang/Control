@@ -1,0 +1,27 @@
+# Authority matrix — charter §3.2, §7.3 S2
+# PENDING: approval thresholds and delegated limits are open decision O-02
+# (Phase 0 gate). Nothing below carries an assumed value — null means
+# "not yet decided by the CEO", and the S2 check cannot run until set.
+# The learning engine may never modify authority limits (§14.2 Tier C).
+
+thresholds:
+  ceo_weekly_itemisation: null   # every commitment above this -> itemised to CEO weekly (§3.2)
+  second_approval_above: null
+
+delegated_limits:
+  # email: limit_egp
+  info@ubcsis.com: null
+  ghareeb@ubcsis.com: null
+  accounts@ubcsis.com: null
+
+rules:
+  - id: S2-1
+    rule: Approver must not be the originator, on every approval.
+  - id: S2-2
+    rule: >
+      Where Ahmed Hassan (info@) is originator, the approver must be the
+      CEO or COO. Flag any document where he appears as both (§3.2).
+  - id: S2-3
+    rule: Delegated limit verified against value on every transaction.
+  - id: S2-4
+    rule: Second approval present where required.

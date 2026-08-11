@@ -1,0 +1,122 @@
+# People roster — charter §3
+# Operative file: Control routes reminders and escalations from this roster.
+# `confirmed: false` marks reporting lines inferred (⚠ in the charter) that
+# require CEO confirmation before Phase 2 — open decision O-01.
+# Joiner/leaver updates are a class 3 obligation owned by HR (§3.3).
+# Leavers deactivate same-day; reminders to deactivated addresses suppress and log.
+
+people:
+  - name: Ahmed Diab
+    email: ahmed@ubcsis.com
+    role: CEO
+    reports_to: null
+    tier: 4
+    confirmed: true
+
+  - name: Ghareeb Mahmoud
+    email: ghareeb@ubcsis.com
+    role: COO
+    reports_to: ahmed@ubcsis.com
+    tier: 3
+    confirmed: true
+
+  - name: Ahmed Hassan
+    email: info@ubcsis.com
+    role: Head of Procurement, Sales, Tendering & Proposals
+    reports_to: ahmed@ubcsis.com
+    tier: 3
+    confirmed: false
+    # §3.2: tier 3 reporting to CEO — his overdue items escalate directly
+    # to the CEO at L1 (no intermediate manager). Applied without comment.
+
+  - name: Mohamed Abdelsadiq
+    email: accounts@ubcsis.com
+    role: Acting CFO
+    reports_to: ahmed@ubcsis.com
+    tier: 3
+    confirmed: true
+
+  - name: Hadeer Mohamed
+    email: hadeer@ubcsis.com
+    role: General Accountant
+    reports_to: accounts@ubcsis.com
+    tier: 1
+    confirmed: false
+
+  - name: Shymaa Mekkawy
+    email: shymaa@ubcsis.com
+    role: Senior Technical Office Engineer
+    reports_to: ghareeb@ubcsis.com
+    tier: 2
+    confirmed: false
+
+  - name: Donia Ali
+    email: donia@ubcsis.com
+    role: Tendering, Proposals & Client Relations
+    reports_to: info@ubcsis.com
+    tier: 2
+    confirmed: false
+
+  - name: Martina Adel
+    email: marketing@ubcsis.com
+    role: Marketing & Business Development
+    reports_to: info@ubcsis.com
+    tier: 1
+    confirmed: false
+
+  - name: Mohamed Ali
+    email: hr@ubcsis.com
+    role: HR & Admin Manager
+    reports_to: ghareeb@ubcsis.com
+    tier: 2
+    confirmed: false
+
+  - name: Ahmed Elsayed
+    email: a.elsayed@ubcsis.com
+    role: Senior Site Engineer / Acting PM
+    reports_to: ghareeb@ubcsis.com
+    tier: 2
+    confirmed: false
+    # Candidate for language_mode: plain (§4 — tier-1/site recipients);
+    # leave formal until the CEO sets it.
+
+  - name: Mostafa Hassan
+    email: hse@ubcsis.com
+    role: Safety Officer
+    reports_to: ghareeb@ubcsis.com
+    tier: 2
+    confirmed: false
+
+# Vacant posts — §3.2: both vacancies concentrate the commercial cycle in
+# Ahmed Hassan (interim). Vacancy burden is quantified monthly (§11 item 12).
+vacancies:
+  - email: procure@ubcsis.com
+    role: Procurement Officer
+    interim: info@ubcsis.com
+    tier: 1
+    # Standing quarterly recommendation (§3.2): fill procurement first —
+    # it splits cost from price.
+  - email: sales@ubcsis.com
+    role: Sales Officer
+    interim: info@ubcsis.com
+    tier: 1
+
+# Special addresses — §3.1. Never reminded, never escalated to.
+special_addresses:
+  - address: contact.ubcsis@gmail.com
+    type: BACKUP_CHANNEL
+    rules: >
+      Standing CC on every outbound. Mail from it is not a submission
+      unless the CEO confirms a domain outage.
+  - address: elevate@ubcsis.com
+    type: SYSTEM_PEER
+    rules: >
+      Peer automated system. Never reply, remind, or escalate. Log only.
+      Excluded from all scorecards. Machine-loop guard applies (§3.1):
+      two consecutive automated-to-automated exchanges -> stop, log
+      MACHINE_LOOP_SUPPRESSED, notify CEO.
+
+# §4: language_mode defaults to formal; set `language_mode: plain` per person
+# for tier-1 site recipients when the CEO confirms the roster.
+defaults:
+  language_mode: formal

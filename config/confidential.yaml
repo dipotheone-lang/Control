@@ -1,0 +1,58 @@
+# Client-confidential scope — charter §12.1, CEO decision D-01 (LOCKED)
+# CLIENT_CONFIDENTIAL_PROCESSING=DISABLED: Control tracks existence and
+# timeliness of client-confidential documents; it never reads their contents.
+# Changeable only by the CEO in writing, per client, after NDA review.
+# The learning engine may never propose relaxing this.
+#
+# PENDING: classifications below are the charter §12.1.1 defaults. Phase 0
+# Stage I maps the real scope from evidence; every classification is then
+# listed for CEO confirmation (open decision O-04). If in doubt, confidential.
+
+processing: DISABLED
+
+confidential_clients:
+  # Default: all clients under NDA (§12.1.1), pending Stage I evidence.
+  - name: Siemens Energy
+    domains: []          # populated by Stage I
+    confirmed: false
+  - name: Saint-Gobain
+    domains: []
+    confirmed: false
+  - name: KNAUF
+    domains: []
+    confirmed: false
+  - name: Galaxy Chemicals
+    domains: []
+    confirmed: false
+  - name: Canal Sugar
+    domains: []
+    confirmed: false
+  - name: Sukari Gold Mines
+    domains: []
+    confirmed: false
+  - name: Air Liquide
+    domains: []
+    confirmed: false
+
+confidential_folders: []   # from Phase 0 inventory (Stage I)
+confidential_projects: []  # project codes mapped to confidential clients
+
+classification_rules:
+  # §12.1.1 — an item is confidential if ANY hold:
+  - sender or recipient domain belongs to a listed client
+  - attachment or subject references a project mapped to such a client
+  - confidentiality/proprietary/restricted marking in filename or first-page header
+  - file sits in a folder classified client-confidential in the Phase 0 inventory
+  - classification is genuinely uncertain   # asymmetry decides borderline cases
+
+metadata_only_mode:
+  permitted: [sender, recipients, timestamp, subject, attachment_filename,
+              file_type, file_size, page_or_sheet_count,
+              form_code_from_filename_only, thread_position]
+  prohibited: [opening body, OCR, text extraction, figure extraction,
+               posting values to registers, quoting content anywhere,
+               retaining file beyond mailbox, passing contents to any
+               model or external service]
+  checks: C1 full; C2 filename-only; C3-C7 not run; S1-S4 metadata signals only
+  verdicts: [RECEIVED_ON_TIME, RECEIVED_LATE, NOT_RECEIVED,
+             NOT ASSESSED — CONFIDENTIAL SCOPE]

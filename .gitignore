@@ -1,0 +1,23 @@
+# Runtime operational data — never committed (charter §12.1, §12.2):
+# contains mail content, personal data, and client material.
+data/control.db
+data/backup/**
+!data/backup/.gitkeep
+data/submissions/**
+!data/submissions/.gitkeep
+data/quarantine/**
+!data/quarantine/.gitkeep
+data/exports/**
+!data/exports/.gitkeep
+outbox/pending-approval/**
+!outbox/pending-approval/.gitkeep
+outbox/sent/**
+!outbox/sent/.gitkeep
+logs/**
+!logs/.gitkeep
+!logs/README.md
+
+# Local environment
+.env
+*.pst
+*.ost
