@@ -85,6 +85,30 @@ raise them as the next build step once A–B output exists.
 
 Needs a Microsoft 365 admin. ~30 minutes.
 
+### The scripted path (recommended)
+
+`scripts/provision-graph.ps1` performs B1–B5 in one run — app
+registration, application permissions with admin consent, certificate
+creation and upload, encrypted PFX export with the password stored in
+Windows Credential Manager, the mandatory Application Access Policy
+with both Granted and Denied verification, and a `graph-env.ps1`
+environment file. Then:
+
+```powershell
+. .\scripts\out\graph-env.ps1
+python .\scripts\graph_smoketest.py     # read-only: prints counts, sends nothing
+```
+
+**Key handling, stated honestly:** MSAL for Python must hold the
+private key material, so a Windows-store *non-exportable* key cannot
+be used directly. The §5.1-compliant compromise the script implements:
+the key exists only inside an encrypted PFX; the password lives in
+Windows Credential Manager (service `UBCSIS-Control`, user `pfx`),
+never in a file; and the temporary store copy of the key is deleted
+after export. Rotation is a re-run of the script.
+
+The manual steps below are the same operations for auditability.
+
 ### B1. Register the Entra app
 
 Portal → Entra ID → App registrations → **New registration**

@@ -13,9 +13,11 @@ construction, never silently.
 """
 
 import base64
+import os
 import time as _time
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 from . import HaltError
 
@@ -122,19 +124,24 @@ class GraphTransport(MailTransport):
                     "and certificate_thumbprint (§5.1 — certificate auth, never a "
                     "client secret). See docs/PHASE0-RUNBOOK.md."
                 )
-            import msal
-
-            app = msal.ConfidentialClientApplication(
-                client_id,
-                authority=f"https://login.microsoftonline.com/{tenant_id}",
-                client_credential={
-                    "private_key": certificate_pem,
-                    "thumbprint": certificate_thumbprint,
-                },
-            )
+            # MSAL app construction performs OIDC discovery (network I/O),
+            # so it is deferred to the first token request — construction
+            # of the transport itself never touches the network.
+            _app_holder: list = []
 
             def _acquire() -> str:
-                result = app.acquire_token_for_client(
+                if not _app_holder:
+                    import msal
+
+                    _app_holder.append(msal.ConfidentialClientApplication(
+                        client_id,
+                        authority=f"https://login.microsoftonline.com/{tenant_id}",
+                        client_credential={
+                            "private_key": certificate_pem,
+                            "thumbprint": certificate_thumbprint,
+                        },
+                    ))
+                result = _app_holder[0].acquire_token_for_client(
                     scopes=["https://graph.microsoft.com/.default"]
                 )
                 if "access_token" not in result:
@@ -240,4 +247,68 @@ class GraphTransport(MailTransport):
         self._request(
             "PATCH", f"{GRAPH_BASE}/users/{self.mailbox}/messages/{graph_id}",
             json={"isRead": True},
+        )
+
+    # -- construction helpers ----------------------------------------------
+
+    @classmethod
+    def from_pfx(cls, mailbox: str, *, tenant_id: str, client_id: str,
+                 pfx_path: str | Path, pfx_password: str | bytes, **kwargs):
+        """Build from a password-protected PFX bundle.
+
+        MSAL needs the private key material, so a Windows-store
+        non-exportable key cannot be used directly from Python. The
+        §5.1-compliant compromise: the key travels only inside an
+        encrypted PFX, and the password lives in Windows Credential
+        Manager (never in a file) — see from_env() and the runbook.
+        """
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding, NoEncryption, PrivateFormat, pkcs12,
+        )
+
+        data = Path(pfx_path).read_bytes()
+        password = pfx_password.encode() if isinstance(pfx_password, str) else pfx_password
+        try:
+            key, cert, _chain = pkcs12.load_key_and_certificates(data, password)
+        except ValueError as e:
+            raise HaltError(f"cannot open PFX {pfx_path}: {e}") from e
+        if key is None or cert is None:
+            raise HaltError(f"PFX {pfx_path} does not contain both key and certificate")
+        pem = key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()).decode()
+        thumbprint = cert.fingerprint(hashes.SHA1()).hex().upper()
+        return cls(mailbox, tenant_id=tenant_id, client_id=client_id,
+                   certificate_pem=pem, certificate_thumbprint=thumbprint, **kwargs)
+
+    @classmethod
+    def from_env(cls, environ=None, **kwargs):
+        """Build from the §5.1 environment. The PFX password is read from
+        Windows Credential Manager (service 'UBCSIS-Control', user 'pfx')
+        via keyring when available, else from GRAPH_PFX_PASSWORD."""
+        env = environ if environ is not None else os.environ
+        required = ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "CONTROL_MAILBOX",
+                    "GRAPH_PFX_PATH")
+        missing = [k for k in required if not env.get(k)]
+        if missing:
+            raise HaltError(f"missing environment: {', '.join(missing)} "
+                            "(§5.1; see docs/PHASE0-RUNBOOK.md)")
+        password = env.get("GRAPH_PFX_PASSWORD")
+        if not password:
+            try:
+                import keyring
+                password = keyring.get_password("UBCSIS-Control", "pfx")
+            except ImportError:
+                password = None
+        if not password:
+            raise HaltError(
+                "PFX password not found: store it in Windows Credential Manager "
+                "(service 'UBCSIS-Control', user 'pfx') or set GRAPH_PFX_PASSWORD"
+            )
+        return cls.from_pfx(
+            env["CONTROL_MAILBOX"],
+            tenant_id=env["GRAPH_TENANT_ID"],
+            client_id=env["GRAPH_CLIENT_ID"],
+            pfx_path=env["GRAPH_PFX_PATH"],
+            pfx_password=password,
+            **kwargs,
         )
