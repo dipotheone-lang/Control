@@ -3,7 +3,7 @@ name = "control-engine"
 version = "0.1.0"
 description = "Control — adaptive obligation & deadline control engine for UBCSIS (charter v4.3)"
 requires-python = ">=3.11"
-dependencies = ["PyYAML>=6.0"]
+dependencies = ["PyYAML>=6.0", "openpyxl>=3.1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
