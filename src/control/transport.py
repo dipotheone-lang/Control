@@ -1,15 +1,26 @@
-"""Mail transport boundary — charter §5.1.
+"""Mail transport — charter §5.1.
 
-The engine never talks to Microsoft Graph directly; it talks to this
-interface. GraphTransport is deliberately a stub: it documents the §5.1
-requirements (certificate auth, single-mailbox Application Access
-Policy, Retry-After handling, FAILED cycle on partial sweep) and raises
-until the tenant, certificate, and mailbox exist (decision O-09 and the
-§5.1 environment values). No fake network code pretending to work.
+The engine talks to this interface, never to Microsoft Graph directly.
+
+GraphTransport is a real implementation: certificate-authenticated
+app-only access to the single control mailbox, honouring the §5.1
+rules — respect Retry-After with bounded retries, and treat any
+incomplete sweep as a FAILED cycle (HaltError) rather than a shorter
+message list. It still requires the tenant-side provisioning (Entra app,
+certificate, Exchange Application Access Policy — see
+docs/PHASE0-RUNBOOK.md); without credentials it fails loudly at
+construction, never silently.
 """
 
+import base64
+import time as _time
 from dataclasses import dataclass, field
 from datetime import datetime
+
+from . import HaltError
+
+GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+_MAX_RETRIES = 3
 
 
 @dataclass
@@ -37,6 +48,10 @@ class MailTransport:
         """Returns the transport message id."""
         raise NotImplementedError
 
+    def mark_processed(self, message_id: str) -> None:
+        """Marking read is permitted only as part of processing (§9)."""
+        raise NotImplementedError
+
 
 class MockTransport(MailTransport):
     """In-memory transport for tests and DRY_RUN rehearsals."""
@@ -44,6 +59,7 @@ class MockTransport(MailTransport):
     def __init__(self, inbox: list[FetchedMessage] | None = None):
         self.inbox = list(inbox or [])
         self.outgoing: list[dict] = []
+        self.processed: list[str] = []
         self._counter = 0
 
     def fetch_unprocessed(self) -> list[FetchedMessage]:
@@ -59,18 +75,169 @@ class MockTransport(MailTransport):
         })
         return message_id
 
+    def mark_processed(self, message_id: str) -> None:
+        self.processed.append(message_id)
+
 
 class GraphTransport(MailTransport):
-    """Microsoft Graph transport — NOT IMPLEMENTED until §5.1 is
-    provisioned: Entra app scoped to control@ubcsis.com, certificate
-    auth (non-exportable), Exchange Application Access Policy, and the
-    GRAPH_* environment values (O-09). Implementations must honour
-    Retry-After with exponential backoff and raise on any partial sweep
-    so the cycle is marked FAILED (§5.1, §13.2)."""
+    """App-only Microsoft Graph access to the control mailbox.
 
-    def __init__(self, *_args, **_kwargs):
-        raise NotImplementedError(
-            "GraphTransport requires the §5.1 provisioning: tenant, "
-            "certificate thumbprint, Application Access Policy, and "
-            "CONTROL_MAILBOX. Use MockTransport until then."
+    Construction paths:
+    - production: pass tenant_id, client_id, certificate private key PEM
+      and thumbprint — MSAL acquires tokens by certificate (§5.1: never
+      a client secret in a file)
+    - tests: pass token_provider and session explicitly
+
+    All requests honour Retry-After on 429/503 with bounded retries;
+    exhausting retries raises HaltError so the cycle records FAILED
+    rather than operating on a partial sweep.
+    """
+
+    def __init__(
+        self,
+        mailbox: str,
+        *,
+        tenant_id: str | None = None,
+        client_id: str | None = None,
+        certificate_pem: str | None = None,
+        certificate_thumbprint: str | None = None,
+        token_provider=None,
+        session=None,
+        sleep=_time.sleep,
+    ):
+        self.mailbox = mailbox
+        self._sleep = sleep
+        self._graph_ids: dict[str, str] = {}
+        if session is None:
+            import requests
+            session = requests.Session()
+        self.session = session
+
+        if token_provider is not None:
+            self._token_provider = token_provider
+        else:
+            if not all([tenant_id, client_id, certificate_pem, certificate_thumbprint]):
+                raise HaltError(
+                    "GraphTransport requires tenant_id, client_id, certificate_pem "
+                    "and certificate_thumbprint (§5.1 — certificate auth, never a "
+                    "client secret). See docs/PHASE0-RUNBOOK.md."
+                )
+            import msal
+
+            app = msal.ConfidentialClientApplication(
+                client_id,
+                authority=f"https://login.microsoftonline.com/{tenant_id}",
+                client_credential={
+                    "private_key": certificate_pem,
+                    "thumbprint": certificate_thumbprint,
+                },
+            )
+
+            def _acquire() -> str:
+                result = app.acquire_token_for_client(
+                    scopes=["https://graph.microsoft.com/.default"]
+                )
+                if "access_token" not in result:
+                    raise HaltError(
+                        f"Graph auth failed: {result.get('error')}: "
+                        f"{result.get('error_description')} — after retries the "
+                        "cycle halts and the CEO is alerted via the backup address "
+                        "(§13.2)"
+                    )
+                return result["access_token"]
+
+            self._token_provider = _acquire
+
+    # -- HTTP with §5.1 throttling discipline ------------------------------
+
+    def _request(self, method: str, url: str, **kwargs):
+        headers = kwargs.pop("headers", {})
+        for attempt in range(_MAX_RETRIES + 1):
+            headers["Authorization"] = f"Bearer {self._token_provider()}"
+            response = self.session.request(method, url, headers=headers, **kwargs)
+            if response.status_code in (429, 503):
+                if attempt == _MAX_RETRIES:
+                    break
+                retry_after = int(response.headers.get("Retry-After", 2 ** attempt))
+                self._sleep(retry_after)
+                continue
+            if response.status_code >= 400:
+                raise HaltError(
+                    f"Graph {method} {url} failed: {response.status_code} "
+                    f"{getattr(response, 'text', '')[:200]}"
+                )
+            return response
+        raise HaltError(
+            f"Graph throttling persisted after {_MAX_RETRIES} retries on {url} — "
+            "incomplete sweep, cycle FAILED (§5.1)"
+        )
+
+    # -- interface ---------------------------------------------------------
+
+    def fetch_unprocessed(self) -> list[FetchedMessage]:
+        url = (
+            f"{GRAPH_BASE}/users/{self.mailbox}/mailFolders/Inbox/messages"
+            "?$filter=isRead eq false"
+            "&$select=id,internetMessageId,from,toRecipients,ccRecipients,"
+            "subject,bodyPreview,receivedDateTime,hasAttachments,"
+            "conversationId,inReplyTo"
+            "&$top=50&$orderby=receivedDateTime asc"
+        )
+        messages: list[FetchedMessage] = []
+        while url:
+            payload = self._request("GET", url).json()
+            for item in payload.get("value", []):
+                attachments: list[tuple[str, bytes]] = []
+                if item.get("hasAttachments"):
+                    att_url = (f"{GRAPH_BASE}/users/{self.mailbox}/messages/"
+                               f"{item['id']}/attachments")
+                    for att in self._request("GET", att_url).json().get("value", []):
+                        if att.get("@odata.type") == "#microsoft.graph.fileAttachment":
+                            attachments.append((
+                                att.get("name", "unnamed"),
+                                base64.b64decode(att.get("contentBytes", "")),
+                            ))
+                sender = (item.get("from", {}).get("emailAddress", {}) or {})
+                messages.append(FetchedMessage(
+                    message_id=item.get("internetMessageId") or item["id"],
+                    sender=f"{sender.get('name', '')} <{sender.get('address', '')}>",
+                    received_at=datetime.fromisoformat(
+                        item["receivedDateTime"].replace("Z", "+00:00")),
+                    to="; ".join(r["emailAddress"]["address"]
+                                 for r in item.get("toRecipients", [])),
+                    cc="; ".join(r["emailAddress"]["address"]
+                                 for r in item.get("ccRecipients", [])),
+                    subject=item.get("subject", ""),
+                    first_line=(item.get("bodyPreview", "").splitlines() or [""])[0],
+                    attachments=attachments,
+                    in_reply_to_control=bool(item.get("inReplyTo")),
+                ))
+                # Graph id needed for mark_processed: remember the mapping.
+                self._graph_ids[messages[-1].message_id] = item["id"]
+            url = payload.get("@odata.nextLink")
+        return messages
+
+    def send(self, recipients, cc, subject, body) -> str:
+        payload = {
+            "message": {
+                "subject": subject,
+                "body": {"contentType": "Text", "content": body},
+                "toRecipients": [{"emailAddress": {"address": a}} for a in recipients],
+                "ccRecipients": [{"emailAddress": {"address": a}} for a in cc],
+            },
+            "saveToSentItems": True,
+        }
+        self._request("POST", f"{GRAPH_BASE}/users/{self.mailbox}/sendMail",
+                      json=payload)
+        # sendMail returns 202 with no body; the durable record is the
+        # outbox JSON plus the Sent Items copy.
+        return f"<graph-accepted-{datetime.now():%Y%m%d%H%M%S%f}@{self.mailbox}>"
+
+    def mark_processed(self, message_id: str) -> None:
+        graph_id = self._graph_ids.get(message_id)
+        if graph_id is None:
+            return
+        self._request(
+            "PATCH", f"{GRAPH_BASE}/users/{self.mailbox}/messages/{graph_id}",
+            json={"isRead": True},
         )
