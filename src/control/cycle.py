@@ -142,8 +142,10 @@ def run_cycle(
 
     try:
         # ---- inbound ----------------------------------------------------
+        processed_ids: list[str] = []
         for fetched in transport.fetch_unprocessed():
             report.processed += 1
+            processed_ids.append(fetched.message_id)
             classification = classifier.classify(InboundMessage(
                 sender=fetched.sender, to=fetched.to, cc=fetched.cc,
                 subject=fetched.subject, first_line=fetched.first_line,
@@ -260,6 +262,14 @@ def run_cycle(
             # Everything else is logged, not acted on, in this version.
             audit.append("inbound.logged", {"message_id": fetched.message_id,
                                             "category": classification.category})
+
+        # Mark the sweep's messages read only after the whole batch
+        # processed — part of processing, per §9.
+        for message_id in processed_ids:
+            try:
+                transport.mark_processed(message_id)
+            except NotImplementedError:
+                break
 
         # ---- enforcement planning --------------------------------------
         if enforcer and tracked_items:
