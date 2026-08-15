@@ -78,6 +78,9 @@ class ObligationCandidate:
     regular: bool
     attachment_rate: float
     example_attachments: list[str] = field(default_factory=list)
+    distinct_days: int = 0
+    per_active_day: float = 0.0
+    pattern_kind: str = "RECURRING"      # RECURRING | BULK
 
 
 def _cadence_for(gap: float | None) -> str:
@@ -109,14 +112,29 @@ def infer_obligations(rows: list[dict], *, min_occurrences: int = 3
         gaps = [(b - a).total_seconds() / 86400 for a, b in zip(times, times[1:])]
         median_gap = statistics.median(gaps) if gaps else None
 
+        # A burst is not a cadence. Hundreds of messages sent on one day
+        # is a mailing campaign; treating it as a "perfectly regular"
+        # obligation is how marketing traffic reaches the top of an
+        # obligation register. Measured by messages per active day.
+        distinct_days = len({t.date() for t in times})
+        per_active_day = len(items) / distinct_days if distinct_days else 0.0
+        is_bulk = per_active_day >= 4 or (
+            len(items) >= 10 and (median_gap is not None and median_gap < 0.5)
+        )
+
         # "Regular" means the spread of gaps is small relative to the gap
-        # itself - a series that arrives every 7±1 days, not 7±20.
+        # itself - a series that arrives every 7±1 days, not 7±20. A
+        # zero-gap series passes this trivially, hence the bulk test above.
         regular = False
         if len(gaps) >= 3 and median_gap:
             spread = statistics.pstdev(gaps)
             regular = spread <= max(2.0, median_gap * 0.5)
 
-        if len(items) >= 12 and regular:
+        if is_bulk:
+            # Never a HIGH-confidence obligation, whatever the volume.
+            confidence = "LOW"
+            regular = False
+        elif len(items) >= 12 and regular:
             confidence = "HIGH"
         elif len(items) >= 4:
             confidence = "MEDIUM"
@@ -135,11 +153,16 @@ def infer_obligations(rows: list[dict], *, min_occurrences: int = 3
             first_seen=times[0].strftime("%d-%b-%Y"),
             last_seen=times[-1].strftime("%d-%b-%Y"),
             median_gap_days=round(median_gap, 1) if median_gap else None,
-            cadence=_cadence_for(median_gap),
+            cadence=(f"bulk send ({per_active_day:.0f}/day over "
+                     f"{distinct_days} day(s))" if is_bulk
+                     else _cadence_for(median_gap)),
             confidence=confidence,
             regular=regular,
             attachment_rate=round(len(with_attachments) / len(items), 2),
             example_attachments=examples[:4],
+            distinct_days=distinct_days,
+            per_active_day=round(per_active_day, 1),
+            pattern_kind="BULK" if is_bulk else "RECURRING",
         ))
 
     order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
@@ -227,6 +250,9 @@ def analyse_responses(rows: list[dict], *, window_days: int = 30) -> ResponseRep
 # ---------------------------------------------------------------------------
 
 def render_stage_d(candidates: list[ObligationCandidate], mailbox: str) -> str:
+    recurring = [c for c in candidates if c.pattern_kind == "RECURRING"]
+    bulk = [c for c in candidates if c.pattern_kind == "BULK"]
+
     lines = [
         f"# Stage D — candidate obligations from {mailbox}",
         "",
@@ -236,17 +262,40 @@ def render_stage_d(candidates: list[ObligationCandidate], mailbox: str) -> str:
         "**Nothing here is an obligation until the CEO approves the register (§6).**",
         "These are observations of what recurs, nothing more.",
         "",
+        "## Recurring patterns — obligation candidates",
+        "",
         "| Confidence | Sender | Subject template | n | Cadence | First | Last | Attach % |",
         "|---|---|---|---|---|---|---|---|",
     ]
-    for c in candidates:
-        template = c.subject_template[:60]
+    for c in recurring:
         lines.append(
-            f"| {c.confidence} | {c.sender} | {template} | {c.occurrences} | "
-            f"{c.cadence} | {c.first_seen} | {c.last_seen} | {c.attachment_rate:.0%} |"
+            f"| {c.confidence} | {c.sender} | {c.subject_template[:60]} | "
+            f"{c.occurrences} | {c.cadence} | {c.first_seen} | {c.last_seen} | "
+            f"{c.attachment_rate:.0%} |"
         )
-    if not candidates:
+    if not recurring:
         lines.append("| — | — | no recurring pattern met the threshold | — | — | — | — | — |")
+
+    lines += [
+        "",
+        "## Bulk sends — NOT obligations",
+        "",
+        "Many messages on few days: mailing campaigns, vendor newsletters, "
+        "mass outreach. A burst is not a cadence, so these are excluded from "
+        "the obligation candidates above regardless of volume. They are listed "
+        "because the volume itself is worth seeing.",
+        "",
+        "| Sender | Subject template | n | Pattern | Days active |",
+        "|---|---|---|---|---|",
+    ]
+    for c in bulk[:25]:
+        lines.append(
+            f"| {c.sender} | {c.subject_template[:60]} | {c.occurrences} | "
+            f"{c.per_active_day:.0f}/day | {c.distinct_days} |"
+        )
+    if not bulk:
+        lines.append("| — | none detected | — | — | — |")
+
     lines += [
         "",
         "## Reading this",
@@ -257,6 +306,9 @@ def render_stage_d(candidates: list[ObligationCandidate], mailbox: str) -> str:
         "- Absence of a pattern is not absence of an obligation: an obligation "
         "nobody has been meeting leaves no trace here. Those are found in the "
         "manuals (Stage C), not in the mailbox.",
+        "- High bulk-send volume from a company address is a commercial and "
+        "reputational observation, not a compliance one. It belongs in front "
+        "of management, not in the obligation register.",
         "",
     ]
     return "\n".join(lines)
