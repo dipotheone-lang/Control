@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Control — adaptive obligation & deadline control engine for UBCSIS (charter v4.3)"
 requires-python = ">=3.11"
 dependencies = [
+    "pypdf>=4.0",
+    "python-docx>=1.1",
     "PyYAML>=6.0",
     "openpyxl>=3.1",
     "msal>=1.28",
