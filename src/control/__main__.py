@@ -181,6 +181,74 @@ def cmd_analyse(args) -> int:
     return 0
 
 
+def cmd_init(args) -> int:
+    """Create CONTROL_ROOT from the repository's config templates."""
+    from .bootstrap import bootstrap, render_result
+
+    repo_config = Path(__file__).resolve().parent.parent.parent / "config"
+    template = Path(args.templates) if args.templates else repo_config
+    result = bootstrap(Path(args.control_root), template)
+    print(render_result(result))
+    print("\nNext:")
+    print(f"  python -m control verify --control-root \"{args.control_root}\"")
+    print(f"  python -m control phase0 --control-root \"{args.control_root}\"")
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    """Check that this machine can actually run Control."""
+    import importlib
+    import platform
+
+    ok = True
+    print(f"platform: {platform.system()} {platform.release()}")
+    print(f"python:   {platform.python_version()}")
+
+    for module, why in (("yaml", "config"), ("openpyxl", "xlsx extraction"),
+                        ("win32com.client", "Outlook transport (Windows only)"),
+                        ("msal", "Graph transport"),
+                        ("cryptography", "certificate handling")):
+        try:
+            importlib.import_module(module)
+            print(f"  [ok]   {module:20} — {why}")
+        except ImportError:
+            level = "warn" if module in ("msal", "win32com.client") else "MISSING"
+            if level == "MISSING":
+                ok = False
+            print(f"  [{level}] {module:20} — {why}")
+
+    control_root = Path(args.control_root) if args.control_root else None
+    if control_root:
+        print(f"\nCONTROL_ROOT: {control_root}")
+        for relative in ("config", "data", "logs", "outbox", "discovery"):
+            path = control_root / relative
+            print(f"  [{'ok' if path.is_dir() else 'MISSING'}] {relative}")
+            if not path.is_dir():
+                ok = False
+        config_count = len(list((control_root / "config").glob("*.yaml"))) \
+            if (control_root / "config").is_dir() else 0
+        print(f"  config files: {config_count}")
+        if config_count < 11:
+            ok = False
+            print("    run: python -m control init --control-root <path>")
+    else:
+        print("\nNo CONTROL_ROOT given (--control-root or $CONTROL_ROOT)")
+        ok = False
+
+    try:
+        from .outlook import _dispatch_namespace
+        namespace = _dispatch_namespace()
+        boxes = [str(getattr(s, "Name", "?")) for s in namespace.Folders]
+        print(f"\nOutlook: attached, {len(boxes)} store(s)")
+        for box in boxes[:10]:
+            print(f"  - {box}")
+    except Exception as e:
+        print(f"\nOutlook: not available — {str(e)[:120]}")
+
+    print("\n" + ("READY" if ok else "NOT READY — fix the items above"))
+    return 0 if ok else 1
+
+
 def cmd_phase0(args) -> int:
     """One command: find every mailbox, scan it, analyse it, write the
     Phase 0 deliverables. Nothing needs naming."""
@@ -334,12 +402,24 @@ def main(argv: list[str] | None = None) -> int:
     phase0.add_argument("--min-occurrences", type=int, default=3)
     phase0.set_defaults(fn=cmd_phase0)
 
+    init = sub.add_parser("init",
+                          help="create CONTROL_ROOT from the config templates")
+    init.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    init.add_argument("--templates", default="",
+                      help="config template directory (default: repo config/)")
+    init.set_defaults(fn=cmd_init)
+
+    doctor = sub.add_parser("doctor",
+                            help="check this machine can run Control")
+    doctor.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    doctor.set_defaults(fn=cmd_doctor)
+
     args = parser.parse_args(argv)
     if args.command in ("startup", "discovery") and (
             not args.control_root or not args.ub_root):
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
-    if (args.command in ("verify", "outlook-scan", "analyse", "phase0")
+    if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
