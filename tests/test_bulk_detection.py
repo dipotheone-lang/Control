@@ -87,3 +87,35 @@ def test_report_separates_bulk_from_candidates():
     assert "should i close your file" in bulk_section
     assert "A burst is not a cadence" in bulk_section
     assert "not in the obligation register" in text
+
+
+def test_small_seasonal_campaign_is_bulk_not_an_obligation():
+    """From the third real run: 'wishing you a happy & blessed eid al-adha'
+    (n=4 over 2 days) survived a per-day threshold. A ~0d median gap is
+    not a cadence at any volume."""
+    day = datetime(2026, 5, 27, 10, 0)
+    rows = [
+        _row(GMAIL, "Wishing you a happy & blessed Eid al-Adha", day),
+        _row(GMAIL, "Wishing you a happy & blessed Eid al-Adha",
+             day + timedelta(minutes=20)),
+        _row(GMAIL, "Wishing you a happy & blessed Eid al-Adha",
+             day + timedelta(days=1)),
+        _row(GMAIL, "Wishing you a happy & blessed Eid al-Adha",
+             day + timedelta(days=1, minutes=15)),
+    ]
+    candidate = infer_obligations(rows)[0]
+    assert candidate.pattern_kind == "BULK"
+    assert candidate.confidence == "LOW"
+
+
+def test_weekly_report_with_an_occasional_same_day_resubmission_survives():
+    """Guard the other direction: a genuine weekly series where one
+    period was corrected and resent the same day must stay RECURRING."""
+    start = datetime(2026, 1, 4, 9, 0)
+    rows = [_row(SITE, f"Weekly Progress Report - Week {i}",
+                 start + timedelta(days=7 * i)) for i in range(14)]
+    rows.append(_row(SITE, "Weekly Progress Report - Week 5",
+                     start + timedelta(days=35, hours=3)))
+    candidate = infer_obligations(rows)[0]
+    assert candidate.pattern_kind == "RECURRING"
+    assert candidate.confidence == "HIGH"

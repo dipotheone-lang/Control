@@ -119,8 +119,13 @@ def infer_obligations(rows: list[dict], *, min_occurrences: int = 3
         # obligation register. Measured by messages per active day.
         distinct_days = len({t.date() for t in times})
         per_active_day = len(items) / distinct_days if distinct_days else 0.0
+        # A median gap under half a day means at least half the sends
+        # happened together: a burst, at any volume. Small seasonal
+        # campaigns ("wishing you a happy Eid", n=4 over 2 days) sit
+        # under a per-day threshold but are no more a cadence than a
+        # 285-message blast.
         is_bulk = per_active_day >= 4 or (
-            len(items) >= 10 and (median_gap is not None and median_gap < 0.5)
+            median_gap is not None and median_gap < 0.5
         )
 
         # A conversation is not a recurrence. Normalising subjects strips
