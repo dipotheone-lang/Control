@@ -347,6 +347,12 @@ def cmd_phase0(args) -> int:
             continue
         all_summaries[mailbox] = summaries
         for s in summaries:
+            if s.not_found:
+                print(f"    !! {s.folder}")
+                print(f"       folders present: "
+                      f"{', '.join(s.available_folders[:12]) or 'none'}")
+                gaps.append(f"{mailbox}: requested folder {s.folder}")
+                continue
             if s.total or s.unreadable_items:
                 note = (f", {s.unreadable_items} unreadable"
                         if s.unreadable_items else "")

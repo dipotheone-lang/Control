@@ -21,6 +21,35 @@ from ..outlook import OutlookTransport, is_mail_item, safe_get
 
 INTERNAL_DOMAIN = "ubcsis.com"
 
+# Folder naming is not portable. Exchange says "Sent Items", Gmail over
+# IMAP nests "[Gmail]/Sent Mail", other clients say "Sent". Asking for
+# "Sent Items" and silently matching nothing is how a scan reports every
+# thread as unanswered while the replies sit in a folder it never opened.
+FOLDER_ALIASES = {
+    "inbox": ("inbox", "البريد الوارد"),
+    "sent items": ("sent items", "sent", "sent mail", "sentitems",
+                   "sent messages", "العناصر المرسلة", "المرسلة"),
+    "drafts": ("drafts", "المسودات"),
+    "deleted items": ("deleted items", "trash", "bin"),
+}
+
+
+def folder_matches(name: str, path: str, requested: list[str]) -> bool:
+    """True when a folder satisfies one of the requested names."""
+    name_l, path_l = (name or "").lower(), (path or "").lower()
+    for request in requested:
+        request_l = request.lower().strip()
+        if not request_l:
+            continue
+        candidates = set(FOLDER_ALIASES.get(request_l, ()))
+        candidates.add(request_l)
+        if name_l in candidates or path_l in candidates:
+            return True
+        # Nested stores: "[Gmail]/Sent Mail" satisfies "Sent Items".
+        if any(path_l.endswith(f"/{c}") for c in candidates):
+            return True
+    return False
+
 
 @dataclass
 class ScanSummary:
@@ -30,6 +59,8 @@ class ScanSummary:
     skipped_non_mail: int = 0
     unreadable_items: int = 0
     attachments_unreadable: int = 0
+    not_found: bool = False
+    available_folders: list = field(default_factory=list)
     with_attachments: int = 0
     earliest: str = ""
     latest: str = ""
@@ -203,11 +234,14 @@ def run_outlook_scan(namespace, mailbox: str, folder_names: list[str],
     safe_mailbox = mailbox.replace("@", "_at_").replace(".", "_")
     jsonl_path = out_dir / f"outlook-scan-{safe_mailbox}.jsonl"
 
+    available: list[str] = []
+
     def walk(folders, prefix=""):
         for folder in folders:
             name = str(getattr(folder, "Name", ""))
             path = f"{prefix}{name}"
-            if not folder_names or name in folder_names or path in folder_names:
+            available.append(path)
+            if not folder_names or folder_matches(name, path, folder_names):
                 yield folder, path
             if recurse:
                 children = getattr(folder, "Folders", None)
@@ -224,13 +258,27 @@ def run_outlook_scan(namespace, mailbox: str, folder_names: list[str],
             if written % 200 == 0:
                 f.flush()      # survive a crash with the work so far on disk
 
+        matched: list[str] = []
         for folder, path in walk(store.Folders):
+            matched.append(path)
             _rows, summary = scan_folder(
                 folder, mailbox=mailbox, folder_name=path, limit=limit,
                 progress=progress, redact_subjects=redact_subjects, sink=sink,
             )
             f.flush()
             summaries.append(summary)
+
+    # A requested folder that matched nothing is a gap, not silence. The
+    # caller must be able to say "Sent Items was not found" rather than
+    # reporting every thread unanswered.
+    for request in folder_names:
+        if not any(folder_matches(Path(p).name, p, [request]) for p in matched):
+            summaries.append(ScanSummary(
+                mailbox=mailbox,
+                folder=f"{request} — NOT FOUND",
+                not_found=True,
+                available_folders=sorted(set(available))[:40],
+            ))
 
     report_path = out_dir / f"OUTLOOK-SCAN-{safe_mailbox}.md"
     report_path.write_text(_render(summaries, mailbox), encoding="utf-8")
