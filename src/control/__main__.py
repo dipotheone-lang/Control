@@ -83,6 +83,34 @@ def cmd_discovery(args) -> int:
     return 0
 
 
+def cmd_outlook_scan(args) -> int:
+    from .discovery.outlook_scan import run_outlook_scan
+    from .outlook import _dispatch_namespace
+
+    out_dir = Path(args.control_root) / "discovery"
+    folders = [f.strip() for f in args.folders.split(",") if f.strip()]
+
+    def progress(done, total):
+        print(f"  ... {done}/{total}", flush=True)
+
+    print(f"scanning {args.mailbox} ({', '.join(folders)}) — metadata only")
+    summaries = run_outlook_scan(
+        _dispatch_namespace(), args.mailbox, folders, out_dir,
+        limit=args.limit, progress=progress,
+    )
+    for s in summaries:
+        print(f"\n{s.folder}: {s.total} messages, {s.earliest or 'n/a'} to "
+              f"{s.latest or 'n/a'}")
+        print(f"  with attachments: {s.with_attachments}")
+        print(f"  internal/external senders: {s.internal_count}/{s.external_count}")
+        print(f"  copied to control@: {s.copied_to_control}")
+        if s.top_senders:
+            print("  top senders: " + ", ".join(
+                f"{a or '(unknown)'} ({n})" for a, n in s.top_senders[:5]))
+    print(f"\noutputs in {out_dir}")
+    return 0
+
+
 def cmd_verify(args) -> int:
     from .audit import AuditLog
     from .db import connect, integrity_check
@@ -121,12 +149,22 @@ def main(argv: list[str] | None = None) -> int:
         _common(p)
         p.set_defaults(fn=fn)
 
+    scan = sub.add_parser("outlook-scan",
+                          help="historical mailbox scan via Outlook (metadata only)")
+    scan.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    scan.add_argument("--mailbox", required=True)
+    scan.add_argument("--folders", default="Inbox",
+                      help="comma-separated folder names (default: Inbox)")
+    scan.add_argument("--limit", type=int, default=None,
+                      help="stop after N messages per folder")
+    scan.set_defaults(fn=cmd_outlook_scan)
+
     args = parser.parse_args(argv)
     if args.command in ("startup", "discovery") and (
             not args.control_root or not args.ub_root):
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
-    if args.command == "verify" and not args.control_root:
+    if args.command in ("verify", "outlook-scan") and not args.control_root:
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
         return args.fn(args)
