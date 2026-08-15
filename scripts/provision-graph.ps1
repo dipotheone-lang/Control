@@ -31,7 +31,8 @@ param(
     [string]$OutDir  = "$PSScriptRoot\out",
     [int]$CertYears  = 2,
     [string]$DeniedProbe = "ahmed@ubcsis.com",
-    [string]$TenantId = ""
+    [string]$TenantId = "",
+    [switch]$UseDeviceCode
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,14 +61,17 @@ Write-Host "== Step 1: application registration ==" -ForegroundColor Cyan
 # Reuse an existing connection if one is live; otherwise sign in. Doing the
 # sign-in from an already-connected session is the reliable path when the
 # script's own interactive prompt is swallowed by output redirection.
+$MsaTenant = "9188040d-6c67-4c5b-b112-36a304b66dad"   # consumer/personal accounts
+
 $context = Get-MgContext
 if (-not ($context -and $context.TenantId)) {
-    Write-Host "Signing in to Microsoft Graph (a browser window will open)..."
+    Write-Host "Signing in to Microsoft Graph..."
     $connectArgs = @{
         Scopes = "Application.ReadWrite.All", "AppRoleAssignment.ReadWrite.All"
         NoWelcome = $true
     }
-    if ($TenantId) { $connectArgs["TenantId"] = $TenantId }
+    if ($TenantId)       { $connectArgs["TenantId"] = $TenantId }
+    if ($UseDeviceCode)  { $connectArgs["UseDeviceCode"] = $true }
     Connect-MgGraph @connectArgs
 
     # Context can lag the connection by a moment on some SDK builds.
@@ -77,19 +81,38 @@ if (-not ($context -and $context.TenantId)) {
     }
 }
 
-$tenantId = if ($context) { $context.TenantId } else { $TenantId }
-if (-not $tenantId) {
-    throw @"
-No Microsoft Graph tenant context.
+# A personal Microsoft account signs in "successfully" but carries no work
+# tenant: TenantId, Scopes and Account come back empty. On Windows the Web
+# Account Manager reuses the signed-in Windows account by default, so this
+# is the most likely reason to land here.
+$signedInToMsa = $context -and (
+    $context.TenantId -eq $MsaTenant -or
+    ($context.HomeAccountId -and $context.HomeAccountId -like "*$MsaTenant*")
+)
 
-Run these two lines by themselves first, then re-run this script:
-  Connect-MgGraph -Scopes "Application.ReadWrite.All","AppRoleAssignment.ReadWrite.All"
+$tenantId = if ($context) { $context.TenantId } else { $TenantId }
+if ($signedInToMsa -or -not $tenantId) {
+    $diagnosis = if ($signedInToMsa) {
+        "You are signed in with a PERSONAL Microsoft account, not a work account. " +
+        "Windows Web Account Manager reuses the account your Windows profile uses."
+    } else {
+        "No Microsoft Graph tenant context was established."
+    }
+    throw @"
+$diagnosis
+
+Fix - run these three lines by themselves, then re-run this script:
+
+  Disconnect-MgGraph
+  Connect-MgGraph -TenantId "<your-domain>" -Scopes "Application.ReadWrite.All","AppRoleAssignment.ReadWrite.All" -UseDeviceCode
   Get-MgContext
 
-Common causes: the browser sign-in window was closed or cancelled; the
-account is not a Microsoft 365 admin; or this script's output was piped
-(e.g. through Tee-Object), which can swallow the interactive prompt -
-use Start-Transcript for logging instead of a pipe.
+-UseDeviceCode bypasses Web Account Manager: it prints a URL and a code,
+so you choose the account yourself. Sign in with the Microsoft 365 ADMIN
+account of the company tenant.
+
+Get-MgContext must then show a populated TenantId and Account. If it does
+not, the sign-in did not complete and nothing downstream will work.
 "@
 }
 Write-Host "Tenant: $tenantId"
