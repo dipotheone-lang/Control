@@ -1,0 +1,276 @@
+"""Outlook desktop transport — local COM alternative to Microsoft Graph.
+
+Implements the same MailTransport interface as GraphTransport, so the
+engine is unchanged: only the transport handed to run_cycle() differs.
+
+**Requires classic Outlook for Windows.** The "new Outlook" app has no
+COM automation interface; File → Options in classic Outlook is the
+quick way to tell them apart.
+
+GOVERNANCE NOTE — read before using this beyond Phase 0 discovery.
+The charter (§5.1) specifies Graph with certificate auth and a
+*mandatory* Exchange Application Access Policy restricting the engine
+to control@ubcsis.com alone. COM automation cannot reproduce that
+control: it runs as the signed-in Windows user and can therefore reach
+every mailbox in that Outlook profile. This is a WIDER permission
+surface than the charter's design, not a narrower one, and it touches
+§12.2 (PDPL data minimisation).
+
+Two guards are implemented here rather than left to discipline:
+
+- `expected_mailbox` — the store to read is resolved by address and the
+  transport refuses to operate against a different one
+- sending refuses unless the sending account's SMTP address matches
+  `expected_mailbox`, so drafts can never leave under a person's own
+  identity by accident
+
+Using this path in Phase 2+ is a charter deviation and belongs in the
+CEO decisions register (§17), not in a code comment.
+"""
+
+import os
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
+from . import HaltError
+from .transport import FetchedMessage, MailTransport
+
+# PidTagSmtpAddress — resolves an Exchange DN sender to a real address.
+_PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
+
+OL_FOLDER_INBOX = 6
+
+
+def _dispatch_namespace():
+    try:
+        import win32com.client
+    except ImportError as e:  # pragma: no cover - platform dependent
+        raise HaltError(
+            "pywin32 is required for the Outlook transport: "
+            "python -m pip install pywin32 (Windows only)"
+        ) from e
+    try:
+        application = win32com.client.Dispatch("Outlook.Application")
+        return application.GetNamespace("MAPI")
+    except Exception as e:  # pragma: no cover - platform dependent
+        raise HaltError(
+            f"cannot attach to Outlook via COM: {e}. Classic Outlook for "
+            "Windows must be installed and running; the 'new Outlook' app "
+            "does not expose COM."
+        ) from e
+
+
+@dataclass
+class _Resolved:
+    folder: object
+    store_address: str
+
+
+class OutlookTransport(MailTransport):
+    """Reads and sends through the local Outlook profile.
+
+    namespace is injectable so the logic is testable without COM.
+    """
+
+    def __init__(self, expected_mailbox: str, *, namespace=None,
+                 folder_name: str = "Inbox", allow_send: bool = False):
+        self.expected_mailbox = expected_mailbox.lower()
+        self.folder_name = folder_name
+        self.allow_send = allow_send
+        self.namespace = namespace if namespace is not None else _dispatch_namespace()
+        self._entry_ids: dict[str, str] = {}
+        self._resolved: _Resolved | None = None
+
+    # -- store resolution ---------------------------------------------------
+
+    def _smtp_of_store(self, store) -> str:
+        for attr in ("SmtpAddress", "Name", "DisplayName"):
+            value = getattr(store, attr, "") or ""
+            if "@" in value:
+                return value.lower()
+        return ""
+
+    def _resolve(self) -> _Resolved:
+        """Find the folder belonging to expected_mailbox. Refuses to fall
+        back to 'whatever the default store is' — reading the wrong
+        mailbox silently is exactly the failure this guard exists for."""
+        if self._resolved is not None:
+            return self._resolved
+
+        candidates = []
+        for store in self.namespace.Folders:
+            address = self._smtp_of_store(store)
+            candidates.append(address or getattr(store, "Name", "?"))
+            if address != self.expected_mailbox:
+                continue
+            folder = None
+            for child in store.Folders:
+                if str(getattr(child, "Name", "")).lower() == self.folder_name.lower():
+                    folder = child
+                    break
+            if folder is None:
+                raise HaltError(
+                    f"mailbox {self.expected_mailbox} has no folder "
+                    f"{self.folder_name!r}"
+                )
+            self._resolved = _Resolved(folder=folder, store_address=address)
+            return self._resolved
+
+        raise HaltError(
+            f"mailbox {self.expected_mailbox} is not in this Outlook profile. "
+            f"Accounts found: {', '.join(str(c) for c in candidates) or 'none'}. "
+            "Add the mailbox to Outlook (File - Account Settings), or pass the "
+            "address that this profile actually holds."
+        )
+
+    # -- reading ------------------------------------------------------------
+
+    @staticmethod
+    def _sender_address(item) -> str:
+        """Exchange senders carry a DN, not an address; resolve to SMTP."""
+        if str(getattr(item, "SenderEmailType", "") or "").upper() == "EX":
+            try:
+                accessor = item.PropertyAccessor
+                address = accessor.GetProperty(_PR_SMTP_ADDRESS)
+                if address:
+                    return str(address)
+            except Exception:
+                pass
+            try:
+                user = item.Sender.GetExchangeUser()
+                if user and user.PrimarySmtpAddress:
+                    return str(user.PrimarySmtpAddress)
+            except Exception:
+                pass
+        return str(getattr(item, "SenderEmailAddress", "") or "")
+
+    @staticmethod
+    def _first_line(item) -> str:
+        body = str(getattr(item, "Body", "") or "")
+        for line in body.splitlines():
+            if line.strip():
+                return line.strip()
+        return ""
+
+    @staticmethod
+    def _received_at(item) -> datetime:
+        value = getattr(item, "ReceivedTime", None)
+        if isinstance(value, datetime):
+            return value
+        try:  # pywin32 returns a COM time object
+            return datetime.fromtimestamp(float(value))
+        except Exception:
+            return datetime.now()
+
+    def _attachments(self, item) -> list[tuple[str, bytes]]:
+        collected: list[tuple[str, bytes]] = []
+        attachments = getattr(item, "Attachments", None)
+        if attachments is None:
+            return collected
+        count = int(getattr(attachments, "Count", 0) or 0)
+        if not count:
+            return collected
+        with tempfile.TemporaryDirectory(prefix="control-att-") as tmp:
+            for index in range(1, count + 1):
+                attachment = attachments.Item(index)
+                name = str(getattr(attachment, "FileName", "") or f"attachment-{index}")
+                # Path is taken from the attachment name only; join to the
+                # isolated temp directory and never to a caller-supplied path.
+                target = Path(tmp) / os.path.basename(name)
+                try:
+                    attachment.SaveAsFile(str(target))
+                    collected.append((name, target.read_bytes()))
+                except Exception:
+                    # An unreadable attachment is a recorded fact, not a
+                    # crash; evaluation will treat it as missing content.
+                    continue
+        return collected
+
+    def fetch_unprocessed(self) -> list[FetchedMessage]:
+        resolved = self._resolve()
+        items = resolved.folder.Items
+        try:
+            unread = items.Restrict("[Unread]=true")
+        except Exception:
+            unread = items
+
+        messages: list[FetchedMessage] = []
+        count = int(getattr(unread, "Count", 0) or 0)
+        for index in range(1, count + 1):
+            item = unread.Item(index)
+            # Non-mail items (meeting requests, reports) have no sender.
+            if not hasattr(item, "SenderEmailAddress"):
+                continue
+            entry_id = str(getattr(item, "EntryID", "") or f"idx-{index}")
+            message_id = str(
+                getattr(item, "InternetMessageID", "") or entry_id
+            )
+            sender = self._sender_address(item)
+            display = str(getattr(item, "SenderName", "") or "")
+            messages.append(FetchedMessage(
+                message_id=message_id,
+                sender=f"{display} <{sender}>" if display else sender,
+                received_at=self._received_at(item),
+                to=str(getattr(item, "To", "") or ""),
+                cc=str(getattr(item, "CC", "") or ""),
+                subject=str(getattr(item, "Subject", "") or ""),
+                first_line=self._first_line(item),
+                attachments=self._attachments(item),
+                in_reply_to_control=bool(
+                    self.expected_mailbox in str(getattr(item, "To", "") or "").lower()
+                    and str(getattr(item, "Subject", "") or "").upper().startswith("RE:")
+                ),
+            ))
+            self._entry_ids[message_id] = entry_id
+        return messages
+
+    # -- writing ------------------------------------------------------------
+
+    def send(self, recipients: list[str], cc: list[str], subject: str,
+             body: str) -> str:
+        if not self.allow_send:
+            raise HaltError(
+                "OutlookTransport is read-only unless allow_send=True. "
+                "Phase 0 sends nothing (§6); enable sending only after the "
+                "§16 phase gates have been passed."
+            )
+        resolved = self._resolve()
+        if resolved.store_address != self.expected_mailbox:
+            raise HaltError(
+                f"refusing to send: resolved store {resolved.store_address!r} "
+                f"is not {self.expected_mailbox!r}"
+            )
+        application = self.namespace.Application
+        mail = application.CreateItem(0)      # olMailItem
+        mail.To = "; ".join(recipients)
+        mail.CC = "; ".join(cc)
+        mail.Subject = subject
+        mail.Body = body
+        try:
+            mail.SendUsingAccount = self._account_for(application)
+        except Exception:
+            pass
+        mail.Send()
+        return f"<outlook-{datetime.now():%Y%m%d%H%M%S%f}@{self.expected_mailbox}>"
+
+    def _account_for(self, application):
+        for account in application.Session.Accounts:
+            if str(getattr(account, "SmtpAddress", "")).lower() == self.expected_mailbox:
+                return account
+        raise HaltError(
+            f"no Outlook account matches {self.expected_mailbox}; refusing to "
+            "send under a different identity"
+        )
+
+    def mark_processed(self, message_id: str) -> None:
+        entry_id = self._entry_ids.get(message_id)
+        if not entry_id:
+            return
+        try:
+            item = self.namespace.GetItemFromID(entry_id)
+        except Exception:
+            return
+        item.UnRead = False
+        item.Save()
