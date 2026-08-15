@@ -43,6 +43,30 @@ _PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
 OL_FOLDER_INBOX = 6
 
 
+def safe_get(item, attribute: str, default=""):
+    """Read a COM property without trusting the object model.
+
+    hasattr() is not usable here: Outlook raises com_error ('No such
+    interface supported') for items that are not mail — some IMAP and
+    Gmail items, calendar artefacts, corrupt entries — and com_error is
+    not an AttributeError, so hasattr propagates it instead of
+    returning False.
+    """
+    try:
+        value = getattr(item, attribute)
+    except Exception:
+        return default
+    return default if value is None else value
+
+
+def is_mail_item(item) -> bool:
+    try:
+        getattr(item, "SenderEmailAddress")
+    except Exception:
+        return False
+    return True
+
+
 def _dispatch_namespace():
     try:
         import win32com.client
