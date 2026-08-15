@@ -80,7 +80,8 @@ class ObligationCandidate:
     example_attachments: list[str] = field(default_factory=list)
     distinct_days: int = 0
     per_active_day: float = 0.0
-    pattern_kind: str = "RECURRING"      # RECURRING | BULK
+    pattern_kind: str = "RECURRING"      # RECURRING | BULK | THREAD
+    reply_ratio: float = 0.0
 
 
 def _cadence_for(gap: float | None) -> str:
@@ -122,6 +123,15 @@ def infer_obligations(rows: list[dict], *, min_occurrences: int = 3
             len(items) >= 10 and (median_gap is not None and median_gap < 0.5)
         )
 
+        # A conversation is not a recurrence. Normalising subjects strips
+        # Re:/Fw:, so a 16-reply negotiation collapses into what looks
+        # like a series on a 3-day cadence. A real recurring report is
+        # sent fresh each period; a thread is mostly replies.
+        replies = sum(1 for i in items
+                      if _PREFIXES.match(i.get("subject", "") or ""))
+        reply_ratio = replies / len(items)
+        is_thread = reply_ratio >= 0.5
+
         # "Regular" means the spread of gaps is small relative to the gap
         # itself - a series that arrives every 7±1 days, not 7±20. A
         # zero-gap series passes this trivially, hence the bulk test above.
@@ -130,8 +140,8 @@ def infer_obligations(rows: list[dict], *, min_occurrences: int = 3
             spread = statistics.pstdev(gaps)
             regular = spread <= max(2.0, median_gap * 0.5)
 
-        if is_bulk:
-            # Never a HIGH-confidence obligation, whatever the volume.
+        if is_bulk or is_thread:
+            # Neither is an obligation, whatever the volume.
             confidence = "LOW"
             regular = False
         elif len(items) >= 12 and regular:
@@ -155,14 +165,17 @@ def infer_obligations(rows: list[dict], *, min_occurrences: int = 3
             median_gap_days=round(median_gap, 1) if median_gap else None,
             cadence=(f"bulk send ({per_active_day:.0f}/day over "
                      f"{distinct_days} day(s))" if is_bulk
-                     else _cadence_for(median_gap)),
+                     else (f"conversation ({reply_ratio:.0%} replies)"
+                           if is_thread else _cadence_for(median_gap))),
             confidence=confidence,
             regular=regular,
             attachment_rate=round(len(with_attachments) / len(items), 2),
             example_attachments=examples[:4],
             distinct_days=distinct_days,
             per_active_day=round(per_active_day, 1),
-            pattern_kind="BULK" if is_bulk else "RECURRING",
+            pattern_kind=("BULK" if is_bulk
+                          else "THREAD" if is_thread else "RECURRING"),
+            reply_ratio=round(reply_ratio, 2),
         ))
 
     order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
@@ -252,6 +265,7 @@ def analyse_responses(rows: list[dict], *, window_days: int = 30) -> ResponseRep
 def render_stage_d(candidates: list[ObligationCandidate], mailbox: str) -> str:
     recurring = [c for c in candidates if c.pattern_kind == "RECURRING"]
     bulk = [c for c in candidates if c.pattern_kind == "BULK"]
+    threads = [c for c in candidates if c.pattern_kind == "THREAD"]
 
     lines = [
         f"# Stage D — candidate obligations from {mailbox}",
@@ -294,6 +308,29 @@ def render_stage_d(candidates: list[ObligationCandidate], mailbox: str) -> str:
             f"{c.per_active_day:.0f}/day | {c.distinct_days} |"
         )
     if not bulk:
+        lines.append("| — | none detected | — | — | — |")
+
+    lines += [
+        "",
+        "## Conversations — NOT obligations",
+        "",
+        "Mostly replies: one negotiation or enquiry, not a series. Subject "
+        "normalisation strips Re:/Fw:, so a long thread would otherwise look "
+        "like a recurring series on a short cadence. **These are still the "
+        "most commercially interesting rows here** — a run of quotation and "
+        "price-offer threads is the shape of the §2.2 commercial cycle, and "
+        "belongs in the tender and quotation registers rather than the class 3 "
+        "report register.",
+        "",
+        "| Sender | Subject template | n | Replies | Span |",
+        "|---|---|---|---|---|",
+    ]
+    for c in threads[:25]:
+        lines.append(
+            f"| {c.sender} | {c.subject_template[:55]} | {c.occurrences} | "
+            f"{c.reply_ratio:.0%} | {c.first_seen} → {c.last_seen} |"
+        )
+    if not threads:
         lines.append("| — | none detected | — | — | — |")
 
     lines += [
