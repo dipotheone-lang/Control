@@ -132,6 +132,55 @@ def cmd_outlook_scan(args) -> int:
     return 0 if all_summaries else 1
 
 
+def cmd_analyse(args) -> int:
+    from .discovery.analyse import (
+        analyse_responses, infer_obligations, load_rows,
+        render_stage_d, render_stage_h,
+    )
+
+    discovery = Path(args.control_root) / "discovery"
+    scans = sorted(discovery.glob("outlook-scan-*.jsonl"))
+    if not scans:
+        print(f"no scan output in {discovery}. Run outlook-scan first.")
+        return 1
+
+    for scan in scans:
+        rows = load_rows(scan)
+        if not rows:
+            print(f"{scan.name}: empty, skipped")
+            continue
+        mailbox = rows[0].get("mailbox", scan.stem)
+        stem = scan.stem.replace("outlook-scan-", "")
+
+        candidates = infer_obligations(rows, min_occurrences=args.min_occurrences)
+        (discovery / f"STAGE-D-{stem}.md").write_text(
+            render_stage_d(candidates, mailbox), encoding="utf-8")
+
+        report = analyse_responses(rows)
+        (discovery / f"STAGE-H-{stem}.md").write_text(
+            render_stage_h(report, mailbox), encoding="utf-8")
+
+        print(f"\n{mailbox} ({len(rows)} messages)")
+        high = [c for c in candidates if c.confidence == "HIGH"]
+        medium = [c for c in candidates if c.confidence == "MEDIUM"]
+        print(f"  candidate obligations: {len(high)} HIGH, {len(medium)} MEDIUM, "
+              f"{len(candidates) - len(high) - len(medium)} LOW")
+        for c in candidates[:5]:
+            print(f"    [{c.confidence}] {c.cadence:12} n={c.occurrences:<4} "
+                  f"{c.sender} — {c.subject_template[:45]}")
+        total = report.answered + report.unanswered
+        if total:
+            print(f"  external messages: {total}, answered {report.answered}, "
+                  f"no reply found {report.unanswered}")
+            if report.median_hours is not None:
+                print(f"  median first reply: {report.median_hours}h")
+        if not report.sent_items_present:
+            print("  NOTE: Sent Items not in this scan — unanswered count is "
+                  "not reliable")
+    print(f"\nreports in {discovery}")
+    return 0
+
+
 def cmd_verify(args) -> int:
     from .audit import AuditLog
     from .db import connect, integrity_check
@@ -185,12 +234,19 @@ def main(argv: list[str] | None = None) -> int:
                       help="omit subject lines (automatic for hr@ mailboxes)")
     scan.set_defaults(fn=cmd_outlook_scan)
 
+    analyse = sub.add_parser("analyse",
+                             help="Stage D cadence and Stage H responses from scan output")
+    analyse.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    analyse.add_argument("--min-occurrences", type=int, default=3,
+                         help="minimum repeats before a pattern is a candidate")
+    analyse.set_defaults(fn=cmd_analyse)
+
     args = parser.parse_args(argv)
     if args.command in ("startup", "discovery") and (
             not args.control_root or not args.ub_root):
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
-    if args.command in ("verify", "outlook-scan") and not args.control_root:
+    if args.command in ("verify", "outlook-scan", "analyse") and not args.control_root:
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
         return args.fn(args)
