@@ -84,31 +84,52 @@ def cmd_discovery(args) -> int:
 
 
 def cmd_outlook_scan(args) -> int:
-    from .discovery.outlook_scan import run_outlook_scan
+    from . import HaltError
+    from .discovery.outlook_scan import run_outlook_scan, write_overview
     from .outlook import _dispatch_namespace
 
     out_dir = Path(args.control_root) / "discovery"
     folders = [f.strip() for f in args.folders.split(",") if f.strip()]
+    mailboxes = [m.strip() for m in args.mailbox.split(",") if m.strip()]
+    namespace = _dispatch_namespace()
 
     def progress(done, total):
         print(f"  ... {done}/{total}", flush=True)
 
-    print(f"scanning {args.mailbox} ({', '.join(folders)}) — metadata only")
-    summaries = run_outlook_scan(
-        _dispatch_namespace(), args.mailbox, folders, out_dir,
-        limit=args.limit, progress=progress,
-    )
-    for s in summaries:
-        print(f"\n{s.folder}: {s.total} messages, {s.earliest or 'n/a'} to "
-              f"{s.latest or 'n/a'}")
-        print(f"  with attachments: {s.with_attachments}")
-        print(f"  internal/external senders: {s.internal_count}/{s.external_count}")
-        print(f"  copied to control@: {s.copied_to_control}")
-        if s.top_senders:
-            print("  top senders: " + ", ".join(
-                f"{a or '(unknown)'} ({n})" for a, n in s.top_senders[:5]))
-    print(f"\noutputs in {out_dir}")
-    return 0
+    all_summaries: dict = {}
+    failures: list[str] = []
+    for mailbox in mailboxes:
+        redact = args.redact_subjects or mailbox.lower().startswith("hr@")
+        label = "metadata only, subjects redacted" if redact else "metadata only"
+        print(f"\n=== {mailbox} ({', '.join(folders) or 'all folders'}) — {label}")
+        try:
+            summaries = run_outlook_scan(
+                namespace, mailbox, folders, out_dir, limit=args.limit,
+                progress=progress, redact_subjects=redact, recurse=args.recurse,
+            )
+        except HaltError as e:
+            # A mailbox missing from the profile is a recorded gap, not a
+            # reason to abandon the other mailboxes (§1.1).
+            print(f"  SKIPPED: {e}")
+            failures.append(f"{mailbox}: {e}")
+            continue
+        all_summaries[mailbox] = summaries
+        for s in summaries:
+            if not s.total:
+                continue
+            print(f"  {s.folder}: {s.total} messages, {s.earliest} to {s.latest}, "
+                  f"{s.with_attachments} with attachments, "
+                  f"{s.copied_to_control} copied to control@")
+
+    if all_summaries:
+        overview = write_overview(all_summaries, out_dir)
+        print(f"\noverview: {overview}")
+    if failures:
+        print("\nGAPS (must appear in DISCOVERY-LIMITATIONS.md):")
+        for failure in failures:
+            print(f"  - {failure}")
+    print(f"outputs in {out_dir}")
+    return 0 if all_summaries else 1
 
 
 def cmd_verify(args) -> int:
@@ -152,11 +173,16 @@ def main(argv: list[str] | None = None) -> int:
     scan = sub.add_parser("outlook-scan",
                           help="historical mailbox scan via Outlook (metadata only)")
     scan.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
-    scan.add_argument("--mailbox", required=True)
+    scan.add_argument("--mailbox", required=True,
+                      help="one address, or several separated by commas")
     scan.add_argument("--folders", default="Inbox",
-                      help="comma-separated folder names (default: Inbox)")
+                      help="comma-separated folder names; empty string = all folders")
     scan.add_argument("--limit", type=int, default=None,
                       help="stop after N messages per folder")
+    scan.add_argument("--recurse", action="store_true",
+                      help="include subfolders")
+    scan.add_argument("--redact-subjects", action="store_true",
+                      help="omit subject lines (automatic for hr@ mailboxes)")
     scan.set_defaults(fn=cmd_outlook_scan)
 
     args = parser.parse_args(argv)
