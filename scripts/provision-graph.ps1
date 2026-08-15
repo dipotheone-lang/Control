@@ -30,7 +30,8 @@ param(
     [string]$AppName = "UBCSIS-Control",
     [string]$OutDir  = "$PSScriptRoot\out",
     [int]$CertYears  = 2,
-    [string]$DeniedProbe = "ahmed@ubcsis.com"
+    [string]$DeniedProbe = "ahmed@ubcsis.com",
+    [string]$TenantId = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,10 +56,44 @@ function Get-GraphCollection {
 
 # ---- 1. App registration --------------------------------------------------
 Write-Host "== Step 1: application registration ==" -ForegroundColor Cyan
-Connect-MgGraph -Scopes "Application.ReadWrite.All","AppRoleAssignment.ReadWrite.All" -NoWelcome
-$tenantId = (Get-MgContext).TenantId
-if (-not $tenantId) { throw "Connect-MgGraph did not establish a tenant context" }
+
+# Reuse an existing connection if one is live; otherwise sign in. Doing the
+# sign-in from an already-connected session is the reliable path when the
+# script's own interactive prompt is swallowed by output redirection.
+$context = Get-MgContext
+if (-not ($context -and $context.TenantId)) {
+    Write-Host "Signing in to Microsoft Graph (a browser window will open)..."
+    $connectArgs = @{
+        Scopes = "Application.ReadWrite.All", "AppRoleAssignment.ReadWrite.All"
+        NoWelcome = $true
+    }
+    if ($TenantId) { $connectArgs["TenantId"] = $TenantId }
+    Connect-MgGraph @connectArgs
+
+    # Context can lag the connection by a moment on some SDK builds.
+    for ($i = 0; $i -lt 5 -and -not ($context -and $context.TenantId); $i++) {
+        Start-Sleep -Seconds 2
+        $context = Get-MgContext
+    }
+}
+
+$tenantId = if ($context) { $context.TenantId } else { $TenantId }
+if (-not $tenantId) {
+    throw @"
+No Microsoft Graph tenant context.
+
+Run these two lines by themselves first, then re-run this script:
+  Connect-MgGraph -Scopes "Application.ReadWrite.All","AppRoleAssignment.ReadWrite.All"
+  Get-MgContext
+
+Common causes: the browser sign-in window was closed or cancelled; the
+account is not a Microsoft 365 admin; or this script's output was piped
+(e.g. through Tee-Object), which can swallow the interactive prompt -
+use Start-Transcript for logging instead of a pipe.
+"@
+}
 Write-Host "Tenant: $tenantId"
+if ($context.Account) { Write-Host "Signed in as: $($context.Account)" }
 
 $app = Get-GraphCollection -Path "applications" -Filter "displayName eq '$AppName'" |
     Select-Object -First 1
