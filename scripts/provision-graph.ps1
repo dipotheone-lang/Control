@@ -56,6 +56,9 @@ function Get-GraphCollection {
 # ---- 1. App registration --------------------------------------------------
 Write-Host "== Step 1: application registration ==" -ForegroundColor Cyan
 Connect-MgGraph -Scopes "Application.ReadWrite.All","AppRoleAssignment.ReadWrite.All" -NoWelcome
+$tenantId = (Get-MgContext).TenantId
+if (-not $tenantId) { throw "Connect-MgGraph did not establish a tenant context" }
+Write-Host "Tenant: $tenantId"
 
 $app = Get-GraphCollection -Path "applications" -Filter "displayName eq '$AppName'" |
     Select-Object -First 1
@@ -151,6 +154,20 @@ if (Test-Path $pfxPath) {
     Start-Sleep -Seconds 10
 }
 
+# ---- 3b. Environment file -------------------------------------------------
+# Written BEFORE the Exchange stage: every value it needs is known now, and
+# an Exchange failure must not cost the work already done in Entra.
+$envFile = Join-Path $OutDir "graph-env.ps1"
+@"
+# Control §5.1 environment - dot-source before running:  . "$envFile"
+`$env:GRAPH_TENANT_ID = "$tenantId"
+`$env:GRAPH_CLIENT_ID = "$appId"
+`$env:GRAPH_PFX_PATH  = "$pfxPath"
+`$env:CONTROL_MAILBOX = "$Mailbox"
+# PFX password: Windows Credential Manager, service UBCSIS-Control, user pfx
+"@ | Set-Content -Path $envFile -Encoding UTF8
+Write-Host "Environment file written: $envFile"
+
 # ---- 4. Application Access Policy (MANDATORY, §5.1) -----------------------
 Write-Host "== Step 4: Application Access Policy ==" -ForegroundColor Cyan
 Connect-ExchangeOnline -ShowBanner:$false
@@ -185,18 +202,12 @@ if ($granted.AccessCheckResult -ne "Granted" -or $denied.AccessCheckResult -ne "
     Write-Warning "Re-run this script (safe) or re-test before running Control."
 }
 
-# ---- 5. Environment file --------------------------------------------------
-$tenantId = (Get-MgContext).TenantId
-$envFile = Join-Path $OutDir "graph-env.ps1"
-@"
-# Control §5.1 environment - dot-source before running:  . "$envFile"
-`$env:GRAPH_TENANT_ID = "$tenantId"
-`$env:GRAPH_CLIENT_ID = "$appId"
-`$env:GRAPH_PFX_PATH  = "$pfxPath"
-`$env:CONTROL_MAILBOX = "$Mailbox"
-# PFX password: Windows Credential Manager, service UBCSIS-Control, user pfx
-"@ | Set-Content -Path $envFile -Encoding UTF8
-
+# ---- 5. Summary -----------------------------------------------------------
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green
+Write-Host "  Tenant : $tenantId"
+Write-Host "  AppId  : $appId"
+Write-Host "  PFX    : $pfxPath"
+Write-Host "  Env    : $envFile"
+Write-Host ""
 Write-Host "Next:  . `"$envFile`"  ;  python scripts\graph_smoketest.py"
