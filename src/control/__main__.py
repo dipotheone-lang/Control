@@ -181,6 +181,86 @@ def cmd_analyse(args) -> int:
     return 0
 
 
+def cmd_phase0(args) -> int:
+    """One command: find every mailbox, scan it, analyse it, write the
+    Phase 0 deliverables. Nothing needs naming."""
+    from . import HaltError
+    from .discovery.deliverables import (
+        build_results, write_confidential_scope, write_discovery_report,
+        write_paste_summary,
+    )
+    from .discovery.outlook_scan import run_outlook_scan, write_overview
+    from .outlook import _dispatch_namespace, safe_get
+
+    discovery = Path(args.control_root) / "discovery"
+    discovery.mkdir(parents=True, exist_ok=True)
+    namespace = _dispatch_namespace()
+
+    # Enumerate whatever this Outlook profile actually holds.
+    mailboxes = []
+    for store in namespace.Folders:
+        address = str(safe_get(store, "SmtpAddress") or safe_get(store, "Name"))
+        if "@" in address:
+            mailboxes.append(address.lower())
+    if args.mailbox:
+        wanted = {m.strip().lower() for m in args.mailbox.split(",") if m.strip()}
+        mailboxes = [m for m in mailboxes if m in wanted]
+    if not mailboxes:
+        print("No mailboxes with an email address found in this Outlook profile.")
+        return 1
+
+    print(f"Phase 0 — {len(mailboxes)} mailbox(es): {', '.join(mailboxes)}")
+    print("Metadata only; no message body is read. This may take a while.\n")
+
+    folders = [f.strip() for f in args.folders.split(",") if f.strip()]
+    gaps: list[str] = []
+    all_summaries: dict = {}
+
+    def progress(done, total):
+        print(f"    ... {done}/{total}", flush=True)
+
+    for mailbox in mailboxes:
+        redact = args.redact_subjects or mailbox.startswith("hr@")
+        print(f"  {mailbox}" + ("  [subjects redacted]" if redact else ""))
+        try:
+            summaries = run_outlook_scan(
+                namespace, mailbox, folders, discovery, limit=args.limit,
+                progress=progress, redact_subjects=redact, recurse=args.recurse,
+            )
+        except HaltError as e:
+            print(f"    SKIPPED: {e}")
+            gaps.append(f"{mailbox}: {e}")
+            continue
+        all_summaries[mailbox] = summaries
+        for s in summaries:
+            if s.total or s.unreadable_items:
+                note = (f", {s.unreadable_items} unreadable"
+                        if s.unreadable_items else "")
+                print(f"    {s.folder}: {s.total} messages{note}")
+            if s.unreadable_items:
+                gaps.append(f"{mailbox}/{s.folder}: {s.unreadable_items} "
+                            "items could not be read")
+
+    if not all_summaries:
+        print("\nNothing scanned. Nothing generated.")
+        return 1
+
+    write_overview(all_summaries, discovery)
+    results = build_results(discovery, min_occurrences=args.min_occurrences)
+    report = write_discovery_report(results, discovery, gaps)
+    scope = write_confidential_scope(results, discovery)
+    summary = write_paste_summary(results, discovery, gaps)
+
+    print("\n" + "=" * 60)
+    print(summary.read_text(encoding="utf-8"))
+    print("=" * 60)
+    print(f"\nDeliverables written to {discovery}:")
+    for path in (report, scope, summary):
+        print(f"  {path.name}")
+    print("  MAILBOX-OVERVIEW.md, STAGE-D-*.md, STAGE-H-*.md via 'analyse'")
+    return 0
+
+
 def cmd_verify(args) -> int:
     from .audit import AuditLog
     from .db import connect, integrity_check
@@ -241,12 +321,26 @@ def main(argv: list[str] | None = None) -> int:
                          help="minimum repeats before a pattern is a candidate")
     analyse.set_defaults(fn=cmd_analyse)
 
+    phase0 = sub.add_parser(
+        "phase0",
+        help="one command: scan every mailbox, analyse, write the deliverables")
+    phase0.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    phase0.add_argument("--mailbox", default="",
+                        help="restrict to these addresses (default: all in profile)")
+    phase0.add_argument("--folders", default="Inbox,Sent Items")
+    phase0.add_argument("--limit", type=int, default=None)
+    phase0.add_argument("--recurse", action="store_true")
+    phase0.add_argument("--redact-subjects", action="store_true")
+    phase0.add_argument("--min-occurrences", type=int, default=3)
+    phase0.set_defaults(fn=cmd_phase0)
+
     args = parser.parse_args(argv)
     if args.command in ("startup", "discovery") and (
             not args.control_root or not args.ub_root):
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
-    if args.command in ("verify", "outlook-scan", "analyse") and not args.control_root:
+    if (args.command in ("verify", "outlook-scan", "analyse", "phase0")
+            and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
         return args.fn(args)
