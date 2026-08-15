@@ -181,6 +181,52 @@ def cmd_analyse(args) -> int:
     return 0
 
 
+def cmd_contracts(args) -> int:
+    """Stage C — commercial terms from documents (§6)."""
+    import yaml
+
+    from .discovery.stage_c import render_commercial_exposure, run_stage_c
+
+    control_root = Path(args.control_root)
+    source = Path(args.source)
+    if not source.is_dir():
+        print(f"source folder not found: {source}")
+        return 1
+
+    clients, folders = [], []
+    config = control_root / "config" / "confidential.yaml"
+    if config.is_file():
+        data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+        clients = [c.get("name", "") for c in data.get("confidential_clients", [])]
+        folders = list(data.get("confidential_folders") or [])
+    else:
+        print("WARNING: config/confidential.yaml not found — falling back to the "
+              "§12.1.1 default client list. Run 'init' first.")
+        clients = ["Siemens Energy", "Saint-Gobain", "KNAUF", "Galaxy",
+                   "Canal Sugar", "Sukari", "Air Liquide"]
+
+    print(f"scanning {source} for commercial terms")
+    print(f"confidential clients: {len(clients)} | folders: {len(folders)}")
+    result = run_stage_c(source, clients, folders, exclude=[control_root])
+
+    out = control_root / "discovery" / "COMMERCIAL-EXPOSURE.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_commercial_exposure(result), encoding="utf-8")
+
+    print(f"\ndocuments seen:      {len(result.documents)}")
+    print(f"terms extracted:     {len(result.terms)}")
+    print(f"confidential, unread: {len(result.blocked)}  (D-01)")
+    print(f"unreadable/scanned:   {len(result.unreadable)}  (OCR needed)")
+    dated = [t for t in result.terms if t.found_date]
+    if dated:
+        soonest = sorted(dated, key=lambda t: t.found_date)[:5]
+        print("\nnearest dated terms:")
+        for term in soonest:
+            print(f"  {term.found_date}  {term.kind:20} {term.source[:50]}")
+    print(f"\nwritten: {out}")
+    return 0
+
+
 def cmd_init(args) -> int:
     """Create CONTROL_ROOT from the repository's config templates."""
     from .bootstrap import bootstrap, render_result
@@ -409,6 +455,14 @@ def main(argv: list[str] | None = None) -> int:
                       help="config template directory (default: repo config/)")
     init.set_defaults(fn=cmd_init)
 
+    contracts = sub.add_parser(
+        "contracts",
+        help="Stage C: extract guarantee, LD, notice and accreditation terms")
+    contracts.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    contracts.add_argument("--source", required=True,
+                           help="folder holding contracts and agreements")
+    contracts.set_defaults(fn=cmd_contracts)
+
     doctor = sub.add_parser("doctor",
                             help="check this machine can run Control")
     doctor.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
@@ -419,7 +473,8 @@ def main(argv: list[str] | None = None) -> int:
             not args.control_root or not args.ub_root):
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
-    if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init")
+    if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init",
+                         "contracts")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
