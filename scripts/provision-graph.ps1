@@ -1,13 +1,13 @@
-<#
+﻿<#
 .SYNOPSIS
-  One-time tenant provisioning for Control (charter §5.1) — Track B.
+  One-time tenant provisioning for Control (charter section 5.1) - Track B.
 
   Run as a Microsoft 365 admin, on the machine that will run Control:
     1. Registers the UBCSIS-Control Entra application (single tenant)
     2. Adds the four Graph APPLICATION permissions and grants consent
     3. Creates the certificate, uploads the public key to the app,
        exports an encrypted PFX, and stores the password in Windows
-       Credential Manager via Python keyring (never in a file, §5.1)
+       Credential Manager via Python keyring (never in a file, section 5.1)
     4. Creates the security group and the MANDATORY Application Access
        Policy restricting the app to the single control mailbox, then
        verifies both Granted and Denied
@@ -22,7 +22,7 @@
   (raw Graph REST) rather than the typed Get-Mg* cmdlets: their -Filter
   handling varies across SDK versions and fails with BadRequest on some.
 
-  The script is IDEMPOTENT — re-running after a failure is safe and is
+  The script is IDEMPOTENT - re-running after a failure is safe and is
   the supported way to resume.
 #>
 param(
@@ -171,7 +171,7 @@ foreach ($name in $AppRoles.Keys) {
 # ---- 3. Certificate -------------------------------------------------------
 # MSAL (Python) must hold the private key, so the key is exported ONCE into
 # an encrypted PFX; the password goes to Windows Credential Manager, never
-# to a file (§5.1). Rotate by re-running this script.
+# to a file (section 5.1). Rotate by re-running this script.
 Write-Host "== Step 3: certificate ==" -ForegroundColor Cyan
 $pfxPath = Join-Path $OutDir "control-graph.pfx"
 if (Test-Path $pfxPath) {
@@ -217,7 +217,7 @@ if (Test-Path $pfxPath) {
 # an Exchange failure must not cost the work already done in Entra.
 $envFile = Join-Path $OutDir "graph-env.ps1"
 @"
-# Control §5.1 environment - dot-source before running:  . "$envFile"
+# Control section 5.1 environment - dot-source before running:  . "$envFile"
 `$env:GRAPH_TENANT_ID = "$tenantId"
 `$env:GRAPH_CLIENT_ID = "$appId"
 `$env:GRAPH_PFX_PATH  = "$pfxPath"
@@ -226,7 +226,7 @@ $envFile = Join-Path $OutDir "graph-env.ps1"
 "@ | Set-Content -Path $envFile -Encoding UTF8
 Write-Host "Environment file written: $envFile"
 
-# ---- 4. Application Access Policy (MANDATORY, §5.1) -----------------------
+# ---- 4. Application Access Policy (MANDATORY, section 5.1) -----------------------
 Write-Host "== Step 4: Application Access Policy ==" -ForegroundColor Cyan
 Connect-ExchangeOnline -ShowBanner:$false
 
