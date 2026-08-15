@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-  Put the whole Control system on this machine — one run.
+  Put the whole Control system on this machine - one run.
 
   Installs dependencies, creates CONTROL_ROOT from the repository's
   config templates, initialises the database and audit chain, checks
@@ -20,7 +20,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 
-Write-Host "== Control — machine setup ==" -ForegroundColor Cyan
+Write-Host "== Control - machine setup ==" -ForegroundColor Cyan
 Write-Host "repository:   $repo"
 Write-Host "CONTROL_ROOT: $ControlRoot"
 Write-Host ""
