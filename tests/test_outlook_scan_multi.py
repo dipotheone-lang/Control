@@ -57,7 +57,7 @@ def test_overview_reports_cc_coverage(tmp_path):
     path = write_overview({INFO: summaries}, tmp_path)
     text = path.read_text(encoding="utf-8")
 
-    assert "CC-discipline coverage: **33.3%**" in text     # 1 of 3 external
+    assert "observed coverage: **33.3%**" in text          # 1 of 3 external
     assert "O-05" in text
     assert "cannot tell you" in text
     assert "Commercial value" in text

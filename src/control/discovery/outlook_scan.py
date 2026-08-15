@@ -66,6 +66,14 @@ def scan_folder(folder, *, mailbox: str, folder_name: str,
     timestamps: list[datetime] = []
 
     items = folder.Items
+    if limit:
+        # A capped run is a sample, and the useful sample is the recent
+        # end: current cadence, current senders. Without this the cap
+        # silently returns the oldest N in folder order.
+        try:
+            items.Sort("[ReceivedTime]", True)
+        except Exception:
+            pass
     count = int(getattr(items, "Count", 0) or 0)
     if limit:
         count = min(count, limit)
@@ -229,14 +237,26 @@ def write_overview(all_summaries: dict[str, list[ScanSummary]], out_dir: Path) -
     ]
     if totals["external"]:
         share = totals["copied"] / totals["external"]
-        lines.append(f"- CC-discipline coverage: **{share:.1%}**")
+        lines.append(f"- observed coverage: **{share:.1%}**")
         lines.append("")
         lines.append(
             "Under Option A (CC discipline) Control sees only what is copied to "
             "control@. The figure above is the share of external traffic the "
-            "system would have been able to watch. Read it before choosing "
-            "between Options A, B and C."
+            "system would have been able to watch."
         )
+        if totals["copied"] == 0:
+            lines += [
+                "",
+                "> **Read this figure with care.** A coverage of 0% over historical "
+                "traffic does **not** measure CC discipline if control@ did not "
+                "exist for most of that period — nothing could have been copied to "
+                "a mailbox that was not yet in use. Confirm when control@ went "
+                "live. If it postdates this traffic, the honest conclusion is that "
+                "**no historical baseline exists**, and CC discipline can only be "
+                "measured forward from the date staff were asked to copy control@. "
+                "Deciding O-05 on this number alone would be deciding on an "
+                "artefact (§1.1).",
+            ]
     lines += [
         "",
         "## What this scan cannot tell you",
