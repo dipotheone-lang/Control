@@ -99,8 +99,13 @@ class FakeNamespace:
         self._by_id = {}
         for store in stores:
             for folder in store.Folders:
-                for item in folder.Items._items:
-                    self._by_id[item.EntryID] = item
+                for item in getattr(folder.Items, "_items", []):
+                    # Hostile/unfetchable items cannot be indexed - real
+                    # Outlook profiles contain them too.
+                    try:
+                        self._by_id[item.EntryID] = item
+                    except Exception:
+                        continue
 
     def GetItemFromID(self, entry_id):
         return self._by_id[entry_id]

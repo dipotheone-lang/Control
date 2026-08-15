@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from ..outlook import OutlookTransport
+from ..outlook import OutlookTransport, is_mail_item, safe_get
 
 INTERNAL_DOMAIN = "ubcsis.com"
 
@@ -28,6 +28,8 @@ class ScanSummary:
     folder: str
     total: int = 0
     skipped_non_mail: int = 0
+    unreadable_items: int = 0
+    attachments_unreadable: int = 0
     with_attachments: int = 0
     earliest: str = ""
     latest: str = ""
@@ -49,7 +51,8 @@ def _address_of(value: str) -> str:
 
 def scan_folder(folder, *, mailbox: str, folder_name: str,
                 limit: int | None = None, progress=None,
-                redact_subjects: bool = False) -> tuple[list[dict], ScanSummary]:
+                redact_subjects: bool = False,
+                sink=None) -> tuple[list[dict], ScanSummary]:
     """Walk every item in a folder, collecting metadata only.
 
     redact_subjects drops subject lines from the output. Subjects are
@@ -79,43 +82,69 @@ def scan_folder(folder, *, mailbox: str, folder_name: str,
         count = min(count, limit)
 
     for index in range(1, count + 1):
+        # One unreadable item must never end a 10,000-item scan. Every
+        # per-item failure is counted and reported, never silently
+        # dropped and never fatal (§1.1, §13.2).
         try:
             item = items.Item(index)
         except Exception:
+            summary.unreadable_items += 1
             continue
-        if not hasattr(item, "SenderEmailAddress"):
+        if not is_mail_item(item):
             summary.skipped_non_mail += 1
             continue
 
-        sender = OutlookTransport._sender_address(item).lower()
-        received = OutlookTransport._received_at(item)
-        to = str(getattr(item, "To", "") or "")
-        cc = str(getattr(item, "CC", "") or "")
+        try:
+            sender = OutlookTransport._sender_address(item).lower()
+            received = OutlookTransport._received_at(item)
+            to = str(safe_get(item, "To"))
+            cc = str(safe_get(item, "CC"))
 
-        attachment_names: list[str] = []
-        attachments = getattr(item, "Attachments", None)
-        att_count = int(getattr(attachments, "Count", 0) or 0) if attachments else 0
-        for i in range(1, att_count + 1):
+            attachment_names: list[str] = []
+            attachments_unreadable = False
             try:
-                name = str(getattr(attachments.Item(i), "FileName", "") or "")
+                attachments = item.Attachments
+                att_count = int(safe_get(attachments, "Count", 0) or 0)
             except Exception:
-                continue
-            if name:
-                attachment_names.append(name)
-                if "." in name:
-                    extensions[name.rsplit(".", 1)[-1].lower()] += 1
+                # Cannot tell whether this item has attachments. An empty
+                # list would assert "none", which is a filled gap (§1.1).
+                attachments, att_count = None, 0
+                attachments_unreadable = True
+            for i in range(1, att_count + 1):
+                try:
+                    name = str(safe_get(attachments.Item(i), "FileName"))
+                except Exception:
+                    attachments_unreadable = True
+                    continue
+                if name:
+                    attachment_names.append(name)
+                    if "." in name:
+                        extensions[name.rsplit(".", 1)[-1].lower()] += 1
 
-        rows.append({
-            "mailbox": mailbox,
-            "folder": folder_name,
-            "sender": sender,
-            "to": to,
-            "cc": cc,
-            "received": received.isoformat(),
-            "subject": ("[REDACTED]" if redact_subjects
-                        else str(getattr(item, "Subject", "") or "")),
-            "attachments": attachment_names,
-        })
+            row = {
+                "mailbox": mailbox,
+                "folder": folder_name,
+                "sender": sender,
+                "to": to,
+                "cc": cc,
+                "received": received.isoformat(),
+                "subject": ("[REDACTED]" if redact_subjects
+                            else str(safe_get(item, "Subject"))),
+                "attachments": attachment_names,
+            }
+            if attachments_unreadable:
+                row["attachments_unreadable"] = True
+                summary.attachments_unreadable += 1
+        except Exception:
+            summary.unreadable_items += 1
+            continue
+
+        # Stream to disk when a sink is given: a crash then costs the
+        # current item, not the whole run.
+        if sink is not None:
+            sink(row)
+        else:
+            rows.append(row)
 
         summary.total += 1
         if attachment_names:
@@ -186,13 +215,21 @@ def run_outlook_scan(namespace, mailbox: str, folder_names: list[str],
                     yield from walk(children, prefix=f"{path}/")
 
     with jsonl_path.open("w", encoding="utf-8") as f:
+        written = 0
+
+        def sink(row):
+            nonlocal written
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            written += 1
+            if written % 200 == 0:
+                f.flush()      # survive a crash with the work so far on disk
+
         for folder, path in walk(store.Folders):
-            rows, summary = scan_folder(
+            _rows, summary = scan_folder(
                 folder, mailbox=mailbox, folder_name=path, limit=limit,
-                progress=progress, redact_subjects=redact_subjects,
+                progress=progress, redact_subjects=redact_subjects, sink=sink,
             )
-            for row in rows:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            f.flush()
             summaries.append(summary)
 
     report_path = out_dir / f"OUTLOOK-SCAN-{safe_mailbox}.md"
@@ -283,8 +320,11 @@ def _render(summaries: list[ScanSummary], mailbox: str) -> str:
         lines += [
             f"## {s.folder}",
             "",
-            f"- messages: {s.total}" + (f" (+{s.skipped_non_mail} non-mail items skipped)"
-                                        if s.skipped_non_mail else ""),
+            f"- messages: {s.total}"
+            + (f" (+{s.skipped_non_mail} non-mail items skipped)"
+               if s.skipped_non_mail else "")
+            + (f" (+{s.unreadable_items} unreadable — listed as a gap)"
+               if s.unreadable_items else ""),
             f"- date range: {s.earliest or 'n/a'} to {s.latest or 'n/a'}",
             f"- with attachments: {s.with_attachments}",
             f"- internal senders: {s.internal_count} | external senders: {s.external_count}",
