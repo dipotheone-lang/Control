@@ -75,6 +75,36 @@ def test_review_appears_in_the_weekly_report(conn, tmp_path):
     assert "D-06" in report["body"]
 
 
+def test_the_gmail_continuity_deferral_is_chased_the_same_way(conn):
+    """D-09 keeps contact.ubcsis@gmail.com and revisits 16-Nov-2026.
+
+    A deferral with no chase behind it is a decision to forget. This
+    surfaces on exactly the same mechanism as D-06, which is the point
+    of driving the wording from config rather than from code.
+    """
+    silent = interim_reviews_due(REPO_CONFIG, date(2026, 9, 1))
+    assert not any("D-09" in line for line in silent)
+
+    warned = interim_reviews_due(REPO_CONFIG, date(2026, 11, 12))
+    gmail = [line for line in warned if "D-09" in line]
+    assert len(gmail) == 1
+    assert "reviews 16-Nov-2026" in gmail[0] and "4 days" in gmail[0]
+
+    overdue = interim_reviews_due(REPO_CONFIG, date(2026, 12, 1))
+    gmail = [line for line in overdue if "D-09" in line]
+    assert "15 day(s) past its 16-Nov-2026 review" in gmail[0]
+    # The standing recommendation travels with the reminder.
+    assert "10,000 messages" in gmail[0]
+    assert "company-controlled mailbox" in gmail[0]
+
+
+def test_both_interim_positions_are_chased_independently(conn):
+    """Different review dates, one mechanism, no interference."""
+    due = interim_reviews_due(REPO_CONFIG, date(2026, 12, 1))
+    assert len([line for line in due if "D-06" in line]) == 1
+    assert len([line for line in due if "D-09" in line]) == 1
+
+
 def test_weekly_report_still_works_without_a_config_dir(conn, tmp_path):
     report = weekly_report(
         conn, as_of=date(2026, 9, 30), horizon=[], open_items=[],

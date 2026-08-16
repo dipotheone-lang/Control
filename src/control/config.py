@@ -28,6 +28,10 @@ REQUIRED_FILES = (
     "mailbox-scope.yaml",
     # Nor is how it reaches the mailbox (§5.1, D-08).
     "transport.yaml",
+    # Nor whether the record survives the machine (§5.2, D-11).
+    "backup.yaml",
+    # Nor the continuity CC exception (§3.1, D-04/D-09).
+    "continuity.yaml",
 )
 
 

@@ -357,7 +357,7 @@ def cmd_doctor(args) -> int:
         config_count = len(list((control_root / "config").glob("*.yaml"))) \
             if (control_root / "config").is_dir() else 0
         print(f"  config files: {config_count}")
-        if config_count < 13:
+        if config_count < 15:
             ok = False
             print("    run: python -m control init --control-root <path>")
     else:
@@ -546,6 +546,82 @@ def cmd_classify(args) -> int:
     return 0
 
 
+def cmd_backup(args) -> int:
+    """Continuity — §5.2, decision D-11."""
+    import tempfile
+
+    import yaml
+
+    from .backup import (
+        BackupResult, continuity_lines, create_backup, create_key,
+        latest_backup, prune, resolve_destination, restore, restore_test,
+    )
+
+    control_root = Path(args.control_root)
+    config_path = control_root / "config" / "backup.yaml"
+    if not config_path.is_file():
+        print(f"no backup.yaml at {config_path}. Run 'init' first.")
+        return 1
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    today = date.fromisoformat(args.today) if args.today else date.today()
+
+    if args.init_key:
+        key = create_key(config)
+        print("A new backup encryption key has been created and stored in "
+              "the Windows credential store.\n")
+        print(f"  {key}\n")
+        print("Write it down somewhere off this machine, now. A key that")
+        print("exists only on the laptop the backup protects against is not")
+        print("a key. Without it the backups cannot be restored by anyone,")
+        print("including you.")
+        return 0
+
+    destination = resolve_destination(config)
+    print(f"destination: {destination or 'NOT CONFIGURED'}")
+
+    if args.restore:
+        archive = Path(args.archive) if args.archive else latest_backup(config)
+        if archive is None:
+            print("no backup to restore.")
+            return 1
+        target = restore(archive, Path(args.restore), config)
+        print(f"restored {archive.name} -> {target}")
+        return 0
+
+    if args.test:
+        with tempfile.TemporaryDirectory() as tmp:
+            outcome = restore_test(config, Path(tmp) / "restored")
+        if outcome.get("error"):
+            print(f"restore test: {outcome['error']}")
+            return 1
+        print(f"restore test on {outcome['archive']}")
+        print(f"  files restored: {outcome['files']}")
+        print(f"  database:       {outcome['db']}")
+        print(f"  audit chain:    {outcome['chain']}")
+        print(f"\n{'PASS' if outcome['ok'] else 'FAIL'}")
+        if outcome["ok"]:
+            print("\nRecord this in backup.yaml: restore_test.last_tested = "
+                  f"{today.isoformat()}")
+        return 0 if outcome["ok"] else 1
+
+    result: BackupResult = create_backup(control_root, config, on_date=today)
+    for gap in result.gaps:
+        print(f"GAP: {gap}")
+    if not result.written:
+        return 1
+    print(f"wrote {result.path.name}")
+    print(f"  files:     {result.files}")
+    print(f"  plaintext: {result.plaintext_bytes:,} bytes")
+    print(f"  encrypted: {result.encrypted_bytes:,} bytes")
+    print(f"  sha256:    {result.sha256[:32]}…")
+    removed = prune(config, on_date=today)
+    if removed:
+        print(f"  pruned:    {len(removed)} past retention")
+    for line in continuity_lines(config, on_date=today):
+        print(f"\n{line}")
+    return 0
+
+
 def cmd_verify(args) -> int:
     from .audit import AuditLog
     from .db import connect, integrity_check
@@ -657,6 +733,21 @@ def main(argv: list[str] | None = None) -> int:
                           help="ISO date of the decision (default: today)")
     classify.set_defaults(fn=cmd_classify)
 
+    backup = sub.add_parser(
+        "backup", help="§5.2 continuity: encrypted backup of CONTROL_ROOT")
+    backup.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    backup.add_argument("--init-key", action="store_true",
+                        help="create and store the encryption key (once)")
+    backup.add_argument("--test", action="store_true",
+                        help="§13.3 restore test: unpack the latest backup "
+                             "and verify the database and audit chain")
+    backup.add_argument("--restore", default="",
+                        help="restore into this directory")
+    backup.add_argument("--archive", default="",
+                        help="specific archive to restore (default: latest)")
+    backup.add_argument("--today", default="", help="ISO date, for testing")
+    backup.set_defaults(fn=cmd_backup)
+
     doctor = sub.add_parser("doctor",
                             help="check this machine can run Control")
     doctor.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
@@ -668,7 +759,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init",
-                         "contracts", "registers", "classify")
+                         "contracts", "registers", "classify", "backup")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:

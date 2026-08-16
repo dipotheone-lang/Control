@@ -151,48 +151,61 @@ def _flags_section(conn, since: datetime) -> list[str]:
     return lines
 
 
+# Config files that may carry an `interim:` block with a review date.
+# Every interim position is registered here, so adding one cannot
+# accidentally create a decision nothing ever chases.
+_INTERIM_FILES = ("authority.yaml", "continuity.yaml")
+
+
 def interim_reviews_due(config_dir: Path, as_of: date) -> list[str]:
-    """Interim positions whose review date has arrived.
+    """Interim positions whose review date has arrived or is close.
 
     A deliberate interim decision is legitimate; one that quietly
     outlives its review date is not. These surface every week from the
     date they fall due, so an operating position cannot become permanent
     by silence.
+
+    The wording comes from the config rather than from here, because
+    the position knows what it is and this function does not.
     """
     import yaml
 
     due: list[str] = []
-    path = Path(config_dir) / "authority.yaml"
-    if not path.is_file():
-        return due
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return due
-    interim = data.get("interim") or {}
-    if not interim.get("active"):
-        return due
-    review = interim.get("review_due")
-    if not review:
-        return due
-    review_date = review if isinstance(review, date) else None
-    if review_date is None:
+    for filename in _INTERIM_FILES:
+        path = Path(config_dir) / filename
+        if not path.is_file():
+            continue
         try:
-            review_date = datetime.fromisoformat(str(review)).date()
-        except ValueError:
-            return due
-    days = (as_of - review_date).days
-    if days >= 0:
-        due.append(
-            f"O-02 authority thresholds: interim itemise-everything is "
-            f"{days} day(s) past its {review_date:%d-%b-%Y} review (D-06). "
-            "Every commitment is still being itemised."
-        )
-    elif days >= -7:
-        due.append(
-            f"O-02 authority thresholds: interim position reviews "
-            f"{review_date:%d-%b-%Y} ({-days} days) (D-06)."
-        )
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        interim = (data.get("interim") or {}) if isinstance(data, dict) else {}
+        if not interim.get("active"):
+            continue
+        review = interim.get("review_due")
+        if not review:
+            continue
+        review_date = review if isinstance(review, date) else None
+        if review_date is None:
+            try:
+                review_date = datetime.fromisoformat(str(review)).date()
+            except ValueError:
+                continue
+
+        subject = interim.get("subject") or filename
+        position = interim.get("position") or "interim position"
+        decision = interim.get("decision") or ""
+        tag = f" ({decision})" if decision else ""
+        note = " ".join(str(interim.get("note") or "").split())
+
+        days = (as_of - review_date).days
+        if days >= 0:
+            line = (f"{subject}: {position} is {days} day(s) past its "
+                    f"{review_date:%d-%b-%Y} review{tag}.")
+            due.append(f"{line} {note}".rstrip())
+        elif days >= -7:
+            due.append(f"{subject}: interim position reviews "
+                       f"{review_date:%d-%b-%Y} ({-days} days){tag}.")
     return due
 
 
@@ -211,6 +224,27 @@ def _transport_note(config_dir: Path) -> list[str]:
         return []
     note = interim_route_note(data)
     return [note] if note else []
+
+
+def _continuity_notes(config_dir: Path, as_of: date) -> list[str]:
+    """§13.3 continuity: backup age and last restore test.
+
+    An unbacked-up hash chain can be truncated undetectably by a
+    hardware failure, so this line appears until it has nothing to say.
+    """
+    import yaml
+
+    from .backup import continuity_lines
+
+    path = Path(config_dir) / "backup.yaml"
+    if not path.is_file():
+        return ["CONTINUITY: backup.yaml is missing — CONTROL_ROOT backup "
+                "status is unknown (§5.2)."]
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return ["CONTINUITY: backup.yaml is unreadable (§5.2)."]
+    return continuity_lines(data, on_date=as_of)
 
 
 def _decisions_section(conn, as_of: date, open_decisions: list[str]) -> list[str]:
@@ -288,6 +322,7 @@ def weekly_report(
         scope = load_scope_file(config_dir)
         extra += open_precondition_lines(scope)
         extra += _transport_note(config_dir)
+        extra += _continuity_notes(config_dir, as_of)
     sections += _decisions_section(conn, as_of, open_decisions + extra)
     shared_en, shared_ar = limitation_lines(scope)
 
