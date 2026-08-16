@@ -17,6 +17,7 @@ from pathlib import Path
 from .attachments import build_submission_doc, quarantine, validate_attachment
 from .classify import Classifier, InboundMessage
 from .db import connect, insert_submission
+from .discovery.classify_worksheet import confidential_domains as _confidential_domains
 from .enforce import Absence, Action, Enforcer, TrackedItem
 from .evaluate import ObligationSpec, evaluate
 from .outbox import Disposition, Outbox, OutboundMessage
@@ -123,10 +124,8 @@ def run_cycle(
     today = today or datetime.now().date()
 
     roster_emails = {p["email"] for p in startup.config["people"]["people"]}
-    confidential_domains = {
-        d for client in startup.config["confidential"].get("confidential_clients", [])
-        for d in client.get("domains", [])
-    }
+    # Per-client NDA lists unioned with the O-04 worksheet decisions.
+    confidential_domains = _confidential_domains(startup.config["confidential"])
     obligation_forms = {
         s.spec.form_code: obligation_id for obligation_id, s in specs.items()
     }

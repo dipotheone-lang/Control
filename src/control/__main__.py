@@ -463,6 +463,88 @@ def cmd_phase0(args) -> int:
     return 0
 
 
+def cmd_classify(args) -> int:
+    """Decision O-04 — build the domain worksheet, or apply the answers."""
+    from .discovery.analyse import load_rows
+    from .discovery.classify_worksheet import (
+        apply_worksheet, build_rows, read_worksheet, write_worksheet,
+    )
+
+    control_root = Path(args.control_root)
+    discovery = control_root / "discovery"
+
+    if args.apply:
+        worksheet = Path(args.apply)
+        if not worksheet.is_file():
+            print(f"worksheet not found: {worksheet}")
+            return 1
+        decisions, problems = read_worksheet(worksheet)
+        if problems:
+            print("The worksheet has entries Control will not interpret:\n")
+            for problem in problems:
+                print(f"  {problem}")
+            print("\nNothing applied. Fix those rows and run again — a "
+                  "guessed classification is a fabrication (§1.1).")
+            return 1
+        if not decisions:
+            print("No decisions found in the worksheet. Nothing applied.")
+            return 1
+        config = control_root / "config" / "confidential.yaml"
+        if not config.is_file():
+            print(f"config not found: {config}. Run 'init' first.")
+            return 1
+        result = apply_worksheet(decisions, config, args.decided_by,
+                                 args.decided_on or date.today().isoformat())
+        import csv as _csv
+
+        with worksheet.open(encoding="utf-8-sig", newline="") as f:
+            total = sum(1 for r in _csv.DictReader(f) if (r.get("domain") or "").strip())
+        blank = total - len(decisions)
+        print(f"applied to {config}")
+        print(f"  CONFIDENTIAL:     {result['confidential']}")
+        print(f"  NOT_CONFIDENTIAL: {result['not_confidential']}")
+        print(f"  left blank:       {blank}  (stay CONFIDENTIAL)")
+        print("\nD-01 is untouched: contents of confidential items are still "
+              "never read.")
+        print("Domains left blank remain confidential by default (§12.1.1).")
+        return 0
+
+    scans = sorted(discovery.glob("outlook-scan-*.jsonl"))
+    if not scans:
+        print(f"no scan output in {discovery}. Run phase0 or outlook-scan first.")
+        return 1
+    rows: list[dict] = []
+    for scan in scans:
+        rows.extend(load_rows(scan))
+    if not rows:
+        print("scan files are empty.")
+        return 1
+
+    domains = build_rows(rows)
+    out = write_worksheet(domains, discovery / "DOMAIN-CLASSIFICATION.csv")
+
+    proposed_conf = sum(1 for d in domains if d.proposed == "CONFIDENTIAL")
+    matched = [d for d in domains if d.matched_client]
+    print(f"{len(rows)} messages, {len(domains)} external domains\n")
+    print(f"  proposed CONFIDENTIAL:     {proposed_conf}")
+    print(f"  proposed NOT_CONFIDENTIAL: {len(domains) - proposed_conf}")
+    print(f"  matching a §12.1.1 client: {len(matched)}")
+    print("\nTop counterparties by volume:")
+    for d in domains[:15]:
+        client = f"  [{d.matched_client}]" if d.matched_client else ""
+        print(f"  {d.messages:>6}  {d.domain[:42]:42} {d.proposed}{client}")
+
+    print(f"\nworksheet: {out}")
+    print("Open it, fill YOUR_DECISION with CONFIDENTIAL or NOT_CONFIDENTIAL, "
+          "then run:")
+    print(f'  python -m control classify --apply "{out}"')
+    print("\nLeave a row blank and the domain stays confidential — blanks are "
+          "never read as approval (§12.1.1).")
+    print("Outbound counts are a lower bound: Outlook reports many recipients "
+          "as display names, not addresses.")
+    return 0
+
+
 def cmd_verify(args) -> int:
     from .audit import AuditLog
     from .db import connect, integrity_check
@@ -563,6 +645,17 @@ def main(argv: list[str] | None = None) -> int:
     registers.add_argument("--today", default="", help="ISO date, for testing")
     registers.set_defaults(fn=cmd_registers)
 
+    classify = sub.add_parser(
+        "classify",
+        help="O-04: build the domain confidentiality worksheet, or apply it")
+    classify.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    classify.add_argument("--apply", default="",
+                          help="path to the filled-in worksheet CSV")
+    classify.add_argument("--decided-by", default="ahmed@ubcsis.com")
+    classify.add_argument("--decided-on", default="",
+                          help="ISO date of the decision (default: today)")
+    classify.set_defaults(fn=cmd_classify)
+
     doctor = sub.add_parser("doctor",
                             help="check this machine can run Control")
     doctor.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
@@ -574,7 +667,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init",
-                         "contracts", "registers")
+                         "contracts", "registers", "classify")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
