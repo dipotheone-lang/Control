@@ -37,6 +37,7 @@ CONFIG_FILES = (
     "escalation.yaml", "distribution.yaml", "absence.yaml",
     "statutory-calendar.yaml", "materiality.yaml", "learning-policy.yaml",
     "confidential.yaml", "mailbox-scope.yaml", "transport.yaml",
+    "backup.yaml", "continuity.yaml",
 )
 
 

@@ -17,6 +17,12 @@ interim:
   decided: 2026-08-16
   decided_by: ahmed@ubcsis.com
   review_due: 2026-09-16
+  # Wording carried into the weekly digest — the position knows what it
+  # is, the reporting code does not.
+  subject: O-02 authority thresholds
+  position: interim itemise-everything
+  decision: D-06
+  note: Every commitment is still being itemised.
   reason: >
     Observe one month of actual commitment volume and value before
     setting thresholds, so the numbers are chosen from evidence rather

@@ -1,0 +1,57 @@
+# Continuity — charter §5.2, CEO decision D-11 (16-Aug-2026)
+#
+# "Daily encrypted backup of the WHOLE of CONTROL_ROOT — database,
+#  hash-chained logs, outbox, learning records — before first write. A
+#  chain that is not backed up can be truncated undetectably by a dead
+#  laptop."
+#
+# CEO decision: back up into the company Microsoft 365 tenant
+# (OneDrive / SharePoint). Reasoning recorded because it is not
+# obvious: the mail already lives in that tenant, so this adds no new
+# processor under §12.2 and no new NDA exposure — while an external
+# drive kept in the same office does not survive the event that takes
+# the laptop.
+
+destination:
+  # Absolute path to the synced folder. Left null so it is set on the
+  # machine that will actually run, rather than guessed here.
+  #
+  # auto_detect resolves it from the Windows OneDrive environment
+  # variables when path is null: OneDriveCommercial first, then
+  # OneDrive. If neither resolves, backup reports NOT CONFIGURED and
+  # says so — it never silently writes nowhere.
+  path: null
+  auto_detect: onedrive
+  subfolder: UBCSIS-Control-Backup
+
+encryption:
+  # Non-negotiable. An unencrypted backup of this data in a synced
+  # folder would be a worse exposure than the risk it mitigates.
+  enabled: true
+  # Where the key lives. Windows Credential Manager via keyring, under
+  # this service name. Never in a file, never in this repository (§5.1).
+  keyring_service: ubcsis-control-backup
+  # Fallback for headless runs only. If both are absent, backup halts
+  # rather than writing plaintext.
+  env_var: CONTROL_BACKUP_KEY
+
+schedule:
+  daily: true
+  # §5.2: before first write. A cycle that cannot back up does not
+  # proceed to modify the record it has not protected.
+  before_first_write: true
+
+retention:
+  # Aligned with the Class C proposal in docs/governance/RETENTION-SCHEDULE.md.
+  # Confirm with counsel under O-10; until then this is the operating value.
+  keep_days: 365
+  # Always keep at least this many, however old, so a long outage can
+  # never leave zero backups on disk.
+  keep_minimum: 7
+
+restore_test:
+  # §13.3 continuity line: backup age AND last successful restore test.
+  # An untested backup is a hope, not a control.
+  every_days: 30
+  last_tested: null
+  last_result: null
