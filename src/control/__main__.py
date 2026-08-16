@@ -181,6 +181,82 @@ def cmd_analyse(args) -> int:
     return 0
 
 
+_REGISTER_ADDERS = {
+    "contracts": "add_contract",
+    "instruments": "add_instrument",
+    "accreditations": "add_accreditation",
+    "quotations": "add_quotation",
+    "tenders": "add_tender",
+}
+
+
+def cmd_registers(args) -> int:
+    """Class 2 registers (§2.2) — import rows, show the horizon."""
+    from datetime import datetime as _dt
+
+    import yaml
+
+    from . import registers as reg
+    from .db import connect
+
+    db_path = Path(args.control_root) / "data" / "control.db"
+    if not db_path.exists():
+        print(f"no database at {db_path}. Run 'init' first.")
+        return 1
+    conn = connect(db_path)
+    try:
+        if args.import_file:
+            data = yaml.safe_load(Path(args.import_file).read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                print("import file must be a mapping of register name -> list of rows")
+                return 1
+            added = 0
+            for register, rows in data.items():
+                adder = _REGISTER_ADDERS.get(register)
+                if not adder:
+                    print(f"  unknown register {register!r} — skipped "
+                          f"(expected one of {', '.join(_REGISTER_ADDERS)})")
+                    continue
+                for row in rows or []:
+                    getattr(reg, adder)(conn, **row)
+                    added += 1
+                print(f"  {register}: +{len(rows or [])} rows")
+            print(f"imported {added} rows (append-only: corrections add rows, "
+                  "they never overwrite)")
+
+        today = (_dt.fromisoformat(args.today).date() if args.today
+                 else date.today())
+        upcoming = reg.horizon(conn, today, days=args.days)
+
+        print(f"\nCLASS 2 HORIZON — next {args.days} days (and anything overdue)")
+        print(f"as of {today:%d-%b-%Y}\n")
+        if not upcoming:
+            print("  Nothing on record.")
+            print("  An empty class 2 horizon before the registers are "
+                  "populated means the registers are empty, not that the")
+            print("  company has no commercial deadlines (§1.1).")
+        for deadline in upcoming:
+            days = (deadline.item.due - today).days
+            marker = "OVERDUE" if days < 0 else f"T-{days}"
+            print(f"  {deadline.item.due:%d-%b-%Y}  {marker:>8}  "
+                  f"[{deadline.register}] {deadline.item.name[:60]}")
+            print(f"{'':32}owner: {deadline.item.owner}")
+
+        windows = reg.notice_periods(conn)
+        if windows:
+            print("\nSTANDING CLAIM/VARIATION WINDOWS (§2.2)")
+            print("  A claim not noticed within its window is generally "
+                  "forfeited. These run from an event, so no date is")
+            print("  synthesised — they are windows, not deadlines.\n")
+            for window in windows:
+                print(f"  {window['contract_ref']} ({window['client']}): "
+                      f"{window['notice_period_days']} days — "
+                      f"owner {window['owner']}")
+    finally:
+        conn.close()
+    return 0
+
+
 def cmd_contracts(args) -> int:
     """Stage C — commercial terms from documents (§6)."""
     import yaml
@@ -469,6 +545,15 @@ def main(argv: list[str] | None = None) -> int:
                            help="folder holding contracts and agreements")
     contracts.set_defaults(fn=cmd_contracts)
 
+    registers = sub.add_parser(
+        "registers", help="class 2 registers (§2.2): import rows, show the horizon")
+    registers.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    registers.add_argument("--import-file", default="",
+                           help="YAML file of register rows to append")
+    registers.add_argument("--days", type=int, default=30)
+    registers.add_argument("--today", default="", help="ISO date, for testing")
+    registers.set_defaults(fn=cmd_registers)
+
     doctor = sub.add_parser("doctor",
                             help="check this machine can run Control")
     doctor.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
@@ -480,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init",
-                         "contracts")
+                         "contracts", "registers")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
