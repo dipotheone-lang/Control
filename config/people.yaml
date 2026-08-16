@@ -25,7 +25,7 @@ people:
     role: Head of Procurement, Sales, Tendering & Proposals
     reports_to: ahmed@ubcsis.com
     tier: 3
-    confirmed: false
+    confirmed: true          # O-01, CEO, 16-Aug-2026
     # §3.2: tier 3 reporting to CEO — his overdue items escalate directly
     # to the CEO at L1 (no intermediate manager). Applied without comment.
 
@@ -41,42 +41,45 @@ people:
     role: General Accountant
     reports_to: accounts@ubcsis.com
     tier: 1
-    confirmed: false
+    confirmed: true          # O-01, CEO, 16-Aug-2026
+    # Dotted line: HR-related items escalate to HR, not to the CFO.
+    also_reports_to: hr@ubcsis.com
+    also_reports_to_domain: hr
 
   - name: Shymaa Mekkawy
     email: shymaa@ubcsis.com
     role: Senior Technical Office Engineer
-    reports_to: ghareeb@ubcsis.com
+    reports_to: ahmed@ubcsis.com    # CORRECTED from COO
     tier: 2
-    confirmed: false
+    confirmed: true          # O-01, CEO, 16-Aug-2026
 
   - name: Donia Ali
     email: donia@ubcsis.com
     role: Tendering, Proposals & Client Relations
     reports_to: info@ubcsis.com
     tier: 2
-    confirmed: false
+    confirmed: true          # O-01, CEO, 16-Aug-2026
 
   - name: Martina Adel
     email: marketing@ubcsis.com
     role: Marketing & Business Development
     reports_to: info@ubcsis.com
     tier: 1
-    confirmed: false
+    confirmed: true          # O-01, CEO, 16-Aug-2026
 
   - name: Mohamed Ali
     email: hr@ubcsis.com
     role: HR & Admin Manager
-    reports_to: ghareeb@ubcsis.com
+    reports_to: ahmed@ubcsis.com    # CORRECTED from COO
     tier: 2
-    confirmed: false
+    confirmed: true          # O-01, CEO, 16-Aug-2026
 
   - name: Ahmed Elsayed
     email: a.elsayed@ubcsis.com
     role: Senior Site Engineer / Acting PM
     reports_to: ghareeb@ubcsis.com
     tier: 2
-    confirmed: false
+    confirmed: true          # O-01, CEO, 16-Aug-2026
     # Candidate for language_mode: plain (§4 — tier-1/site recipients);
     # leave formal until the CEO sets it.
 
@@ -85,7 +88,7 @@ people:
     role: Safety Officer
     reports_to: ghareeb@ubcsis.com
     tier: 2
-    confirmed: false
+    confirmed: true          # O-01, CEO, 16-Aug-2026
 
 # Vacant posts — §3.2: both vacancies concentrate the commercial cycle in
 # Ahmed Hassan (interim). Vacancy burden is quantified monthly (§11 item 12).
