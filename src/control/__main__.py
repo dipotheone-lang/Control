@@ -7,8 +7,9 @@ Commands map to what the engine can honestly do today:
   verify     §13.3 assurance: DB integrity + audit hash chain
 
 There is deliberately no `cycle` command yet: a live cycle needs the
-Graph transport, which needs the §5.1 provisioning (O-09). The engine
-refuses to pretend otherwise.
+Graph transport, which needs the §5.1 provisioning. Decision D-08 keeps
+Phase 0 on the interim Outlook COM route and refuses it at startup in
+SUPERVISED and LIVE. The engine does not pretend otherwise.
 
 Environment defaults (§5.1): UB_ROOT, CONTROL_ROOT, RUN_MODE,
 LEARNING_MODE — flags override.
@@ -356,7 +357,7 @@ def cmd_doctor(args) -> int:
         config_count = len(list((control_root / "config").glob("*.yaml"))) \
             if (control_root / "config").is_dir() else 0
         print(f"  config files: {config_count}")
-        if config_count < 12:
+        if config_count < 13:
             ok = False
             print("    run: python -m control init --control-root <path>")
     else:

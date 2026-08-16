@@ -35,6 +35,14 @@ def env(tmp_path):
     (control_root / "data").mkdir(parents=True)
     (control_root / "logs").mkdir()
     shutil.copytree(REPO_CONFIG, control_root / "config")
+    # These tests run a SUPERVISED cycle, which D-08 does not permit on
+    # the interim Outlook route. A Phase 2 world is a Graph world, so
+    # the fixture builds one rather than weakening the gate.
+    transport = control_root / "config" / "transport.yaml"
+    transport.write_text(
+        transport.read_text(encoding="utf-8").replace(
+            "route: outlook_com", "route: graph", 1),
+        encoding="utf-8")
     startup = run_startup(control_root, ub_root, "SUPERVISED", "OBSERVE", 2, "2026-08-13")
     return startup, control_root
 

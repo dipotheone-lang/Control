@@ -26,6 +26,8 @@ REQUIRED_FILES = (
     "confidential.yaml",
     # What Control may read is not an optional file (§3.1a, D-07).
     "mailbox-scope.yaml",
+    # Nor is how it reaches the mailbox (§5.1, D-08).
+    "transport.yaml",
 )
 
 
