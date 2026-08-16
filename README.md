@@ -47,6 +47,7 @@ not convention.
 | `watchdog.py` | §8.5 | External SLA tracking; observation-worded notices; CC-compliance metric |
 | `outbox.py` | §10 | Gate table as code; external gate has no override; authenticated approval release |
 | `report.py` | §11 | Weekly report — class 1/2 horizon always first; numbers trace to rows |
+| `loader.py` | §2, §6 — config to engine: specs, roster, calendar, tracked items. Refuses to track an unapproved obligation or guess an unparseable deadline |
 | `cycle.py` | §5.6 | One sweep: state first, mailbox last, idempotent, audit-logged |
 | `transport.py` | §5.1 | Mail boundary; Graph stub raises until provisioned |
 | `discovery/` | §6 | Phase 0 Stages A–B, read-only, limitations always written |

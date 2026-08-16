@@ -6,10 +6,12 @@ Commands map to what the engine can honestly do today:
   discovery  Phase 0 Stages A-B against UB_ROOT (requires DISCOVERY state)
   verify     §13.3 assurance: DB integrity + audit hash chain
 
-There is deliberately no `cycle` command yet: a live cycle needs the
-Graph transport, which needs the §5.1 provisioning. Decision D-08 keeps
-Phase 0 on the interim Outlook COM route and refuses it at startup in
-SUPERVISED and LIVE. The engine does not pretend otherwise.
+  cycle      one sweep: fetch, classify, evaluate, enforce, gate
+
+`cycle` is what Phase 1 runs. What it sends is decided by the §10 gate
+table and the run mode, never by a flag here: in DRY_RUN it sends
+nothing at all. Decision D-08 keeps Phase 0 and Phase 1 on the interim
+Outlook route and refuses it at startup in SUPERVISED and LIVE.
 
 Environment defaults (§5.1): UB_ROOT, CONTROL_ROOT, RUN_MODE,
 LEARNING_MODE — flags override.
@@ -573,6 +575,125 @@ def cmd_classify(args) -> int:
     return 0
 
 
+def cmd_cycle(args) -> int:
+    """One sweep — §5.6 order, §10 gates, nothing sent that the mode
+    does not permit."""
+    import yaml
+
+    from .backup import ensure_daily_backup
+    from .cycle import run_cycle
+    from .db import connect
+    from .enforce import Enforcer
+    from .loader import load_class2, load_for_cycle
+    from .report import report_recipients
+
+    control_root = Path(args.control_root)
+    report = _startup(args)                      # halts on illegal state
+    today = date.fromisoformat(args.today) if args.today else date.today()
+
+    # §5.2: back up before the first write. A cycle that cannot protect
+    # the record it is about to change does not proceed silently.
+    backup_config = yaml.safe_load(
+        (control_root / "config" / "backup.yaml").read_text(encoding="utf-8")) or {}
+    backup = ensure_daily_backup(control_root, backup_config, on_date=today)
+    for gap in backup.gaps:
+        print(f"BACKUP GAP: {gap}")
+    if backup.written and backup.files:
+        print(f"backup: {backup.path.name} ({backup.files} files)")
+
+    conn = connect(report.db_path)
+    try:
+        loaded = load_for_cycle(report.config, conn, today)
+        class2 = load_class2(conn)
+        tracked = loaded.tracked + class2
+
+        people = report.config["people"]
+        ceo = _role(people, 4) or "ahmed@ubcsis.com"
+        coo = _role(people, 3, "COO")
+        cfo = _role(people, 3, "CFO")
+
+        print(f"\nobligations approved and tracked: {loaded.approved}")
+        print(f"tracked deadlines: {len(tracked)} "
+              f"(class 2 from the registers: {len(class2)})")
+        if loaded.gaps:
+            print(f"\nGAPS — {len(loaded.gaps)}. Each is a thing Control "
+                  "is NOT doing:\n")
+            for gap in loaded.gaps:
+                print(f"  - {gap}")
+
+        transport = _transport_for(report, args)
+        if transport is None:
+            print("\nNo transport available. Nothing fetched, nothing sent.")
+            print("Phase 0/1 run on Outlook (D-08); Graph is required from "
+                  "Phase 2.")
+            return 1
+
+        result = run_cycle(
+            report, transport, control_root,
+            specs=loaded.specs, tracked_items=tracked,
+            class3_state=loaded.class3_state,
+            enforcer=Enforcer(loaded.calendar, loaded.roster,
+                              ceo=ceo, coo=coo, cfo=cfo),
+            today=today, ceo=ceo, cfo=cfo, coo=coo,
+        )
+    finally:
+        conn.close()
+
+    print(f"\nprocessed:        {result.processed}")
+    print(f"verdicts:         {len(result.verdicts)}")
+    print(f"sent:             {len(result.sent)}")
+    print(f"drafted:          {len(result.drafted)}")
+    print(f"duplicates held:  {result.skipped_duplicates}")
+    if result.quarantined:
+        print(f"quarantined:      {len(result.quarantined)} — reported, never opened")
+    if result.security_events:
+        print(f"SECURITY EVENTS:  {len(result.security_events)} — see the audit log")
+    pending = len(list((control_root / "outbox" / "pending-approval").glob("*.json")))
+    if pending:
+        print(f"\n{pending} draft(s) awaiting release in "
+              f"{control_root / 'outbox' / 'pending-approval'}")
+        print("Nothing releases on silence (§10).")
+
+    recipients, note = report_recipients(report.config["distribution"])
+    print(f"\nmanagement report would go to: {', '.join(recipients) or 'nobody'}")
+    if note:
+        print(f"  {note}")
+    return 0
+
+
+def _role(people: dict, tier: int, marker: str = "") -> str:
+    for entry in people.get("people") or []:
+        if int(entry.get("tier") or 0) != tier:
+            continue
+        if marker and marker.lower() not in str(entry.get("role", "")).lower():
+            continue
+        return str(entry.get("email", "")).lower()
+    return ""
+
+
+def _transport_for(report, args):
+    """Outlook in DISCOVERY/DRY_RUN, Graph beyond — D-08 already refused
+    an illegal combination at startup, so this only picks."""
+    route = str((report.config["transport"] or {}).get("route") or "graph").lower()
+    if route == "outlook_com":
+        from .outlook import OutlookTransport
+
+        mailbox = (report.config["mailbox-scope"] or {}).get(
+            "control_mailbox") or "control@ubcsis.com"
+        try:
+            return OutlookTransport(mailbox, allow_send=args.allow_send)
+        except Exception as e:
+            print(f"Outlook not available: {str(e)[:140]}")
+            return None
+    from .transport import GraphTransport
+
+    try:
+        return GraphTransport()
+    except Exception as e:
+        print(f"Graph not available: {str(e)[:140]}")
+        return None
+
+
 def cmd_manuals(args) -> int:
     """Stage C — find the governing manuals, for CEO confirmation."""
     import yaml
@@ -833,6 +954,15 @@ def main(argv: list[str] | None = None) -> int:
                           help="ISO date of the decision (default: today)")
     classify.set_defaults(fn=cmd_classify)
 
+    cycle = sub.add_parser(
+        "cycle", help="one sweep: fetch, classify, evaluate, enforce, gate")
+    _common(cycle)
+    cycle.add_argument("--today", default="", help="ISO date, for testing")
+    cycle.add_argument("--allow-send", action="store_true",
+                       help="permit the transport to send what the §10 gate "
+                            "has already approved for this run mode")
+    cycle.set_defaults(fn=cmd_cycle)
+
     manuals = sub.add_parser(
         "manuals",
         help="Stage C: find the governing manuals, for CEO confirmation")
@@ -864,7 +994,7 @@ def main(argv: list[str] | None = None) -> int:
     doctor.set_defaults(fn=cmd_doctor)
 
     args = parser.parse_args(argv)
-    if args.command in ("startup", "discovery") and (
+    if args.command in ("startup", "discovery", "cycle") and (
             not args.control_root or not args.ub_root):
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")

@@ -147,6 +147,26 @@ an untested backup is a hope rather than a control.
 
 ---
 
+## 7. A dry run — the first time the engine actually runs
+
+```
+set RUN_MODE=DRY_RUN
+set LEARNING_MODE=OBSERVE
+python -m control cycle --control-root "%CONTROL_ROOT%" --ub-root "%UB_ROOT%"
+```
+
+**This sends nothing.** DRY_RUN is Phase 1: everything is evaluated,
+everything is drafted into `outbox\pending-approval\`, nothing leaves.
+
+Expect it to report a long list of gaps and track almost nothing. That
+is correct today — the obligation register is empty until you approve
+it, and every statutory rule is unverified until the advisor answers.
+The list is the point: each line is something Control is deliberately
+**not** doing, with the reason.
+
+Run it before the register is approved so you can see what the gap list
+looks like when it is honest. It gets shorter as the answers come in.
+
 ## What to send back
 
 1. `COMMERCIAL-EXPOSURE.md` — or just the nearest five dates
