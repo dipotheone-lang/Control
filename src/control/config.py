@@ -24,6 +24,8 @@ REQUIRED_FILES = (
     "materiality.yaml",
     "learning-policy.yaml",
     "confidential.yaml",
+    # What Control may read is not an optional file (§3.1a, D-07).
+    "mailbox-scope.yaml",
 )
 
 
@@ -72,6 +74,12 @@ def _validate(cfg: Config) -> None:
     lp = cfg["learning-policy"]
     if lp.get("learning_mode") not in ("OBSERVE", "PROPOSE", "ADAPTIVE"):
         raise HaltError("learning-policy.yaml: learning_mode must be OBSERVE|PROPOSE|ADAPTIVE")
+
+    # Raises if the scope is declared LIVE with an open precondition
+    # (§3.1a) — Control never widens its own reach.
+    from .scope import load_scope
+
+    load_scope(cfg["mailbox-scope"])
 
     conf = cfg["confidential"]
     if conf.get("processing") != "DISABLED":

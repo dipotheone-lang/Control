@@ -19,6 +19,12 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from .scope import (
+    MailboxScope, limitation_lines, load_scope_file, open_precondition_lines,
+)
+
+# Retained as the Option A wording. `scope.limitation_lines` selects the
+# line that is true of the scope actually in force (§3.1a, D-07).
 LIMITATION_SHARED_MAILBOX_EN = (
     "External SLA coverage is limited to threads copied to control@. "
     "Traffic in sales@ and procure@ is not visible to this system."
@@ -258,8 +264,14 @@ def weekly_report(
     sections.append("")
     sections += _flags_section(conn, since)
     sections.append("")
-    reviews = interim_reviews_due(config_dir, as_of) if config_dir else []
-    sections += _decisions_section(conn, as_of, open_decisions + reviews)
+    extra: list[str] = []
+    scope = MailboxScope()
+    if config_dir:
+        extra += interim_reviews_due(config_dir, as_of)
+        scope = load_scope_file(config_dir)
+        extra += open_precondition_lines(scope)
+    sections += _decisions_section(conn, as_of, open_decisions + extra)
+    shared_en, shared_ar = limitation_lines(scope)
 
     flags_rows = conn.execute(
         "SELECT signal, detail FROM anomalies WHERE posted_at >= ?",
@@ -274,7 +286,7 @@ def weekly_report(
         [f"WEEKLY CONTROL REPORT — {as_of:%d-%b-%Y}", ""]
         + sections
         + ["", "STANDING LIMITATIONS",
-           f"   {LIMITATION_SHARED_MAILBOX_EN}",
+           f"   {shared_en}",
            f"   {LIMITATION_CONFIDENTIAL_EN}"]
     )
     ar = "\n".join([
@@ -285,7 +297,7 @@ def weekly_report(
         f"بنود مفتوحة: {len(open_items)}",
         "",
         "القيود الدائمة:",
-        f"   {LIMITATION_SHARED_MAILBOX_AR}",
+        f"   {shared_ar}",
         f"   {LIMITATION_CONFIDENTIAL_AR}",
     ])
 

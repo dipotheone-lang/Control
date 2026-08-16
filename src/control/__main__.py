@@ -356,7 +356,7 @@ def cmd_doctor(args) -> int:
         config_count = len(list((control_root / "config").glob("*.yaml"))) \
             if (control_root / "config").is_dir() else 0
         print(f"  config files: {config_count}")
-        if config_count < 11:
+        if config_count < 12:
             ok = False
             print("    run: python -m control init --control-root <path>")
     else:
