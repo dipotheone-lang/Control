@@ -4,6 +4,7 @@ Commands map to what the engine can honestly do today:
 
   startup    run the §5.6 startup sequence and report the state
   discovery  Phase 0 Stages A-B against UB_ROOT (requires DISCOVERY state)
+  classify   §9 category profile over scan output, metadata only
   verify     §13.3 assurance: DB integrity + audit hash chain
 
 There is deliberately no `cycle` command yet: a live cycle needs the
@@ -178,6 +179,62 @@ def cmd_analyse(args) -> int:
             print("  NOTE: Sent Items not in this scan — unanswered count is "
                   "not reliable")
     print(f"\nreports in {discovery}")
+    return 0
+
+
+def cmd_classify(args) -> int:
+    """§9 category profile over the Stage A scan output (metadata only).
+
+    Not a live cycle: no mailbox is touched, no reply is produced, no
+    verdict is reached. The classifier is run over metadata already on
+    disk so its behaviour on real corporate mail is visible before
+    anything depends on it."""
+    from .config import load_config
+    from .discovery.classify_scan import (
+        BODY_DEPENDENT, build_classifier, classify_rows, load_rows, merge, render,
+    )
+
+    control_root = Path(args.control_root)
+    discovery = control_root / "discovery"
+    scans = sorted(discovery.glob("outlook-scan-*.jsonl"))
+    if not scans:
+        print(f"no scan output in {discovery}. Run outlook-scan or phase0 first.")
+        return 1
+
+    wanted = {m.strip().lower() for m in args.mailbox.split(",") if m.strip()}
+    config = load_config(control_root / "config")
+    classifier, limitations = build_classifier(config)
+
+    reports = []
+    for scan in scans:
+        rows = load_rows(scan)
+        if not rows:
+            print(f"{scan.name}: empty, skipped")
+            continue
+        mailbox = str(rows[0].get("mailbox") or scan.stem)
+        if wanted and mailbox.lower() not in wanted:
+            continue
+        report = classify_rows(rows, classifier, mailbox=mailbox)
+        reports.append(report)
+        top = ", ".join(f"{c} {n}" for c, n in report.by_category.most_common(4))
+        print(f"  {mailbox}: {report.rows} messages — {top}")
+
+    if not reports:
+        print("nothing matched. Check --mailbox.")
+        return 1
+
+    merged = merge(reports)
+    merged.limitations = limitations
+    out = discovery / "CLASSIFY-SCAN.md"
+    out.write_text(render(merged), encoding="utf-8")
+
+    print(f"\n{merged.rows} messages classified across {len(reports)} mailbox(es)")
+    for category, n in merged.by_category.most_common():
+        print(f"  {category:26} {n:6}  {n / merged.rows:5.1%}")
+    print(f"\nsecurity events: {len(merged.security_events)}")
+    print("NOT detectable from metadata: " + ", ".join(BODY_DEPENDENT))
+    print("  (a zero against those is a property of the input, not a finding)")
+    print(f"\nwritten: {out}")
     return 0
 
 
@@ -455,6 +512,14 @@ def main(argv: list[str] | None = None) -> int:
                       help="config template directory (default: repo config/)")
     init.set_defaults(fn=cmd_init)
 
+    classify = sub.add_parser(
+        "classify",
+        help="§9 category profile over scan output (metadata only, no mailbox access)")
+    classify.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    classify.add_argument("--mailbox", default="",
+                          help="restrict to these addresses (default: every scan)")
+    classify.set_defaults(fn=cmd_classify)
+
     contracts = sub.add_parser(
         "contracts",
         help="Stage C: extract guarantee, LD, notice and accreditation terms")
@@ -474,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init",
-                         "contracts")
+                         "contracts", "classify")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
