@@ -38,7 +38,30 @@ KNOWN_CLIENT_HINTS = {
     "galaxy": "Galaxy Chemicals", "canalsugar": "Canal Sugar",
     "canal-sugar": "Canal Sugar", "sukari": "Sukari Gold Mines",
     "airliquide": "Air Liquide", "air-liquide": "Air Liquide",
+    # Confirmed as active clients on 16-Aug-2026 from Phase 0 evidence.
+    # None were in the charter's §12.1.1 list.
+    "enova": "Enova", "suezsteel": "Suez Steel", "suez-steel": "Suez Steel",
+    "lafarge": "Lafarge", "ivldhunseri": "IVL Dhunseri",
+    "dhunseri": "IVL Dhunseri", "fertiglobe": "Fertiglobe",
 }
+
+
+def client_hints_from_config(config: dict | None) -> dict[str, str]:
+    """Derive hints from the confirmed client list.
+
+    Preferred over the constant above, so adding a client to
+    confidential.yaml does not silently leave the worksheet proposing
+    NOT_CONFIDENTIAL for its domains.
+    """
+    hints = dict(KNOWN_CLIENT_HINTS)
+    for client in (config or {}).get("confidential_clients") or []:
+        name = client.get("name")
+        if not name:
+            continue
+        for domain in client.get("domains") or []:
+            hints[str(domain).lower()] = name
+    return hints
+
 
 # Domains that are infrastructure, not counterparties.
 NOISE_HINTS = ("google.com", "googlemail.com", "microsoft.com", "outlook.com",
@@ -61,7 +84,8 @@ class DomainRow:
     note: str = ""
 
 
-def build_rows(scan_rows: list[dict]) -> list[DomainRow]:
+def build_rows(scan_rows: list[dict],
+               client_hints: dict[str, str] | None = None) -> list[DomainRow]:
     by_domain: dict[str, DomainRow] = {}
     timestamps: dict[str, list[datetime]] = defaultdict(list)
 
@@ -109,11 +133,12 @@ def build_rows(scan_rows: list[dict]) -> list[DomainRow]:
         if stamps:
             entry.first_seen = min(stamps).strftime("%Y-%m-%d")
             entry.last_seen = max(stamps).strftime("%Y-%m-%d")
+        hints = KNOWN_CLIENT_HINTS if client_hints is None else client_hints
         entry.matched_client = next(
-            (name for hint, name in KNOWN_CLIENT_HINTS.items() if hint in domain), "")
+            (name for hint, name in hints.items() if hint in domain), "")
         if entry.matched_client:
             entry.proposed = "CONFIDENTIAL"
-            entry.note = f"matches §12.1.1 client {entry.matched_client}"
+            entry.note = f"matches confirmed client {entry.matched_client}"
         elif any(hint in domain for hint in NOISE_HINTS):
             entry.proposed = "NOT_CONFIDENTIAL"
             entry.note = "platform/infrastructure, not a counterparty"

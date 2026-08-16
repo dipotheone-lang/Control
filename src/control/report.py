@@ -247,6 +247,22 @@ def _continuity_notes(config_dir: Path, as_of: date) -> list[str]:
     return continuity_lines(data, on_date=as_of)
 
 
+def _holiday_notes(config_dir: Path, as_of: date) -> list[str]:
+    """§8.3: the holiday calendar, empty or stale."""
+    import yaml
+
+    from .calendar import holiday_calendar_status
+
+    path = Path(config_dir) / "sla.yaml"
+    if not path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return ["HOLIDAY CALENDAR: sla.yaml is unreadable (§8.3)."]
+    return holiday_calendar_status(data, as_of)
+
+
 def _decisions_section(conn, as_of: date, open_decisions: list[str]) -> list[str]:
     lines = ["6. DECISIONS REQUIRED"]
     pending = conn.execute(
@@ -323,6 +339,7 @@ def weekly_report(
         extra += open_precondition_lines(scope)
         extra += _transport_note(config_dir)
         extra += _continuity_notes(config_dir, as_of)
+        extra += _holiday_notes(config_dir, as_of)
     sections += _decisions_section(conn, as_of, open_decisions + extra)
     shared_en, shared_ar = limitation_lines(scope)
 
