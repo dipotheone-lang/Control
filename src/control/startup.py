@@ -21,6 +21,7 @@ from .audit import AuditLog
 from .config import Config, load_config
 from .db import connect, init_db, integrity_check
 from .states import State, validate_state
+from .transport import assert_route_permitted
 
 
 @dataclass
@@ -61,6 +62,11 @@ def run_startup(
             f"learning-policy.yaml says {declared_mode}"
         )
     state = validate_state(maturity_level, run_mode, learning_mode)
+
+    # An interim transport route is legal only in the phases it was
+    # granted for (§5.1, D-08). Checked here, where the run mode is
+    # known, rather than left to be remembered at Phase 2.
+    assert_route_permitted(config["transport"], run_mode)
 
     # 2
     db_path = control_root / "data" / "control.db"

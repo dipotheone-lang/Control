@@ -24,6 +24,63 @@ from . import HaltError
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 _MAX_RETRIES = 3
 
+_INTERIM_ROUTES = ("outlook_com",)
+
+
+def assert_route_permitted(config: dict | None, run_mode: str) -> None:
+    """Refuse an interim transport route outside its permitted phases.
+
+    Decision D-08 keeps Outlook COM for Phase 0 and requires Graph
+    before Phase 2. The gate is enforced rather than remembered, for two
+    reasons §5.1 already implies:
+
+    Phase 2 sends on a schedule, and a transport that needs a laptop
+    powered on, Outlook running and a user logged in cannot hold one. A
+    missed class 1 alert is the most expensive failure in this charter.
+
+    And Outlook COM sees whatever the Windows profile sees — not the set
+    D-07 authorises, enforced by nothing but this process. Graph's
+    Application Access Policy is enforced by Exchange against a scoped
+    identity. A permission the system grants itself is not a control.
+    """
+    data = config or {}
+    route = str(data.get("route") or "graph").lower()
+    if route not in _INTERIM_ROUTES:
+        return
+    interim = data.get("interim") or {}
+    if not interim.get("active"):
+        return
+    permitted = [str(m).upper() for m in (interim.get("permitted_run_modes") or [])]
+    if run_mode.upper() in permitted:
+        return
+    raise HaltError(
+        f"transport route {route!r} is not permitted in RUN_MODE={run_mode} "
+        f"(D-08 permits {', '.join(permitted) or 'nothing'}). §5.1 specifies "
+        "Graph with certificate authentication for live operation: a "
+        "scheduled send cannot depend on a laptop being awake, and the "
+        "D-07 mailbox scope must be enforced by Exchange rather than by "
+        "this process. Provision Graph, or set transport.yaml route: graph."
+    )
+
+
+def interim_route_note(config: dict | None) -> str | None:
+    """One decision line while an interim route is in force."""
+    data = config or {}
+    route = str(data.get("route") or "graph").lower()
+    interim = data.get("interim") or {}
+    if route not in _INTERIM_ROUTES or not interim.get("active"):
+        return None
+    graph = data.get("graph") or {}
+    missing = [k for k in ("tenant_id", "client_id", "cert_thumbprint")
+               if not graph.get(k)]
+    detail = (f" Graph is not yet provisioned: {', '.join(missing)} unset."
+              if missing else " Graph credentials are configured; switch the "
+              "route when the Application Access Policy is in place.")
+    return (
+        f"Transport is on the interim {route} route (D-08). §5.1 specifies "
+        "Graph, and Phase 2 cannot start on this route." + detail
+    )
+
 
 @dataclass
 class FetchedMessage:

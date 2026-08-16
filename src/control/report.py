@@ -196,6 +196,23 @@ def interim_reviews_due(config_dir: Path, as_of: date) -> list[str]:
     return due
 
 
+def _transport_note(config_dir: Path) -> list[str]:
+    """The interim transport route, while one is in force (D-08)."""
+    import yaml
+
+    from .transport import interim_route_note
+
+    path = Path(config_dir) / "transport.yaml"
+    if not path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    note = interim_route_note(data)
+    return [note] if note else []
+
+
 def _decisions_section(conn, as_of: date, open_decisions: list[str]) -> list[str]:
     lines = ["6. DECISIONS REQUIRED"]
     pending = conn.execute(
@@ -270,6 +287,7 @@ def weekly_report(
         extra += interim_reviews_due(config_dir, as_of)
         scope = load_scope_file(config_dir)
         extra += open_precondition_lines(scope)
+        extra += _transport_note(config_dir)
     sections += _decisions_section(conn, as_of, open_decisions + extra)
     shared_en, shared_ar = limitation_lines(scope)
 
