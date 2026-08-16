@@ -17,7 +17,10 @@ from pathlib import Path
 from .attachments import build_submission_doc, quarantine, validate_attachment
 from .classify import Classifier, InboundMessage
 from .db import connect, insert_submission
-from .discovery.classify_worksheet import confidential_domains as _confidential_domains
+from .discovery.classify_worksheet import (
+    confidential_domains as _confidential_domains,
+)
+from .discovery.classify_worksheet import known_domains as _known_domains
 from .enforce import Absence, Action, Enforcer, TrackedItem
 from .evaluate import ObligationSpec, evaluate
 from .outbox import Disposition, Outbox, OutboundMessage
@@ -117,6 +120,7 @@ def run_cycle(
     today: date | None = None,
     ceo: str,
     cfo: str,
+    coo: str | None = None,
 ) -> CycleReport:
     control_root = Path(control_root)
     audit = startup.audit
@@ -133,11 +137,22 @@ def run_cycle(
         roster_emails=roster_emails,
         obligation_forms=obligation_forms,
         confidential_domains=confidential_domains,
-        known_domains=confidential_domains,
+        # Wider than the confidential set on purpose: a spoofed supplier
+        # is the §7.3 S1 vector, and suppliers are not under NDA.
+        known_domains=_known_domains(startup.config["confidential"]),
     )
-    outbox = Outbox(control_root, startup.state.run_mode, ceo=ceo)
-    known = _known_dedupe_keys(outbox)
     conn = connect(startup.db_path)
+    # §3.3, extended to draft release: the COO deputises only while the
+    # CEO's absence is REGISTERED. Read from the register, never from a
+    # flag the deputy could set.
+    ceo_absent = bool(conn.execute(
+        "SELECT 1 FROM absence WHERE email = ? AND from_date <= ?"
+        " AND to_date >= ? LIMIT 1",
+        (ceo, today.isoformat(), today.isoformat()),
+    ).fetchone())
+    outbox = Outbox(control_root, startup.state.run_mode, ceo=ceo,
+                    coo=coo, ceo_absent=ceo_absent)
+    known = _known_dedupe_keys(outbox)
 
     try:
         # ---- inbound ----------------------------------------------------

@@ -102,14 +102,31 @@ def _domain(email: str) -> str:
 
 class Outbox:
     def __init__(self, control_root: Path, run_mode: str, ceo: str,
-                 backup_cc: str = BACKUP_CC):
+                 backup_cc: str = BACKUP_CC, coo: str | None = None,
+                 ceo_absent: bool = False):
         self.pending = Path(control_root) / "outbox" / "pending-approval"
         self.sent_dir = Path(control_root) / "outbox" / "sent"
         self.pending.mkdir(parents=True, exist_ok=True)
         self.sent_dir.mkdir(parents=True, exist_ok=True)
         self.run_mode = run_mode
         self.ceo = ceo.lower()
+        self.coo = (coo or "").lower()
+        # §3.3, extended to draft release on 16-Aug-2026: during
+        # REGISTERED CEO absence the COO deputises. Not a standing
+        # delegation — the flag is set from the absence register, so an
+        # unregistered absence does not open the gate, and a deputy
+        # cannot appoint themselves.
+        self.ceo_absent = bool(ceo_absent)
         self.backup_cc = backup_cc
+
+    def _may_release(self, sender: str) -> tuple[bool, bool]:
+        """(permitted, deputised) for this authenticated sender."""
+        sender = sender.lower()
+        if sender == self.ceo:
+            return True, False
+        if self.coo and sender == self.coo and self.ceo_absent:
+            return True, True
+        return False, False
 
     # -- gate enforcement --------------------------------------------------
 
@@ -183,7 +200,14 @@ class Outbox:
         if not path.exists():
             raise ApprovalAuthenticationError(f"no pending draft {draft_id!r}")
 
-        if authenticated_sender.lower() != self.ceo:
+        permitted, deputised = self._may_release(authenticated_sender)
+        if not permitted:
+            if self.coo and authenticated_sender.lower() == self.coo:
+                raise ApprovalAuthenticationError(
+                    f"approval sender {authenticated_sender!r} is the COO, but "
+                    "no CEO absence is registered — the deputy path opens from "
+                    "the absence register, never from the deputy (§3.3)"
+                )
             raise ApprovalAuthenticationError(
                 f"approval sender {authenticated_sender!r} is not the CEO — security event (§13.2)"
             )
@@ -199,6 +223,11 @@ class Outbox:
         record = json.loads(path.read_text(encoding="utf-8"))
         record["status"] = "APPROVED"
         record["approved_by"] = authenticated_sender
+        # §3.3: every deputised approval is logged as such, so the
+        # record shows who actually released it and under what authority.
+        record["deputised"] = deputised
+        if deputised:
+            record["deputised_for"] = self.ceo
         record["approval_message_id"] = message_id
         record["approved_at"] = datetime.now(timezone.utc).isoformat()
         (self.sent_dir / f"{draft_id}.json").write_text(
