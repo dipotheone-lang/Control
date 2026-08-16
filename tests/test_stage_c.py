@@ -96,19 +96,63 @@ def test_report_sorts_by_urgency_and_separates_past(tmp_path):
     assert "2026-02-01" in passed
 
 
-def test_report_states_the_charter_conflict(tmp_path):
+def test_d05_is_off_by_default(tmp_path):
+    """The exception must be switched on deliberately, never assumed."""
     (tmp_path / "KNAUF").mkdir()
     (tmp_path / "KNAUF" / "master-agreement.txt").write_text(
         _contract_text(), encoding="utf-8")
     result = run_stage_c(tmp_path, CLIENTS, FOLDERS)
+
+    assert len(result.blocked) == 1
+    assert result.d05_extracted == []
+    assert result.terms == []
+
+
+def test_d05_extracts_dates_but_never_clause_text(tmp_path):
+    (tmp_path / "KNAUF").mkdir()
+    (tmp_path / "KNAUF" / "master-agreement.txt").write_text(
+        _contract_text(), encoding="utf-8")
+    result = run_stage_c(tmp_path, CLIENTS, FOLDERS,
+                         permit_confidential_dates=True)
+
+    assert result.blocked == []
+    assert result.d05_extracted == ["KNAUF/master-agreement.txt"]
+    assert result.terms, "dates should have been extracted"
+
+    # The value survives; the clause text does not — and the redaction
+    # happens at capture, so no report template can leak it.
+    dated = [t for t in result.terms if t.found_date]
+    assert any(t.found_date == "2026-11-30" for t in dated)
+    for term in result.terms:
+        assert term.context.startswith("[REDACTED")
+        for fragment in ("Contractor", "liquidated damages of 0.5%",
+                         "Taking Over", "net 60"):
+            assert fragment not in term.context
+
+
+def test_d05_keeps_only_dated_terms_from_confidential_documents(tmp_path):
+    (tmp_path / "KNAUF").mkdir()
+    (tmp_path / "KNAUF" / "agreement.txt").write_text(
+        "Retention money of 5% shall be held.\n"
+        "The performance bond is valid until 30/11/2026.\n", encoding="utf-8")
+    result = run_stage_c(tmp_path, CLIENTS, FOLDERS,
+                         permit_confidential_dates=True)
+    # An undated term from a confidential document would carry no value
+    # and only risk disclosure, so it is not retained at all.
+    assert all(t.found_date for t in result.terms)
+
+
+def test_report_scopes_itself_to_d05(tmp_path):
+    (tmp_path / "KNAUF").mkdir()
+    (tmp_path / "KNAUF" / "master-agreement.txt").write_text(
+        _contract_text(), encoding="utf-8")
+    result = run_stage_c(tmp_path, CLIENTS, FOLDERS,
+                         permit_confidential_dates=True)
     text = render_commercial_exposure(result, today=date(2026, 8, 15))
 
-    assert "incomplete by design" in text
-    assert "D-01" in text
-    assert "cannot see a guarantee expiry" in text
-    assert "governance decision, not a technical one" in text
-    assert "must not happen by a code change" in text
-    # All three options put to the CEO
-    assert "Accept the gap" in text
-    assert "written amendment to D-01" in text
-    assert "Extract the dates manually" in text
+    assert "dates extracted under D-05" in text
+    assert "No clause text is stored" in text
+    assert "does not widen §12.1 for anything else" in text
+    # Still honest about what remains invisible
+    assert "claim not noticed within its window is generally forfeited" in text
+    assert "need OCR above the §5.5 confidence floor" in text
