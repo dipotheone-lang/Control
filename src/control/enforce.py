@@ -33,6 +33,16 @@ class Person:
     email: str
     manager: str | None
     tier: int
+    # Matrix reporting: a second line that owns a specific domain. Hadeer
+    # reports to the CFO, but to HR on HR matters — escalating an HR item
+    # to the CFO would route a personnel question to the wrong manager.
+    also_manager: str | None = None
+    also_domain: str | None = None
+
+    def manager_for(self, domain: str | None) -> str | None:
+        if domain and self.also_domain and domain == self.also_domain:
+            return self.also_manager
+        return self.manager
 
 
 @dataclass
@@ -45,6 +55,7 @@ class TrackedItem:
     financial: bool = False        # class 3: L2 adds CFO instead of COO
     monthly: bool = False          # class 3: pre-reminder at -48h instead of -24h
     schedule: tuple | None = None  # class 1/2 override (tender, instrument, …)
+    domain: str | None = None      # selects a matrix manager (e.g. "hr")
 
 
 @dataclass
@@ -140,7 +151,7 @@ class Enforcer:
 
         due = self.cal.shift_deadline(item.due)
         owner = self.roster.get(item.owner)
-        manager = owner.manager if owner else None
+        manager = owner.manager_for(item.domain) if owner else None
 
         # §3.3: never escalate an item owned by someone on registered leave.
         if absence is not None:
