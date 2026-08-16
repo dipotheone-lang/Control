@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .attachments import build_submission_doc, quarantine, validate_attachment
 from .classify import Classifier, InboundMessage
+from .config import known_addresses
 from .db import connect, insert_submission
 from .discovery.classify_worksheet import (
     confidential_domains as _confidential_domains,
@@ -127,7 +128,10 @@ def run_cycle(
     report = CycleReport()
     today = today or datetime.now().date()
 
-    roster_emails = {p["email"] for p in startup.config["people"]["people"]}
+    # All three lists in people.yaml, not just `people:` — vacancies
+    # carry live traffic and special addresses are recognised senders
+    # (§13.2). Leavers are excluded on purpose.
+    roster_emails = known_addresses(startup.config["people"])
     # Per-client NDA lists unioned with the O-04 worksheet decisions.
     confidential_domains = _confidential_domains(startup.config["confidential"])
     obligation_forms = {

@@ -68,6 +68,9 @@ def build_roster(people_config: dict | None) -> dict[str, Person]:
         email = str(entry.get("email") or "").lower()
         if not email:
             continue
+        # A leaver owns nothing and is escalated to by nobody (§3.3).
+        if entry.get("active") is False:
+            continue
         roster[email] = Person(
             email=email,
             manager=(str(entry["reports_to"]).lower()

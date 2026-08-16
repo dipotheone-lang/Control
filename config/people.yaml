@@ -105,7 +105,67 @@ vacancies:
     tier: 1
 
 # Special addresses — §3.1. Never reminded, never escalated to.
+# Former employees — confirmed by the CEO 16-Aug-2026 from the Phase 0
+# scan. §3.3: leavers deactivate same-day, and reminders to deactivated
+# addresses suppress AND log — silent suppression is indistinguishable
+# from a system that simply missed them.
+#
+# `active: false` also removes them from the recognised-sender set, on
+# purpose: mail arriving from a departed employee's address is exactly
+# the impersonation case §13.2 exists for, and folding leavers back into
+# the roster would silence it.
+#
+# left_on is NULL rather than guessed. The CEO's instruction was to use
+# last-seen marked as inferred; last_seen below is month-precision from
+# the scan summary, and the exact date is in the Phase 0 scan output.
+# An inferred date is good enough to suppress a reminder and nothing
+# else — if one of these ever matters in a labour context the real date
+# comes from HR (§1.1).
+leavers:
+  - name: NOT PROVIDED
+    email: mahmoud.diab@ubcsis.com
+    active: false
+    left_on: null
+    left_on_source: INFERRED_FROM_MAIL
+    last_seen: 2025-08
+    messages_observed: 11
+    hr_confirmation_pending: true
+  - name: NOT PROVIDED
+    email: rania@ubcsis.com
+    active: false
+    left_on: null
+    left_on_source: INFERRED_FROM_MAIL
+    last_seen: 2025-08
+    messages_observed: 10
+    hr_confirmation_pending: true
+  - name: NOT PROVIDED
+    email: mariam@ubcsis.com
+    active: false
+    left_on: null
+    left_on_source: INFERRED_FROM_MAIL
+    last_seen: 2025-08
+    messages_observed: 3
+    hr_confirmation_pending: true
+  - name: NOT PROVIDED
+    email: moustafa@ubcsis.com
+    active: false
+    left_on: null
+    left_on_source: INFERRED_FROM_MAIL
+    last_seen: 2022-06
+    messages_observed: 5
+    hr_confirmation_pending: true
+
 special_addresses:
+  - address: cpanel@ubcsis.com
+    type: SYSTEM_NOISE
+    rules: >
+      Hosting control-panel address, not a person. Still sending in
+      Aug-2026, including to control@ itself, so it is a system address
+      rather than a leaver — treating it as a leaver would deactivate
+      an address that is legitimately active. Never reminded, never
+      escalated to, never expected to submit. Log only.
+      Confirmed by the CEO 16-Aug-2026 from the Phase 0 scan.
+
   - address: contact.ubcsis@gmail.com
     type: BACKUP_CHANNEL
     rules: >
