@@ -1,3 +1,5 @@
+> **Superseded for day-to-day use by `docs/RUNBOOK.md`**, which carries the current commands end to end. This file is kept for the background it records.
+
 # CEO DECISION PACK — Phase 0 gate
 
 **For:** Ahmed Diab, CEO — sole authority to amend the charter (§17)

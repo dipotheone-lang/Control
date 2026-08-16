@@ -1,3 +1,5 @@
+> **Superseded for day-to-day use by `docs/RUNBOOK.md`**, which carries the current commands end to end. This file is kept for the background it records.
+
 # Phase 0 Runbook — connecting the mailbox and folders
 
 This is the step-by-step to take Control from repository to a live

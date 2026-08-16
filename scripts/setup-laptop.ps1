@@ -14,6 +14,7 @@
 #>
 param(
     [string]$ControlRoot = "$env:USERPROFILE\Documents\UnitedBrothers\CONTROL",
+    [string]$UbRoot = "E:\UBCSIS Co Date Jan 2026",
     [switch]$SkipInstall
 )
 
@@ -23,6 +24,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 Write-Host "== Control - machine setup ==" -ForegroundColor Cyan
 Write-Host "repository:   $repo"
 Write-Host "CONTROL_ROOT: $ControlRoot"
+Write-Host "UB_ROOT:      $UbRoot"
 Write-Host ""
 
 # ---- 1. dependencies ------------------------------------------------------
@@ -57,6 +59,17 @@ Write-Host "== Step 3: environment ==" -ForegroundColor Cyan
 $env:CONTROL_ROOT = $ControlRoot
 Write-Host "  CONTROL_ROOT set for this user (new shells will have it)"
 
+# UB_ROOT is the company folder (open decision O-09, closed 16-Aug-2026).
+# The cycle and discovery commands refuse to run without it rather than
+# operating on a partial view (charter 13.2).
+[Environment]::SetEnvironmentVariable("UB_ROOT", $UbRoot, "User")
+$env:UB_ROOT = $UbRoot
+Write-Host "  UB_ROOT set for this user"
+if (-not (Test-Path -LiteralPath $UbRoot)) {
+    Write-Host "  WARNING: $UbRoot is not reachable from this machine." -ForegroundColor Yellow
+    Write-Host "  Startup halts on an unreachable UB_ROOT. Re-run with -UbRoot <path>."
+}
+
 # ---- 4. readiness ---------------------------------------------------------
 Write-Host ""
 Write-Host "== Step 4: readiness ==" -ForegroundColor Cyan
@@ -77,7 +90,8 @@ if ($doctorExit -eq 0) {
 } else {
     Write-Host "Setup finished with warnings - see above." -ForegroundColor Yellow
 }
-Write-Host "Run Phase 0 discovery with:  python -m control phase0"
+Write-Host "Next: docs\RUNBOOK.md - the commands in order."
+Write-Host "Start with:  python -m control contracts"
 Write-Host ""
 Write-Host "Reminder: CONTROL_ROOT holds mail-derived data and is not in git."
 Write-Host "Back it up encrypted, daily, in full (charter 5.2)."

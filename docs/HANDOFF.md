@@ -1,3 +1,5 @@
+> **Superseded for day-to-day use by `docs/RUNBOOK.md`**, which carries the current commands end to end. This file is kept for the background it records.
+
 # Handoff brief — for a Claude Code session running on the UBCSIS laptop
 
 You are picking up a build already in progress. This file is the
