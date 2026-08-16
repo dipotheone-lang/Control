@@ -286,12 +286,13 @@ def cmd_contracts(args) -> int:
         print(f"source folder not found: {source}")
         return 1
 
-    clients, folders = [], []
+    clients, folders, projects = [], [], []
     config = control_root / "config" / "confidential.yaml"
     if config.is_file():
         data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
         clients = [c.get("name", "") for c in data.get("confidential_clients", [])]
         folders = list(data.get("confidential_folders") or [])
+        projects = list(data.get("confidential_projects") or [])
     else:
         print("WARNING: config/confidential.yaml not found — falling back to the "
               "§12.1.1 default client list. Run 'init' first.")
@@ -304,7 +305,8 @@ def cmd_contracts(args) -> int:
         print("D-05 ACTIVE: dates and term durations will be extracted from "
               "confidential contracts; no clause text is retained.")
     result = run_stage_c(source, clients, folders, exclude=[control_root],
-                         permit_confidential_dates=args.confidential_dates)
+                         permit_confidential_dates=args.confidential_dates,
+                         confidential_projects=projects)
 
     out = control_root / "discovery" / "COMMERCIAL-EXPOSURE.md"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -571,6 +573,77 @@ def cmd_classify(args) -> int:
     return 0
 
 
+def cmd_manuals(args) -> int:
+    """Stage C — find the governing manuals, for CEO confirmation."""
+    import yaml
+
+    from .discovery.manuals import (
+        CANDIDATE_THRESHOLD, render_manual_inventory, score_candidate,
+    )
+    from .discovery.stage_c import (
+        READABLE_SUFFIXES, SCANNED_SUFFIXES, classify_confidential, extract_text,
+    )
+
+    control_root = Path(args.control_root)
+    if not args.source:
+        print("no --source and no UB_ROOT set. Nothing scanned.")
+        return 1
+    source = Path(args.source)
+    if not source.is_dir():
+        print(f"source folder not found: {source}")
+        return 1
+
+    clients, folders, projects = [], [], []
+    config = control_root / "config" / "confidential.yaml"
+    if config.is_file():
+        data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+        clients = [c.get("name", "") for c in data.get("confidential_clients", [])]
+        folders = list(data.get("confidential_folders") or [])
+        projects = list(data.get("confidential_projects") or [])
+
+    print(f"scanning {source} for governing manuals")
+    candidates = []
+    for path in sorted(source.rglob("*")):
+        if not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        if suffix not in READABLE_SUFFIXES and suffix not in SCANNED_SUFFIXES:
+            continue
+        if path.resolve().is_relative_to(control_root.resolve()):
+            continue
+        relative = str(path.relative_to(source))
+        confidential, _ = classify_confidential(
+            Path(relative), clients, folders, projects)
+        # A confidential manual is still scored — on its filename only.
+        # D-01 forbids opening it, and D-05 covers contracts, not manuals.
+        text = None if (confidential or suffix in SCANNED_SUFFIXES) \
+            else extract_text(path)
+        candidate = score_candidate(relative, text)
+        candidate.confidential = confidential
+        if candidate.score >= CANDIDATE_THRESHOLD:
+            candidates.append(candidate)
+
+    out = control_root / "discovery" / "MANUAL-INVENTORY.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_manual_inventory(candidates, expected=args.expected),
+                   encoding="utf-8")
+
+    high = [c for c in candidates if c.confidence == "HIGH"]
+    print(f"\ncandidates:      {len(candidates)}")
+    print(f"high confidence: {len(high)} (charter expects {args.expected})")
+    for candidate in sorted(high, key=lambda c: -c.score)[:15]:
+        print(f"  {candidate.score:>3}  {candidate.path[:70]}")
+    if len(high) < args.expected:
+        print(f"\nGAP: {args.expected - len(high)} of the {args.expected} "
+              "manuals are not accounted for at high confidence.")
+        print("They may be named differently, unreadable, or not written. "
+              "Which it is changes what C6 can claim (§1.1).")
+    print(f"\nwritten: {out}")
+    print("Tick the governing manuals in that file; clause extraction runs "
+          "only against confirmed ones.")
+    return 0
+
+
 def cmd_backup(args) -> int:
     """Continuity — §5.2, decision D-11."""
     import tempfile
@@ -760,6 +833,16 @@ def main(argv: list[str] | None = None) -> int:
                           help="ISO date of the decision (default: today)")
     classify.set_defaults(fn=cmd_classify)
 
+    manuals = sub.add_parser(
+        "manuals",
+        help="Stage C: find the governing manuals, for CEO confirmation")
+    manuals.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    manuals.add_argument("--source", default=os.environ.get("UB_ROOT", ""),
+                         help="folder to scan (default: UB_ROOT)")
+    manuals.add_argument("--expected", type=int, default=12,
+                         help="how many manuals the charter names (§6)")
+    manuals.set_defaults(fn=cmd_manuals)
+
     backup = sub.add_parser(
         "backup", help="§5.2 continuity: encrypted backup of CONTROL_ROOT")
     backup.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
@@ -786,7 +869,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init",
-                         "contracts", "registers", "classify", "backup")
+                         "contracts", "registers", "classify", "backup",
+                         "manuals")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:

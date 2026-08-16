@@ -106,8 +106,51 @@ class StageCResult:
     unreadable: list = field(default_factory=list)  # scanned/OCR needed
 
 
+# Words that identify an industry, not a counterparty. A client name
+# reduced to one of these matches half a contracting company's folders,
+# and the resulting noise hides the gap it pretends to protect.
+_GENERIC_TOKENS = {
+    "air", "and", "canal", "chemical", "chemicals", "co", "company",
+    "construction", "contracting", "egypt", "energy", "engineering", "for",
+    "gold", "group", "holding", "industrial", "industries", "international",
+    "ltd", "materials", "mines", "misr", "sae", "services", "steel", "sugar",
+    "supplies", "the", "trading",
+}
+_MIN_TOKEN = 5
+
+
+def _normalise(text: str) -> str:
+    """Lowercase, with every non-alphanumeric run reduced to a space.
+
+    Matching then happens on whole words, so "Air Liquide" cannot be
+    matched by the "air" inside "repair schedule.xlsx".
+    """
+    return " " + "".join(
+        c if c.isalnum() else " " for c in str(text).lower()).strip() + " "
+
+
+def match_tokens(name: str) -> list[str]:
+    """The strings that identify this client in a path.
+
+    The full name always counts. Individual words count only if they are
+    long enough and specific enough to mean this client and not an
+    industry — so "Suez Steel" matches a folder named for Suez Steel,
+    but not every steel supplier on the drive.
+    """
+    normalised = _normalise(name).strip()
+    if not normalised:
+        return []
+    tokens = [normalised]
+    for word in normalised.split():
+        if len(word) >= _MIN_TOKEN and word not in _GENERIC_TOKENS:
+            tokens.append(word)
+    return tokens
+
+
 def classify_confidential(path: Path, confidential_clients: list[str],
-                          confidential_folders: list[str]) -> tuple[bool, str]:
+                          confidential_folders: list[str],
+                          confidential_projects: list[str] | None = None,
+                          ) -> tuple[bool, str]:
     """§12.1.1, conservative by design: if in doubt, confidential.
 
     `path` must be RELATIVE to the scan root. Classifying on an absolute
@@ -115,15 +158,34 @@ def classify_confidential(path: Path, confidential_clients: list[str],
     data sits under, say, "Confidential Backup" would mark every
     document confidential. That is not caution, it is noise, and it
     would hide the gap it pretends to protect.
+
+    Folder names carry the same weight as filenames, which is the CEO's
+    decision of 16-Aug-2026: a folder named for a client is confidential
+    and so is everything in it. §12.1.1 already says as much — the
+    folder rule simply had nothing to consult until the inventory ran.
     """
-    text = str(path).lower()
+    text = _normalise(path)
+    segments = [_normalise(part).strip() for part in Path(path).parts]
+
     for folder in confidential_folders:
-        if folder and folder.lower() in text:
+        needle = _normalise(folder).strip()
+        if needle and needle in text:
             return True, f"inside folder classified confidential: {folder}"
+
     for client in confidential_clients:
-        token = client.lower().split()[0]
-        if token and token in text:
-            return True, f"filename or path references {client}"
+        for token in match_tokens(client):
+            if f" {token} " not in text:
+                continue
+            where = ("folder named for the client"
+                     if any(token in segment for segment in segments[:-1])
+                     else "filename references the client")
+            return True, f"{where}: {client}"
+
+    for project in confidential_projects or []:
+        needle = _normalise(project).strip()
+        if needle and f" {needle} " in text:
+            return True, f"project mapped to a confidential client: {project}"
+
     for marker in ("confidential", "proprietary", "restricted", "nda", "سري"):
         if marker in text:
             return True, f"document marked {marker}"
@@ -219,7 +281,8 @@ def find_terms(text: str, source: str, window: int = 120) -> list[CommercialTerm
 def run_stage_c(root: Path, confidential_clients: list[str],
                 confidential_folders: list[str],
                 exclude: list[Path] | None = None,
-                permit_confidential_dates: bool = False) -> StageCResult:
+                permit_confidential_dates: bool = False,
+                confidential_projects: list[str] | None = None) -> StageCResult:
     root = Path(root)
     excluded = [Path(e).resolve() for e in (exclude or [])]
     result = StageCResult()
@@ -235,7 +298,8 @@ def run_stage_c(root: Path, confidential_clients: list[str],
 
         relative = str(path.relative_to(root))
         confidential, reason = classify_confidential(
-            Path(relative), confidential_clients, confidential_folders)
+            Path(relative), confidential_clients, confidential_folders,
+            confidential_projects)
 
         if confidential and not permit_confidential_dates:
             record = DocumentRecord(path=relative, confidential=True, reason=reason,

@@ -247,6 +247,75 @@ def _continuity_notes(config_dir: Path, as_of: date) -> list[str]:
     return continuity_lines(data, on_date=as_of)
 
 
+def vacancy_burden(conn, people: dict | None, since: datetime) -> list[str]:
+    """§3.2 — the standing monthly line quantifying the vacancies.
+
+        "One standing monthly line quantifying both vacancy burdens as
+         hiring evidence: reporting load, transaction volume, and value
+         passing through the interim arrangement."
+
+    The charter is careful that this is evidence, not an allegation, and
+    the wording here keeps that: it counts what passed through one pair
+    of hands. It does not characterise anyone, and it never implies that
+    anything went wrong — the point is that a structural gap nobody
+    measures is a gap nobody fills.
+    """
+    people = people or {}
+    vacant = list(people.get("vacancies") or [])
+    if not vacant:
+        return []
+
+    interim = sorted({str(p.get("interim") or "") for p in vacant} - {""})
+    holders = interim or ["the interim holder"]
+    lines = [
+        f"SOD / VACANCY BURDEN (§3.2): {len(vacant)} vacant role(s) — "
+        + ", ".join(sorted(str(p.get("role", "?")) for p in vacant))
+        + f". Covered on an interim basis by {', '.join(holders)}."
+    ]
+
+    counted = False
+    for holder in interim:
+        submissions = conn.execute(
+            "SELECT COUNT(*) FROM submissions WHERE submitted_by = ?"
+            " AND posted_at >= ?", (holder, since.isoformat(sep=" ")),
+        ).fetchone()[0]
+        threads = conn.execute(
+            "SELECT COUNT(DISTINCT thread_id) FROM external_threads"
+            " WHERE owner = ? AND posted_at >= ?",
+            (holder, since.isoformat(sep=" ")),
+        ).fetchone()[0]
+        quotes = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(amount), 0), "
+            " COUNT(DISTINCT currency_code) FROM registers_quotations"
+            " WHERE owner = ?", (holder,),
+        ).fetchone()
+        if not (submissions or threads or quotes[0]):
+            continue
+        counted = True
+        # §5.2: never total across currencies without a stated basis.
+        value = (f"{quotes[1]:,.0f} EGP" if quotes[2] <= 1
+                 else f"{quotes[0]} quotations across {quotes[2]} currencies "
+                      "— not totalled, no stated FX basis")
+        lines.append(
+            f"   {holder}: {submissions} submission(s), {threads} external "
+            f"thread(s) owned, {quotes[0]} quotation(s) on the register "
+            f"({value})."
+        )
+
+    if not counted:
+        lines.append(
+            "   No transaction volume recorded yet against the interim "
+            "holder(s). This is an empty register, not a light workload — "
+            "the figures become evidence once Phase 2 is running (§1.1)."
+        )
+    lines.append(
+        "   Standing recommendation (§3.2): of the two vacancies, filling "
+        "procurement first restores the more valuable separation, because "
+        "it splits cost from price."
+    )
+    return lines
+
+
 def _holiday_notes(config_dir: Path, as_of: date) -> list[str]:
     """§8.3: the holiday calendar, empty or stale."""
     import yaml
@@ -261,6 +330,19 @@ def _holiday_notes(config_dir: Path, as_of: date) -> list[str]:
     except Exception:
         return ["HOLIDAY CALENDAR: sla.yaml is unreadable (§8.3)."]
     return holiday_calendar_status(data, as_of)
+
+
+def _vacancy_notes(conn, config_dir: Path, since: datetime) -> list[str]:
+    import yaml
+
+    path = Path(config_dir) / "people.yaml"
+    if not path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    return vacancy_burden(conn, data, since)
 
 
 def _decisions_section(conn, as_of: date, open_decisions: list[str]) -> list[str]:
@@ -340,6 +422,7 @@ def weekly_report(
         extra += _transport_note(config_dir)
         extra += _continuity_notes(config_dir, as_of)
         extra += _holiday_notes(config_dir, as_of)
+        extra += _vacancy_notes(conn, config_dir, since)
     sections += _decisions_section(conn, as_of, open_decisions + extra)
     shared_en, shared_ar = limitation_lines(scope)
 
