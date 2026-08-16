@@ -139,8 +139,15 @@ def s1_award_concentration(awards: list[dict], *, run_length: int = 3) -> Flag |
 
 
 def s1_out_of_hours(submitted_at: datetime, working_hours: dict | None) -> Flag | None:
-    """Silent until working hours are configured (O-11, §8.3)."""
+    """Silent until working hours are configured and confirmed (O-11, §8.3).
+
+    The confirmation is part of the precondition, not paperwork around
+    it. This signal produces observations about when named people work;
+    an unconfirmed config edit must not be able to switch that on.
+    """
     if not working_hours or not working_hours.get("start") or not working_hours.get("end"):
+        return None
+    if not working_hours.get("confirmed_by_ceo"):
         return None
     start = datetime.strptime(working_hours["start"], "%H:%M").time()
     end = datetime.strptime(working_hours["end"], "%H:%M").time()
