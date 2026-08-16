@@ -19,6 +19,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from . import HaltError
+from .scope import (
+    MailboxScope, limitation_lines, load_scope_file, open_precondition_lines,
+)
+
+# Retained as the Option A wording. `scope.limitation_lines` selects the
+# line that is true of the scope actually in force (§3.1a, D-07).
 LIMITATION_SHARED_MAILBOX_EN = (
     "External SLA coverage is limited to threads copied to control@. "
     "Traffic in sales@ and procure@ is not visible to this system."
@@ -145,6 +152,246 @@ def _flags_section(conn, since: datetime) -> list[str]:
     return lines
 
 
+# Config files that may carry an `interim:` block with a review date.
+# Every interim position is registered here, so adding one cannot
+# accidentally create a decision nothing ever chases.
+_INTERIM_FILES = ("authority.yaml", "continuity.yaml")
+
+
+def interim_reviews_due(config_dir: Path, as_of: date) -> list[str]:
+    """Interim positions whose review date has arrived or is close.
+
+    A deliberate interim decision is legitimate; one that quietly
+    outlives its review date is not. These surface every week from the
+    date they fall due, so an operating position cannot become permanent
+    by silence.
+
+    The wording comes from the config rather than from here, because
+    the position knows what it is and this function does not.
+    """
+    import yaml
+
+    due: list[str] = []
+    for filename in _INTERIM_FILES:
+        path = Path(config_dir) / filename
+        if not path.is_file():
+            continue
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        interim = (data.get("interim") or {}) if isinstance(data, dict) else {}
+        if not interim.get("active"):
+            continue
+        review = interim.get("review_due")
+        if not review:
+            continue
+        review_date = review if isinstance(review, date) else None
+        if review_date is None:
+            try:
+                review_date = datetime.fromisoformat(str(review)).date()
+            except ValueError:
+                continue
+
+        subject = interim.get("subject") or filename
+        position = interim.get("position") or "interim position"
+        decision = interim.get("decision") or ""
+        tag = f" ({decision})" if decision else ""
+        note = " ".join(str(interim.get("note") or "").split())
+
+        days = (as_of - review_date).days
+        if days >= 0:
+            line = (f"{subject}: {position} is {days} day(s) past its "
+                    f"{review_date:%d-%b-%Y} review{tag}.")
+            due.append(f"{line} {note}".rstrip())
+        elif days >= -7:
+            due.append(f"{subject}: interim position reviews "
+                       f"{review_date:%d-%b-%Y} ({-days} days){tag}.")
+    return due
+
+
+def _transport_note(config_dir: Path) -> list[str]:
+    """The interim transport route, while one is in force (D-08)."""
+    import yaml
+
+    from .transport import interim_route_note
+
+    path = Path(config_dir) / "transport.yaml"
+    if not path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    note = interim_route_note(data)
+    return [note] if note else []
+
+
+def _continuity_notes(config_dir: Path, as_of: date) -> list[str]:
+    """§13.3 continuity: backup age and last restore test.
+
+    An unbacked-up hash chain can be truncated undetectably by a
+    hardware failure, so this line appears until it has nothing to say.
+    """
+    import yaml
+
+    from .backup import continuity_lines
+
+    path = Path(config_dir) / "backup.yaml"
+    if not path.is_file():
+        return ["CONTINUITY: backup.yaml is missing — CONTROL_ROOT backup "
+                "status is unknown (§5.2)."]
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return ["CONTINUITY: backup.yaml is unreadable (§5.2)."]
+    return continuity_lines(data, on_date=as_of)
+
+
+VALID_DISTRIBUTION_PHASES = ("PHASE_2", "STEADY_STATE")
+
+
+def report_recipients(distribution: dict | None) -> tuple[list[str], str]:
+    """Who receives the management report, and why that set (D-13).
+
+    Narrowed for Phase 2 and widened at the gate. Returns the note as
+    well as the list, because a recipient set that changed for a reason
+    should carry the reason into the report rather than looking like a
+    configuration accident.
+    """
+    config = (distribution or {}).get("management_reports") or {}
+    phase = str(config.get("phase") or "STEADY_STATE").upper()
+    if phase not in VALID_DISTRIBUTION_PHASES:
+        raise HaltError(
+            f"distribution.yaml: phase must be one of "
+            f"{', '.join(VALID_DISTRIBUTION_PHASES)}, not {phase!r} (D-13)"
+        )
+    if phase == "PHASE_2":
+        recipients = list(config.get("default_recipients") or [])
+        note = (
+            "DISTRIBUTION: narrowed to CEO and COO for Phase 2 (D-13). This "
+            "report carries Control's own false positives while the system "
+            "proves itself; it widens to the §11 default at the Phase 2 gate. "
+            "The §12.4 usage policy is circulated to everyone regardless — "
+            "the narrowing is by phase, not a private pilot."
+        )
+        return recipients, note
+    return list(config.get("steady_state_recipients")
+                or config.get("default_recipients") or []), ""
+
+
+def vacancy_burden(conn, people: dict | None, since: datetime) -> list[str]:
+    """§3.2 — the standing monthly line quantifying the vacancies.
+
+        "One standing monthly line quantifying both vacancy burdens as
+         hiring evidence: reporting load, transaction volume, and value
+         passing through the interim arrangement."
+
+    The charter is careful that this is evidence, not an allegation, and
+    the wording here keeps that: it counts what passed through one pair
+    of hands. It does not characterise anyone, and it never implies that
+    anything went wrong — the point is that a structural gap nobody
+    measures is a gap nobody fills.
+    """
+    people = people or {}
+    vacant = list(people.get("vacancies") or [])
+    if not vacant:
+        return []
+
+    interim = sorted({str(p.get("interim") or "") for p in vacant} - {""})
+    holders = interim or ["the interim holder"]
+    lines = [
+        f"SOD / VACANCY BURDEN (§3.2): {len(vacant)} vacant role(s) — "
+        + ", ".join(sorted(str(p.get("role", "?")) for p in vacant))
+        + f". Covered on an interim basis by {', '.join(holders)}."
+    ]
+
+    counted = False
+    for holder in interim:
+        submissions = conn.execute(
+            "SELECT COUNT(*) FROM submissions WHERE submitted_by = ?"
+            " AND posted_at >= ?", (holder, since.isoformat(sep=" ")),
+        ).fetchone()[0]
+        threads = conn.execute(
+            "SELECT COUNT(DISTINCT thread_id) FROM external_threads"
+            " WHERE owner = ? AND posted_at >= ?",
+            (holder, since.isoformat(sep=" ")),
+        ).fetchone()[0]
+        quotes = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(amount), 0), "
+            " COUNT(DISTINCT currency_code) FROM registers_quotations"
+            " WHERE owner = ?", (holder,),
+        ).fetchone()
+        if not (submissions or threads or quotes[0]):
+            continue
+        counted = True
+        # §5.2: never total across currencies without a stated basis.
+        value = (f"{quotes[1]:,.0f} EGP" if quotes[2] <= 1
+                 else f"{quotes[0]} quotations across {quotes[2]} currencies "
+                      "— not totalled, no stated FX basis")
+        lines.append(
+            f"   {holder}: {submissions} submission(s), {threads} external "
+            f"thread(s) owned, {quotes[0]} quotation(s) on the register "
+            f"({value})."
+        )
+
+    if not counted:
+        lines.append(
+            "   No transaction volume recorded yet against the interim "
+            "holder(s). This is an empty register, not a light workload — "
+            "the figures become evidence once Phase 2 is running (§1.1)."
+        )
+    lines.append(
+        "   Standing recommendation (§3.2): of the two vacancies, filling "
+        "procurement first restores the more valuable separation, because "
+        "it splits cost from price."
+    )
+    return lines
+
+
+def _holiday_notes(config_dir: Path, as_of: date) -> list[str]:
+    """§8.3: the holiday calendar, empty or stale."""
+    import yaml
+
+    from .calendar import holiday_calendar_status
+
+    path = Path(config_dir) / "sla.yaml"
+    if not path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return ["HOLIDAY CALENDAR: sla.yaml is unreadable (§8.3)."]
+    return holiday_calendar_status(data, as_of)
+
+
+def _distribution_note(config_dir: Path) -> list[str]:
+    import yaml
+
+    path = Path(config_dir) / "distribution.yaml"
+    if not path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    _, note = report_recipients(data)
+    return [note] if note else []
+
+
+def _vacancy_notes(conn, config_dir: Path, since: datetime) -> list[str]:
+    import yaml
+
+    path = Path(config_dir) / "people.yaml"
+    if not path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    return vacancy_burden(conn, data, since)
+
+
 def _decisions_section(conn, as_of: date, open_decisions: list[str]) -> list[str]:
     lines = ["6. DECISIONS REQUIRED"]
     pending = conn.execute(
@@ -193,6 +440,7 @@ def weekly_report(
     conn,
     *,
     as_of: date,
+    config_dir: Path | None = None,
     horizon: list[HorizonItem],
     open_items: list[OpenItem],
     open_decisions: list[str],
@@ -212,7 +460,19 @@ def weekly_report(
     sections.append("")
     sections += _flags_section(conn, since)
     sections.append("")
-    sections += _decisions_section(conn, as_of, open_decisions)
+    extra: list[str] = []
+    scope = MailboxScope()
+    if config_dir:
+        extra += interim_reviews_due(config_dir, as_of)
+        scope = load_scope_file(config_dir)
+        extra += open_precondition_lines(scope)
+        extra += _transport_note(config_dir)
+        extra += _continuity_notes(config_dir, as_of)
+        extra += _holiday_notes(config_dir, as_of)
+        extra += _vacancy_notes(conn, config_dir, since)
+        extra += _distribution_note(config_dir)
+    sections += _decisions_section(conn, as_of, open_decisions + extra)
+    shared_en, shared_ar = limitation_lines(scope)
 
     flags_rows = conn.execute(
         "SELECT signal, detail FROM anomalies WHERE posted_at >= ?",
@@ -227,7 +487,7 @@ def weekly_report(
         [f"WEEKLY CONTROL REPORT — {as_of:%d-%b-%Y}", ""]
         + sections
         + ["", "STANDING LIMITATIONS",
-           f"   {LIMITATION_SHARED_MAILBOX_EN}",
+           f"   {shared_en}",
            f"   {LIMITATION_CONFIDENTIAL_EN}"]
     )
     ar = "\n".join([
@@ -238,7 +498,7 @@ def weekly_report(
         f"بنود مفتوحة: {len(open_items)}",
         "",
         "القيود الدائمة:",
-        f"   {LIMITATION_SHARED_MAILBOX_AR}",
+        f"   {shared_ar}",
         f"   {LIMITATION_CONFIDENTIAL_AR}",
     ])
 

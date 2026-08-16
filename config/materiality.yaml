@@ -25,4 +25,16 @@ minimum_samples:
 # CEO flag-volume budget (§14.5, §13.3, v4.3): a Tier A baseline tightening
 # that pushes weekly S1-S4 flag volume beyond this budget without at least
 # one confirmed-useful flag auto-rolls back. Set from observed Phase 2 load.
-ceo_flag_budget_per_week: null
+# CEO DECISION D-10 (16-Aug-2026): 10 flags per week — about two a
+# working day. Chosen as the number the CEO will still open on the
+# eleventh, which is the only number that matters here: a channel that
+# gets skimmed is a failed control, whatever its threshold says.
+#
+# Over-budget flags are REPORTED as suppressed, never silently dropped.
+# Reviewed against observed volume after 30 days of Phase 2, alongside
+# the D-06 authority thresholds.
+ceo_flag_budget_per_week: 10
+ceo_flag_budget:
+  decided: 2026-08-16
+  decided_by: ahmed@ubcsis.com
+  review_after_days: 30

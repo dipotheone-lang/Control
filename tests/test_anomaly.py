@@ -60,9 +60,38 @@ def test_out_of_hours_silent_until_o11():
     late = datetime(2026, 8, 13, 23, 30)
     assert s1_out_of_hours(late, None) is None
     assert s1_out_of_hours(late, {"start": None, "end": None}) is None    # O-11 open
-    hours = {"start": "08:00", "end": "17:00"}
+    hours = {"start": "08:00", "end": "17:00", "confirmed_by_ceo": True}
     assert s1_out_of_hours(late, hours) is not None
     assert s1_out_of_hours(datetime(2026, 8, 13, 10, 0), hours) is None
+
+
+def test_out_of_hours_needs_the_confirmation_not_just_the_numbers():
+    """This signal observes when named people work. An unconfirmed
+    config edit must not be able to switch that on (§8.3, O-11)."""
+    late = datetime(2026, 8, 13, 23, 30)
+    unconfirmed = {"start": "09:00", "end": "17:00", "confirmed_by_ceo": False}
+    assert s1_out_of_hours(late, unconfirmed) is None
+    assert s1_out_of_hours(late, {"start": "09:00", "end": "17:00"}) is None
+
+
+def test_repo_sla_config_closes_o11_at_nine_to_five():
+    from pathlib import Path
+
+    import yaml
+
+    path = Path(__file__).resolve().parent.parent / "config" / "sla.yaml"
+    hours = yaml.safe_load(path.read_text(encoding="utf-8"))[
+        "working_calendar"]["working_hours"]
+    assert hours["start"] == "09:00" and hours["end"] == "17:00"
+    assert hours["confirmed_by_ceo"] is True
+    # Recorded honestly: the CEO set these, not HR, and the IWR still
+    # needs to agree with them (O-06).
+    assert hours["set_by"] == "ahmed@ubcsis.com"
+    assert hours["hr_countersign_pending"] is True
+
+    # The signal is live against the real config.
+    assert s1_out_of_hours(datetime(2026, 8, 13, 22, 15), hours) is not None
+    assert s1_out_of_hours(datetime(2026, 8, 13, 11, 0), hours) is None
 
 
 def test_statistical_outlier_respects_minimum_sample():

@@ -30,6 +30,11 @@ APPEND_ONLY = (
     "baselines",
     "outcomes",
     "period_locks",
+    "registers_contracts",
+    "registers_instruments",
+    "registers_accreditations",
+    "registers_quotations",
+    "registers_tenders",
 )
 
 # SQLite grammar: all column definitions must precede table-level CHECKs,
@@ -213,6 +218,113 @@ CREATE TABLE IF NOT EXISTS outcomes (
     {_PROVENANCE_CHECK}
 );
 
+-- Class 2 registers (§2.2). The charter calls these the highest-value
+-- items in the system: a missed tender deadline or a lapsed guarantee
+-- costs orders of magnitude more than a late internal report.
+
+CREATE TABLE IF NOT EXISTS registers_contracts (
+    id INTEGER PRIMARY KEY,
+    contract_ref TEXT NOT NULL,
+    client TEXT NOT NULL,
+    title TEXT,
+    owner TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    ld_rate TEXT,
+    ld_cap TEXT,
+    notice_period_days INTEGER,
+    variation_procedure TEXT,
+    retention_pct REAL,
+    dlp_end_date TEXT,
+    payment_terms TEXT,
+    confidential INTEGER NOT NULL DEFAULT 0,
+    {_MONEY_COLS}
+    {_PROVENANCE_COLS}
+    {_MONEY_CHECKS}
+    {_PROVENANCE_CHECK}
+);
+
+CREATE TABLE IF NOT EXISTS registers_instruments (
+    id INTEGER PRIMARY KEY,
+    instrument_ref TEXT NOT NULL,
+    instrument_type TEXT NOT NULL CHECK (instrument_type IN (
+        'LETTER_OF_GUARANTEE','ADVANCE_PAYMENT_GUARANTEE','PERFORMANCE_BOND',
+        'BID_BOND','INSURANCE_POLICY','RETENTION')),
+    issuer TEXT,
+    beneficiary TEXT,
+    project_ref TEXT,
+    issue_date TEXT,
+    expiry_date TEXT NOT NULL,
+    release_date TEXT,
+    owner TEXT,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN (
+        'OPEN','RELEASED','EXPIRED','EXTENDED','CANCELLED')),
+    {_MONEY_COLS}
+    {_PROVENANCE_COLS}
+    {_MONEY_CHECKS}
+    {_PROVENANCE_CHECK}
+);
+
+CREATE TABLE IF NOT EXISTS registers_accreditations (
+    id INTEGER PRIMARY KEY,
+    client TEXT NOT NULL,
+    -- UNKNOWN is not PENDING. A prequalification whose status nobody
+    -- has checked is a different fact from one under application, and
+    -- §2.2 warns the dangerous case looks like silence (§1.1).
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN (
+        'ACTIVE','PENDING','LAPSED','WITHDRAWN','UNKNOWN')),
+    registered_on TEXT,
+    expiry_date TEXT,
+    documents_required TEXT,
+    renewal_owner TEXT,
+    portal TEXT,
+    {_PROVENANCE_COLS}
+    {_PROVENANCE_CHECK}
+);
+
+CREATE TABLE IF NOT EXISTS registers_quotations (
+    id INTEGER PRIMARY KEY,
+    quote_ref TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('ISSUED','RECEIVED')),
+    counterparty TEXT NOT NULL,
+    subject TEXT,
+    issued_date TEXT,
+    valid_until TEXT,
+    opportunity_ref TEXT,
+    owner TEXT,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN (
+        'OPEN','WON','LOST','EXPIRED','WITHDRAWN')),
+    {_MONEY_COLS}
+    {_PROVENANCE_COLS}
+    {_MONEY_CHECKS}
+    {_PROVENANCE_CHECK}
+);
+
+CREATE TABLE IF NOT EXISTS registers_tenders (
+    id INTEGER PRIMARY KEY,
+    tender_ref TEXT NOT NULL,
+    client TEXT NOT NULL,
+    title TEXT,
+    owner TEXT,
+    rfq_received TEXT,
+    bid_decision_due TEXT,
+    site_visit_date TEXT,
+    clarification_deadline TEXT,
+    bid_bond_due TEXT,
+    submission_deadline TEXT,
+    technical_opening TEXT,
+    commercial_opening TEXT,
+    result TEXT CHECK (result IS NULL OR result IN ('WON','LOST','CANCELLED','PENDING')),
+    result_date TEXT,
+    postmortem_due TEXT,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN (
+        'OPEN','SUBMITTED','CLOSED','NO_BID')),
+    {_MONEY_COLS}
+    {_PROVENANCE_COLS}
+    {_MONEY_CHECKS}
+    {_PROVENANCE_CHECK}
+);
+
 CREATE TABLE IF NOT EXISTS period_locks (
     id INTEGER PRIMARY KEY,
     period TEXT NOT NULL,
@@ -246,8 +358,13 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     for table in APPEND_ONLY:
         conn.executescript(_append_only_triggers(table))
+    # Stamped from the package constant rather than a literal, which
+    # had already drifted three charter versions behind.
+    from . import CHARTER_VERSION
+
     conn.execute(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('charter_version', '4.3')"
+        "INSERT OR REPLACE INTO schema_meta (key, value)"
+        " VALUES ('charter_version', ?)", (CHARTER_VERSION,)
     )
     conn.commit()
     return conn

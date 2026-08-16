@@ -4,14 +4,25 @@
 working_calendar:
   working_days: [sunday, monday, tuesday, wednesday, thursday]
   timezone: Africa/Cairo          # IANA zone, never a hardcoded UTC offset (§5.1)
-  # Working hours for the §7.3 S1 out-of-hours signal — open decision O-11:
-  # set by HR, confirmed by CEO. The S1 out-of-hours signal stays SILENT
-  # until both values are set and confirmed (§8.3).
+  # Working hours for the §7.3 S1 out-of-hours signal — O-11, closed by
+  # the CEO on 16-Aug-2026 as 09:00–17:00, Sunday–Thursday.
+  #
+  # The signal stays SILENT unless start, end and confirmed_by_ceo are
+  # all present (§8.3). It produces observations about when people work,
+  # so an unconfirmed edit must not be able to switch it on.
+  #
+  # set_by records who actually set the value, not who the charter
+  # nominates. §8.3 nominates HR; here the CEO set it directly, which
+  # is within his authority (§17) but is worth stating rather than
+  # dressing up as an HR submission. HR should countersign these hours
+  # into the IWR under O-06 so the employment record and this file agree.
   working_hours:
-    start: null
-    end: null
-    set_by: null
-    confirmed_by_ceo: false
+    start: "09:00"
+    end: "17:00"
+    set_by: ahmed@ubcsis.com
+    set_on: 2026-08-16
+    confirmed_by_ceo: true
+    hr_countersign_pending: true    # O-06, IWR alignment
   # Deadlines move to the next working day; no class 3 reminders on
   # non-working days.
   holidays: []
@@ -35,6 +46,11 @@ external_sla:
 # Thread closes on an observed outbound UBCSIS reply, or the owner replying
 # CLOSED (logged with declarant).
 #
-# Scope limitation (§3.1a, decision D-02): coverage is limited to threads
-# copied to control@. Traffic in sales@ and procure@ is not visible.
-# Stated in every management report until the CEO takes decision O-05.
+# Scope limitation (§3.1a): coverage is limited to threads copied to
+# control@. Traffic in sales@ and procure@ is not visible.
+#
+# O-05 is closed as decision D-07 (Option C — extended mailbox scope),
+# superseding D-02. The limitation above still stands, because a
+# decision is not a deployment: the scope change is gated on O-07, O-08
+# and O-10. See config/mailbox-scope.yaml, which is the operative
+# record of what Control may read today.

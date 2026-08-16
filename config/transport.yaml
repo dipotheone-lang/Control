@@ -1,0 +1,48 @@
+# Mail transport route — charter §5.1, CEO decision D-08 (16-Aug-2026)
+#
+# §5.1 specifies Microsoft Graph with certificate-based authentication.
+# Phase 0 has run on Outlook COM instead, because Graph provisioning
+# stalled on an Entra tenant issue and discovery is read-only metadata
+# that Outlook can supply today.
+#
+# The CEO's decision: keep Outlook COM for Phase 0, move to Graph before
+# Phase 2. This is an interim position with a hard gate, not a quiet
+# amendment to §5.1 — the charter is unchanged and Graph remains the
+# specified route.
+#
+# Why the gate is hard rather than a reminder:
+#
+#   - Phase 2 sends reminders on a schedule. A transport that needs a
+#     laptop powered on, Outlook running and a user logged in cannot
+#     hold a schedule, and a missed class 1 alert is the single most
+#     expensive failure in this charter.
+#   - Outlook COM sees whatever the Windows profile sees. That is not
+#     the same set as the mailboxes D-07 authorises, and it is enforced
+#     by nothing but this code. Graph's Application Access Policy is
+#     enforced by Exchange, on the server, against a scoped identity.
+#     A permission the system grants itself is not a control.
+
+route: outlook_com          # outlook_com | graph
+
+interim:
+  active: true
+  decided: 2026-08-16
+  decided_by: ahmed@ubcsis.com
+  # Not a date. A phase: Outlook COM is refused in SUPERVISED and LIVE.
+  permitted_run_modes: [DISCOVERY, DRY_RUN]
+  reason: >
+    Graph provisioning stalled on tenant authentication; Phase 0 is
+    read-only metadata and does not need it. Graph is provisioned
+    during Phase 1, when nothing depends on the timing.
+
+graph:
+  # Populated by scripts/provision-graph.ps1. Until these are set the
+  # graph route is not selectable, and saying so is the point (§1.1).
+  tenant_id: null
+  client_id: null
+  cert_thumbprint: null
+  application_access_policy: false     # the §5.1 mandatory Exchange policy
+
+notes:
+  - §5.1 is unchanged; this file records an interim route, not an amendment.
+  - Sending stays gated by §10 regardless of route.

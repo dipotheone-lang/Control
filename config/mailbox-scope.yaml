@@ -1,0 +1,88 @@
+# Mailbox scope — charter §3.1a, CEO decision D-07 (16-Aug-2026)
+#
+# O-05 CLOSED. The CEO chose Option C: the Exchange Online Application
+# Access Policy is widened from control@ alone to the named shared
+# functional mailboxes.
+#
+# This is the largest permission surface of the three options, and the
+# charter attaches a condition to it: "Requires the §12.4 usage policy
+# to state it explicitly." That condition is recorded below as a
+# precondition, not as a footnote. Until every precondition is closed,
+# Control keeps operating on Option A — control@ only — and every
+# management report keeps carrying the §3.1a blind-spot limitation.
+#
+# A decision is not a deployment. The gap between them is what this
+# file exists to hold open honestly.
+
+option: C
+decided: 2026-08-16
+decided_by: ahmed@ubcsis.com
+
+# DECIDED     — the CEO has chosen; nothing has been provisioned
+# PROVISIONED — the access policy is widened, engine not yet reading
+# LIVE        — Control reads the mailboxes below
+#
+# Control never advances this itself. Moving to LIVE with an open
+# precondition is refused at startup.
+state: DECIDED
+
+# Always in scope, under every option.
+control_mailbox: control@ubcsis.com
+
+# The §3.1a shared functional mailboxes. These are addresses, not
+# people — that is what makes them shared, and what makes their traffic
+# invisible to a system scoped to control@.
+mailboxes:
+  - sales@ubcsis.com
+  - procure@ubcsis.com
+  - info@ubcsis.com
+  - accounts@ubcsis.com
+  - hr@ubcsis.com
+  - hse@ubcsis.com
+  - marketing@ubcsis.com
+
+# Deliberately NOT included, and not to be added silently:
+#
+#   ahmed@ubcsis.com          — a named individual's mailbox, not a
+#                               shared functional address. Reading it
+#                               is a different decision with a
+#                               different PDPL footprint.
+#   contact.ubcsis@gmail.com  — an external consumer account (§3.1).
+#                               The standing recommendation is to
+#                               replace it, not to wire Control into it.
+#
+# Both were read during Phase 0 discovery as historical archives under
+# RUN_MODE=DISCOVERY. That is a one-time read-only metadata scan, and
+# it is not authority for live processing.
+excluded:
+  - address: ahmed@ubcsis.com
+    reason: named individual, not a shared functional mailbox
+  - address: contact.ubcsis@gmail.com
+    reason: external consumer account (§3.1); replacement recommended
+
+preconditions:
+  - id: O-07
+    requirement: >
+      PDPL 151/2020 lawful basis documented and written employee
+      notification issued, naming these mailboxes and stating that
+      their external traffic is processed by Control (§12.2).
+    closed: false
+  - id: O-08
+    requirement: >
+      §12.4 usage policy circulated and acknowledged, stating the
+      extended mailbox scope explicitly. The charter makes this a
+      named condition of Option C (§3.1a).
+    closed: false
+  - id: O-10
+    requirement: >
+      Retention schedule per record class confirmed with counsel
+      (§12.5). Wider ingestion without a retention rule accumulates
+      personal data with no defined end.
+    closed: false
+
+# Metadata-only still governs everything read here. Option C widens
+# WHICH mailboxes Control may see, never WHAT it may read inside a
+# client-confidential item — D-01 is untouched by this decision.
+notes:
+  - D-01 unchanged: confidential contents are still never read.
+  - Widened scope does not widen the check set (§12.1.3).

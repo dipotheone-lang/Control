@@ -1,0 +1,54 @@
+# Continuity channel — charter §3.1, §10; decisions D-04 and D-09
+#
+# contact.ubcsis@gmail.com is a standing CC on outbound mail and the
+# SOLE scoped exception to the external gate. It never carries
+# SUSPECTED_FRAUD, S1-S4 anomaly flags, SOD itemisations, or anything
+# referencing a confidential client (D-04). Continuity does not require
+# the crown jewels.
+#
+# CEO DECISION D-09 (16-Aug-2026): keep it, revisit 16-Nov-2026.
+#
+# What that decision is accepting, stated plainly so the revisit has
+# something to weigh:
+#
+#   - Roughly 10,000 messages of company correspondence sit in a
+#     consumer account outside company control. Phase 0 measured this.
+#   - The account is a personal-data processing location that is not
+#     the company's, which is an open question for counsel in
+#     docs/governance/PDPL-BASIS.md (§7 question 7).
+#   - Every outbound message Control sends adds to that archive.
+#
+# The charter's standing recommendation is replacement with a
+# company-controlled mailbox. This decision defers it, it does not
+# withdraw it, and the recommendation keeps appearing monthly.
+
+address: contact.ubcsis@gmail.com
+role: continuity_backup
+
+interim:
+  active: true
+  decided: 2026-08-16
+  decided_by: ahmed@ubcsis.com
+  review_due: 2026-11-16
+  subject: D-04 continuity CC
+  position: the Gmail continuity address
+  decision: D-09
+  note: >
+    Replacement with a company-controlled mailbox remains the standing
+    recommendation. Roughly 10,000 messages of company correspondence
+    are held in a consumer account outside company control.
+
+# Never varied by the learning engine, never widened by configuration.
+excluded_content:
+  - SUSPECTED_FRAUD
+  - S1
+  - S2
+  - S3
+  - S4
+  - SOD_ITEMISATION
+  - CONFIDENTIAL_CLIENT
+
+rules:
+  - Never reminded, escalated to, or expected to submit.
+  - Mail FROM it is not a submission unless the CEO confirms a domain outage.
+  - Replacement recommended monthly until resolved (§3.1).

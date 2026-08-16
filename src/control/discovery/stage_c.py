@@ -14,17 +14,24 @@ posted to a register. Contracts with NDA clients are confidential by
 definition, so the two requirements collide precisely where the value
 is highest.
 
-This module does not resolve that conflict — resolving it is a CEO
-decision, not a coding choice. It:
+**That conflict was resolved by the CEO on 16-Aug-2026: decision D-05**
+permits a narrow exception — dates and term durations only, from
+confidential CONTRACTS, for the class 2 registers. Its conditions are
+binding and are enforced here, not left to the report layer:
 
-1. classifies every document BEFORE opening it,
-2. reads only those that are not confidential,
-3. records each confidential contract as metadata plus an explicit
-   BLOCKED entry naming what could not be assessed,
+- processing is local only; nothing passes to any model or service;
+- **no clause text is stored** — the extracted value and the document
+  reference are kept, the surrounding text is redacted at the point of
+  capture, so it cannot leak through a later change to a template;
+- everything else in those documents stays metadata-only under §12.1.2.
 
-so the resulting register is honest about the shape of its own hole
-(§1.1). A commercial exposure report that silently omits the biggest
-clients would be worse than none.
+`permit_confidential_dates=False` is still the default. The exception
+must be switched on deliberately by a caller acting under D-05; the
+module never assumes it.
+
+Documents that remain unreadable — scans without OCR above the §5.5
+floor — are recorded as gaps rather than guessed at, so the register
+stays honest about the shape of its own holes (§1.1).
 """
 
 import re
@@ -95,11 +102,55 @@ class StageCResult:
     documents: list = field(default_factory=list)
     terms: list = field(default_factory=list)
     blocked: list = field(default_factory=list)     # confidential, not read
+    d05_extracted: list = field(default_factory=list)  # confidential, dates only
     unreadable: list = field(default_factory=list)  # scanned/OCR needed
 
 
+# Words that identify an industry, not a counterparty. A client name
+# reduced to one of these matches half a contracting company's folders,
+# and the resulting noise hides the gap it pretends to protect.
+_GENERIC_TOKENS = {
+    "air", "and", "canal", "chemical", "chemicals", "co", "company",
+    "construction", "contracting", "egypt", "energy", "engineering", "for",
+    "gold", "group", "holding", "industrial", "industries", "international",
+    "ltd", "materials", "mines", "misr", "sae", "services", "steel", "sugar",
+    "supplies", "the", "trading",
+}
+_MIN_TOKEN = 5
+
+
+def _normalise(text: str) -> str:
+    """Lowercase, with every non-alphanumeric run reduced to a space.
+
+    Matching then happens on whole words, so "Air Liquide" cannot be
+    matched by the "air" inside "repair schedule.xlsx".
+    """
+    return " " + "".join(
+        c if c.isalnum() else " " for c in str(text).lower()).strip() + " "
+
+
+def match_tokens(name: str) -> list[str]:
+    """The strings that identify this client in a path.
+
+    The full name always counts. Individual words count only if they are
+    long enough and specific enough to mean this client and not an
+    industry — so "Suez Steel" matches a folder named for Suez Steel,
+    but not every steel supplier on the drive.
+    """
+    normalised = _normalise(name).strip()
+    if not normalised:
+        return []
+    tokens = [normalised]
+    for word in normalised.split():
+        if len(word) >= _MIN_TOKEN and word not in _GENERIC_TOKENS:
+            tokens.append(word)
+    return tokens
+
+
 def classify_confidential(path: Path, confidential_clients: list[str],
-                          confidential_folders: list[str]) -> tuple[bool, str]:
+                          confidential_folders: list[str],
+                          confidential_projects: list[str] | None = None,
+                          ) -> tuple[bool, str]:
     """§12.1.1, conservative by design: if in doubt, confidential.
 
     `path` must be RELATIVE to the scan root. Classifying on an absolute
@@ -108,21 +159,33 @@ def classify_confidential(path: Path, confidential_clients: list[str],
     document confidential. That is not caution, it is noise, and it
     would hide the gap it pretends to protect.
 
-    Both sides are normalised to forward slashes before comparison.
-    `confidential_folders` is written by a human in config; str(Path)
-    yields backslashes on Windows. Comparing the two raw means a folder
-    the CEO classified confidential does not match, Control opens the
-    document, and D-01 is breached silently on one platform only.
+    Folder names carry the same weight as filenames, which is the CEO's
+    decision of 16-Aug-2026: a folder named for a client is confidential
+    and so is everything in it. §12.1.1 already says as much — the
+    folder rule simply had nothing to consult until the inventory ran.
     """
-    text = str(path).replace("\\", "/").lower()
+    text = _normalise(path)
+    segments = [_normalise(part).strip() for part in Path(path).parts]
+
     for folder in confidential_folders:
-        folder_key = str(folder).replace("\\", "/").strip("/").lower()
-        if folder_key and folder_key in text:
+        needle = _normalise(folder).strip()
+        if needle and needle in text:
             return True, f"inside folder classified confidential: {folder}"
+
     for client in confidential_clients:
-        token = client.lower().split()[0]
-        if token and token in text:
-            return True, f"filename or path references {client}"
+        for token in match_tokens(client):
+            if f" {token} " not in text:
+                continue
+            where = ("folder named for the client"
+                     if any(token in segment for segment in segments[:-1])
+                     else "filename references the client")
+            return True, f"{where}: {client}"
+
+    for project in confidential_projects or []:
+        needle = _normalise(project).strip()
+        if needle and f" {needle} " in text:
+            return True, f"project mapped to a confidential client: {project}"
+
     for marker in ("confidential", "proprietary", "restricted", "nda", "سري"):
         if marker in text:
             return True, f"document marked {marker}"
@@ -217,7 +280,9 @@ def find_terms(text: str, source: str, window: int = 120) -> list[CommercialTerm
 
 def run_stage_c(root: Path, confidential_clients: list[str],
                 confidential_folders: list[str],
-                exclude: list[Path] | None = None) -> StageCResult:
+                exclude: list[Path] | None = None,
+                permit_confidential_dates: bool = False,
+                confidential_projects: list[str] | None = None) -> StageCResult:
     root = Path(root)
     excluded = [Path(e).resolve() for e in (exclude or [])]
     result = StageCResult()
@@ -231,11 +296,16 @@ def run_stage_c(root: Path, confidential_clients: list[str],
         if suffix not in READABLE_SUFFIXES and suffix not in SCANNED_SUFFIXES:
             continue
 
+        # POSIX form always. This string is the citation on every term
+        # (§1.2) and the D-05 audit list of which confidential contracts
+        # were opened for dates — a reference that changes shape with the
+        # operating system is a weak reference.
         relative = path.relative_to(root).as_posix()
         confidential, reason = classify_confidential(
-            Path(relative), confidential_clients, confidential_folders)
+            Path(relative), confidential_clients, confidential_folders,
+            confidential_projects)
 
-        if confidential:
+        if confidential and not permit_confidential_dates:
             record = DocumentRecord(path=relative, confidential=True, reason=reason,
                                     readable=False,
                                     note="not opened — D-01 metadata-only scope")
@@ -262,9 +332,27 @@ def run_stage_c(root: Path, confidential_clients: list[str],
             continue
 
         terms = find_terms(text, relative)
+        if confidential:
+            # D-05: the value and its reference may be kept; the clause
+            # text may not. Redact the context rather than trusting the
+            # report layer to omit it — the prohibition belongs at the
+            # point of capture, not at the point of display.
+            terms = [
+                CommercialTerm(
+                    kind=t.kind, source=t.source,
+                    context="[REDACTED — D-05: date extracted, clause text not retained]",
+                    found_date=t.found_date, page_or_para=t.page_or_para,
+                )
+                for t in terms if t.found_date
+            ]
         result.documents.append(DocumentRecord(
-            path=relative, confidential=False, readable=True, terms=terms))
+            path=relative, confidential=confidential, readable=True,
+            reason=reason, terms=terms,
+            note="dates extracted under D-05; clause text not retained"
+            if confidential else ""))
         result.terms.extend(terms)
+        if confidential:
+            result.d05_extracted.append(relative)
 
     return result
 
@@ -315,13 +403,30 @@ def render_commercial_exposure(result: StageCResult, today: date | None = None) 
     if not undated:
         lines.append("| — | none found | — |")
 
+    if result.d05_extracted:
+        lines += [
+            "",
+            "## Confidential contracts — dates extracted under D-05",
+            "",
+            f"**{len(result.d05_extracted)} client-confidential contract(s)** "
+            "were read for dates and term durations only, under decision D-05 "
+            "(16-Aug-2026). No clause text is stored, quoted or reproduced: "
+            "rows from these documents show `[REDACTED]` in place of context "
+            "by construction, not by convention. Everything else in them "
+            "remains metadata-only under §12.1.2.",
+            "",
+        ]
+        for path in result.d05_extracted[:40]:
+            lines.append(f"  - `{path}`")
+
     lines += [
         "",
         "## What could not be read",
         "",
         f"- **{len(result.blocked)} client-confidential document(s)** were not "
         "opened. Decision D-01 (§12.1) permits metadata only: no text "
-        "extraction, no value posted to a register.",
+        "extraction, no value posted to a register. D-05 covers contracts; "
+        "anything else confidential stays closed.",
         "",
     ]
     for record in result.blocked[:40]:
@@ -341,33 +446,24 @@ def render_commercial_exposure(result: StageCResult, today: date | None = None) 
 
     lines += [
         "",
-        "## The conflict this report cannot resolve",
+        "## Scope of this report",
         "",
-        "§6 Stage C requires contractual dates, notice periods, LD terms and "
-        "guarantee expiries to be extracted into the class 2 registers. "
-        "Decision **D-01** forbids opening the body of any client-confidential "
-        "document. Contracts with NDA clients are confidential by definition, "
-        "so the requirement and the prohibition collide exactly where the "
-        "money is: the largest clients.",
+        "Decision **D-05** (16-Aug-2026) permits dates and term durations to "
+        "be extracted from client-confidential **contracts** for the class 2 "
+        "registers. It does not widen §12.1 for anything else: no clause text "
+        "is retained, nothing passes to any model or external service, and "
+        "every other confidential document stays metadata-only.",
         "",
-        "The consequence, stated plainly: **for confidential clients, Control "
-        "cannot see a guarantee expiry, a claim notice window or an LD cap.** "
-        "Those deadlines remain entirely with the responsible department. A "
-        "green dashboard here is not assurance over them.",
+        "What this report still cannot tell you:",
         "",
-        "This is a governance decision, not a technical one. The options are "
-        "for the CEO (§17):",
-        "",
-        "1. Accept the gap, and record in the register that class 2 commercial "
-        "deadlines for NDA clients are managed outside Control.",
-        "2. Permit date-and-term extraction from confidential contracts for "
-        "this purpose only — local processing, no content leaving the machine, "
-        "no clause text quoted in any report — as a written amendment to D-01.",
-        "3. Extract the dates manually into the registers, so a human reads the "
-        "contract and only the dates enter the system.",
-        "",
-        "Option 2 is a charter amendment and belongs in Appendix B with a date "
-        "and a reason. It must not happen by a code change.",
+        "- terms in documents that produced no extractable text (scans) — "
+        "these need OCR above the §5.5 confidence floor, and nothing is "
+        "guessed from them;",
+        "- notice periods expressed as a duration have no date here, because "
+        "a claim window runs from an event that is not in the document set. "
+        "They are listed as standing terms, and §2.2 is unambiguous that a "
+        "claim not noticed within its window is generally forfeited;",
+        "- anything in a contract that was never filed in the scanned folder.",
         "",
     ]
     return "\n".join(lines)

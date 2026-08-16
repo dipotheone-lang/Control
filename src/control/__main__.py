@@ -4,12 +4,14 @@ Commands map to what the engine can honestly do today:
 
   startup    run the §5.6 startup sequence and report the state
   discovery  Phase 0 Stages A-B against UB_ROOT (requires DISCOVERY state)
-  classify   §9 category profile over scan output, metadata only
   verify     §13.3 assurance: DB integrity + audit hash chain
 
-There is deliberately no `cycle` command yet: a live cycle needs the
-Graph transport, which needs the §5.1 provisioning (O-09). The engine
-refuses to pretend otherwise.
+  cycle      one sweep: fetch, classify, evaluate, enforce, gate
+
+`cycle` is what Phase 1 runs. What it sends is decided by the §10 gate
+table and the run mode, never by a flag here: in DRY_RUN it sends
+nothing at all. Decision D-08 keeps Phase 0 and Phase 1 on the interim
+Outlook route and refuses it at startup in SUPERVISED and LIVE.
 
 Environment defaults (§5.1): UB_ROOT, CONTROL_ROOT, RUN_MODE,
 LEARNING_MODE — flags override.
@@ -182,11 +184,104 @@ def cmd_analyse(args) -> int:
     return 0
 
 
-def cmd_classify(args) -> int:
+_REGISTER_ADDERS = {
+    "contracts": "add_contract",
+    "instruments": "add_instrument",
+    "accreditations": "add_accreditation",
+    "quotations": "add_quotation",
+    "tenders": "add_tender",
+}
+
+
+def cmd_registers(args) -> int:
+    """Class 2 registers (§2.2) — import rows, show the horizon."""
+    from datetime import datetime as _dt
+
+    import yaml
+
+    from . import registers as reg
+    from .db import connect
+
+    db_path = Path(args.control_root) / "data" / "control.db"
+    if not db_path.exists():
+        print(f"no database at {db_path}. Run 'init' first.")
+        return 1
+    conn = connect(db_path)
+    try:
+        if args.import_file:
+            data = yaml.safe_load(Path(args.import_file).read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                print("import file must be a mapping of register name -> list of rows")
+                return 1
+            added = 0
+            for register, rows in data.items():
+                adder = _REGISTER_ADDERS.get(register)
+                if not adder:
+                    print(f"  unknown register {register!r} — skipped "
+                          f"(expected one of {', '.join(_REGISTER_ADDERS)})")
+                    continue
+                for row in rows or []:
+                    getattr(reg, adder)(conn, **row)
+                    added += 1
+                print(f"  {register}: +{len(rows or [])} rows")
+            print(f"imported {added} rows (append-only: corrections add rows, "
+                  "they never overwrite)")
+
+        today = (_dt.fromisoformat(args.today).date() if args.today
+                 else date.today())
+        upcoming = reg.horizon(conn, today, days=args.days)
+
+        print(f"\nCLASS 2 HORIZON — next {args.days} days (and anything overdue)")
+        print(f"as of {today:%d-%b-%Y}\n")
+        undated_rows = reg.undated(conn)
+        if not upcoming:
+            print("  Nothing due on record.")
+            if not undated_rows:
+                print("  An empty class 2 horizon before the registers are "
+                      "populated means the registers are empty, not that the")
+                print("  company has no commercial deadlines (§1.1).")
+        for deadline in upcoming:
+            days = (deadline.item.due - today).days
+            marker = "OVERDUE" if days < 0 else f"T-{days}"
+            print(f"  {deadline.item.due:%d-%b-%Y}  {marker:>8}  "
+                  f"[{deadline.register}] {deadline.item.name[:60]}")
+            print(f"{'':32}owner: {deadline.item.owner}")
+
+        if undated_rows:
+            print(f"\nON THE REGISTER, ALERTING ON NOTHING — {len(undated_rows)} rows")
+            print("  These exist but carry no date, so no alert can fire for")
+            print("  them. §2.2: a lapsed prequalification shows up as silence,")
+            print("  not rejection — which is what an undated row looks like.\n")
+            for row in undated_rows:
+                status = f" [{row['status']}]" if row["status"] else ""
+                print(f"  {row['kind']:14} {row['ref'][:40]:40}{status}")
+                print(f"{'':17}missing {row['missing']} — owner "
+                      f"{row['owner'] or 'NOT ASSIGNED'}")
+
+        windows = reg.notice_periods(conn)
+        if windows:
+            print("\nSTANDING CLAIM/VARIATION WINDOWS (§2.2)")
+            print("  A claim not noticed within its window is generally "
+                  "forfeited. These run from an event, so no date is")
+            print("  synthesised — they are windows, not deadlines.\n")
+            for window in windows:
+                print(f"  {window['contract_ref']} ({window['client']}): "
+                      f"{window['notice_period_days']} days — "
+                      f"owner {window['owner']}")
+    finally:
+        conn.close()
+    return 0
+
+
+def cmd_classify_scan(args) -> int:
     """§9 category profile over the Stage A scan output (metadata only).
 
-    Not a live cycle: no mailbox is touched, no reply is produced, no
-    verdict is reached. The classifier is run over metadata already on
+    Distinct from `classify`, which is the O-04 confidentiality
+    worksheet. This one answers a different question: of the mail
+    already scanned, what would §9 have called it?
+
+    Not a live cycle — no mailbox is touched, no reply is produced, no
+    verdict is reached. The classifier runs over metadata already on
     disk so its behaviour on real corporate mail is visible before
     anything depends on it."""
     from .config import load_config
@@ -245,17 +340,21 @@ def cmd_contracts(args) -> int:
     from .discovery.stage_c import render_commercial_exposure, run_stage_c
 
     control_root = Path(args.control_root)
+    if not args.source:
+        print("no --source and no UB_ROOT set. Nothing scanned.")
+        return 1
     source = Path(args.source)
     if not source.is_dir():
         print(f"source folder not found: {source}")
         return 1
 
-    clients, folders = [], []
+    clients, folders, projects = [], [], []
     config = control_root / "config" / "confidential.yaml"
     if config.is_file():
         data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
         clients = [c.get("name", "") for c in data.get("confidential_clients", [])]
         folders = list(data.get("confidential_folders") or [])
+        projects = list(data.get("confidential_projects") or [])
     else:
         print("WARNING: config/confidential.yaml not found — falling back to the "
               "§12.1.1 default client list. Run 'init' first.")
@@ -264,7 +363,12 @@ def cmd_contracts(args) -> int:
 
     print(f"scanning {source} for commercial terms")
     print(f"confidential clients: {len(clients)} | folders: {len(folders)}")
-    result = run_stage_c(source, clients, folders, exclude=[control_root])
+    if args.confidential_dates:
+        print("D-05 ACTIVE: dates and term durations will be extracted from "
+              "confidential contracts; no clause text is retained.")
+    result = run_stage_c(source, clients, folders, exclude=[control_root],
+                         permit_confidential_dates=args.confidential_dates,
+                         confidential_projects=projects)
 
     out = control_root / "discovery" / "COMMERCIAL-EXPOSURE.md"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -273,6 +377,8 @@ def cmd_contracts(args) -> int:
     print(f"\ndocuments seen:      {len(result.documents)}")
     print(f"terms extracted:     {len(result.terms)}")
     print(f"confidential, unread: {len(result.blocked)}  (D-01)")
+    if result.d05_extracted:
+        print(f"confidential, dates only: {len(result.d05_extracted)}  (D-05)")
     print(f"unreadable/scanned:   {len(result.unreadable)}  (OCR needed)")
     dated = [t for t in result.terms if t.found_date]
     if dated:
@@ -331,7 +437,7 @@ def cmd_doctor(args) -> int:
         config_count = len(list((control_root / "config").glob("*.yaml"))) \
             if (control_root / "config").is_dir() else 0
         print(f"  config files: {config_count}")
-        if config_count < 11:
+        if config_count < 15:
             ok = False
             print("    run: python -m control init --control-root <path>")
     else:
@@ -404,6 +510,12 @@ def cmd_phase0(args) -> int:
             continue
         all_summaries[mailbox] = summaries
         for s in summaries:
+            if s.not_found:
+                print(f"    !! {s.folder}")
+                print(f"       folders present: "
+                      f"{', '.join(s.available_folders[:12]) or 'none'}")
+                gaps.append(f"{mailbox}: requested folder {s.folder}")
+                continue
             if s.total or s.unreadable_items:
                 note = (f", {s.unreadable_items} unreadable"
                         if s.unreadable_items else "")
@@ -429,6 +541,363 @@ def cmd_phase0(args) -> int:
     for path in (report, scope, summary):
         print(f"  {path.name}")
     print("  MAILBOX-OVERVIEW.md, STAGE-D-*.md, STAGE-H-*.md via 'analyse'")
+    return 0
+
+
+def cmd_classify(args) -> int:
+    """Decision O-04 — build the domain worksheet, or apply the answers."""
+    from .discovery.analyse import load_rows
+    from .discovery.classify_worksheet import (
+        apply_worksheet, build_rows, client_hints_from_config, read_worksheet,
+        write_worksheet,
+    )
+
+    control_root = Path(args.control_root)
+    discovery = control_root / "discovery"
+
+    if args.apply:
+        worksheet = Path(args.apply)
+        if not worksheet.is_file():
+            print(f"worksheet not found: {worksheet}")
+            return 1
+        decisions, problems = read_worksheet(worksheet)
+        if problems:
+            print("The worksheet has entries Control will not interpret:\n")
+            for problem in problems:
+                print(f"  {problem}")
+            print("\nNothing applied. Fix those rows and run again — a "
+                  "guessed classification is a fabrication (§1.1).")
+            return 1
+        if not decisions:
+            print("No decisions found in the worksheet. Nothing applied.")
+            return 1
+        config = control_root / "config" / "confidential.yaml"
+        if not config.is_file():
+            print(f"config not found: {config}. Run 'init' first.")
+            return 1
+        result = apply_worksheet(decisions, config, args.decided_by,
+                                 args.decided_on or date.today().isoformat())
+        import csv as _csv
+
+        with worksheet.open(encoding="utf-8-sig", newline="") as f:
+            total = sum(1 for r in _csv.DictReader(f) if (r.get("domain") or "").strip())
+        blank = total - len(decisions)
+        print(f"applied to {config}")
+        print(f"  CONFIDENTIAL:     {result['confidential']}")
+        print(f"  NOT_CONFIDENTIAL: {result['not_confidential']}")
+        print(f"  left blank:       {blank}  (stay CONFIDENTIAL)")
+        print("\nD-01 is untouched: contents of confidential items are still "
+              "never read.")
+        print("Domains left blank remain confidential by default (§12.1.1).")
+        return 0
+
+    scans = sorted(discovery.glob("outlook-scan-*.jsonl"))
+    if not scans:
+        print(f"no scan output in {discovery}. Run phase0 or outlook-scan first.")
+        return 1
+    rows: list[dict] = []
+    for scan in scans:
+        rows.extend(load_rows(scan))
+    if not rows:
+        print("scan files are empty.")
+        return 1
+
+    # Hints come from the confirmed client list, so a client added to
+    # confidential.yaml is never proposed NOT_CONFIDENTIAL here.
+    import yaml as _yaml
+
+    config_path = control_root / "config" / "confidential.yaml"
+    hints = client_hints_from_config(
+        _yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if config_path.is_file() else None)
+    domains = build_rows(rows, hints)
+    out = write_worksheet(domains, discovery / "DOMAIN-CLASSIFICATION.csv")
+
+    proposed_conf = sum(1 for d in domains if d.proposed == "CONFIDENTIAL")
+    matched = [d for d in domains if d.matched_client]
+    print(f"{len(rows)} messages, {len(domains)} external domains\n")
+    print(f"  proposed CONFIDENTIAL:     {proposed_conf}")
+    print(f"  proposed NOT_CONFIDENTIAL: {len(domains) - proposed_conf}")
+    print(f"  matching a §12.1.1 client: {len(matched)}")
+    print("\nTop counterparties by volume:")
+    for d in domains[:15]:
+        client = f"  [{d.matched_client}]" if d.matched_client else ""
+        print(f"  {d.messages:>6}  {d.domain[:42]:42} {d.proposed}{client}")
+
+    print(f"\nworksheet: {out}")
+    print("Open it, fill YOUR_DECISION with CONFIDENTIAL or NOT_CONFIDENTIAL, "
+          "then run:")
+    print(f'  python -m control classify --apply "{out}"')
+    print("\nLeave a row blank and the domain stays confidential — blanks are "
+          "never read as approval (§12.1.1).")
+    print("Outbound counts are a lower bound: Outlook reports many recipients "
+          "as display names, not addresses.")
+    return 0
+
+
+def cmd_cycle(args) -> int:
+    """One sweep — §5.6 order, §10 gates, nothing sent that the mode
+    does not permit."""
+    import yaml
+
+    from .backup import ensure_daily_backup
+    from .cycle import run_cycle
+    from .db import connect
+    from .enforce import Enforcer
+    from .loader import load_class2, load_for_cycle
+    from .report import report_recipients
+
+    control_root = Path(args.control_root)
+    report = _startup(args)                      # halts on illegal state
+    today = date.fromisoformat(args.today) if args.today else date.today()
+
+    # §5.2: back up before the first write. A cycle that cannot protect
+    # the record it is about to change does not proceed silently.
+    backup_config = yaml.safe_load(
+        (control_root / "config" / "backup.yaml").read_text(encoding="utf-8")) or {}
+    backup = ensure_daily_backup(control_root, backup_config, on_date=today)
+    for gap in backup.gaps:
+        print(f"BACKUP GAP: {gap}")
+    if backup.written and backup.files:
+        print(f"backup: {backup.path.name} ({backup.files} files)")
+
+    conn = connect(report.db_path)
+    try:
+        loaded = load_for_cycle(report.config, conn, today)
+        class2 = load_class2(conn)
+        tracked = loaded.tracked + class2
+
+        people = report.config["people"]
+        ceo = _role(people, 4) or "ahmed@ubcsis.com"
+        coo = _role(people, 3, "COO")
+        cfo = _role(people, 3, "CFO")
+
+        print(f"\nobligations approved and tracked: {loaded.approved}")
+        print(f"tracked deadlines: {len(tracked)} "
+              f"(class 2 from the registers: {len(class2)})")
+        if loaded.gaps:
+            print(f"\nGAPS — {len(loaded.gaps)}. Each is a thing Control "
+                  "is NOT doing:\n")
+            for gap in loaded.gaps:
+                print(f"  - {gap}")
+
+        transport = _transport_for(report, args)
+        if transport is None:
+            print("\nNo transport available. Nothing fetched, nothing sent.")
+            print("Phase 0/1 run on Outlook (D-08); Graph is required from "
+                  "Phase 2.")
+            return 1
+
+        result = run_cycle(
+            report, transport, control_root,
+            specs=loaded.specs, tracked_items=tracked,
+            class3_state=loaded.class3_state,
+            enforcer=Enforcer(loaded.calendar, loaded.roster,
+                              ceo=ceo, coo=coo, cfo=cfo),
+            today=today, ceo=ceo, cfo=cfo, coo=coo,
+        )
+    finally:
+        conn.close()
+
+    print(f"\nprocessed:        {result.processed}")
+    print(f"verdicts:         {len(result.verdicts)}")
+    print(f"sent:             {len(result.sent)}")
+    print(f"drafted:          {len(result.drafted)}")
+    print(f"duplicates held:  {result.skipped_duplicates}")
+    if result.quarantined:
+        print(f"quarantined:      {len(result.quarantined)} — reported, never opened")
+    if result.security_events:
+        print(f"SECURITY EVENTS:  {len(result.security_events)} — see the audit log")
+    pending = len(list((control_root / "outbox" / "pending-approval").glob("*.json")))
+    if pending:
+        print(f"\n{pending} draft(s) awaiting release in "
+              f"{control_root / 'outbox' / 'pending-approval'}")
+        print("Nothing releases on silence (§10).")
+
+    recipients, note = report_recipients(report.config["distribution"])
+    print(f"\nmanagement report would go to: {', '.join(recipients) or 'nobody'}")
+    if note:
+        print(f"  {note}")
+    return 0
+
+
+def _role(people: dict, tier: int, marker: str = "") -> str:
+    for entry in people.get("people") or []:
+        if int(entry.get("tier") or 0) != tier:
+            continue
+        if marker and marker.lower() not in str(entry.get("role", "")).lower():
+            continue
+        return str(entry.get("email", "")).lower()
+    return ""
+
+
+def _transport_for(report, args):
+    """Outlook in DISCOVERY/DRY_RUN, Graph beyond — D-08 already refused
+    an illegal combination at startup, so this only picks."""
+    route = str((report.config["transport"] or {}).get("route") or "graph").lower()
+    if route == "outlook_com":
+        from .outlook import OutlookTransport
+
+        mailbox = (report.config["mailbox-scope"] or {}).get(
+            "control_mailbox") or "control@ubcsis.com"
+        try:
+            return OutlookTransport(mailbox, allow_send=args.allow_send)
+        except Exception as e:
+            print(f"Outlook not available: {str(e)[:140]}")
+            return None
+    from .transport import GraphTransport
+
+    try:
+        return GraphTransport()
+    except Exception as e:
+        print(f"Graph not available: {str(e)[:140]}")
+        return None
+
+
+def cmd_manuals(args) -> int:
+    """Stage C — find the governing manuals, for CEO confirmation."""
+    import yaml
+
+    from .discovery.manuals import (
+        CANDIDATE_THRESHOLD, render_manual_inventory, score_candidate,
+    )
+    from .discovery.stage_c import (
+        READABLE_SUFFIXES, SCANNED_SUFFIXES, classify_confidential, extract_text,
+    )
+
+    control_root = Path(args.control_root)
+    if not args.source:
+        print("no --source and no UB_ROOT set. Nothing scanned.")
+        return 1
+    source = Path(args.source)
+    if not source.is_dir():
+        print(f"source folder not found: {source}")
+        return 1
+
+    clients, folders, projects = [], [], []
+    config = control_root / "config" / "confidential.yaml"
+    if config.is_file():
+        data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+        clients = [c.get("name", "") for c in data.get("confidential_clients", [])]
+        folders = list(data.get("confidential_folders") or [])
+        projects = list(data.get("confidential_projects") or [])
+
+    print(f"scanning {source} for governing manuals")
+    candidates = []
+    for path in sorted(source.rglob("*")):
+        if not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        if suffix not in READABLE_SUFFIXES and suffix not in SCANNED_SUFFIXES:
+            continue
+        if path.resolve().is_relative_to(control_root.resolve()):
+            continue
+        relative = str(path.relative_to(source))
+        confidential, _ = classify_confidential(
+            Path(relative), clients, folders, projects)
+        # A confidential manual is still scored — on its filename only.
+        # D-01 forbids opening it, and D-05 covers contracts, not manuals.
+        text = None if (confidential or suffix in SCANNED_SUFFIXES) \
+            else extract_text(path)
+        candidate = score_candidate(relative, text)
+        candidate.confidential = confidential
+        if candidate.score >= CANDIDATE_THRESHOLD:
+            candidates.append(candidate)
+
+    out = control_root / "discovery" / "MANUAL-INVENTORY.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_manual_inventory(candidates, expected=args.expected),
+                   encoding="utf-8")
+
+    high = [c for c in candidates if c.confidence == "HIGH"]
+    print(f"\ncandidates:      {len(candidates)}")
+    print(f"high confidence: {len(high)} (charter expects {args.expected})")
+    for candidate in sorted(high, key=lambda c: -c.score)[:15]:
+        print(f"  {candidate.score:>3}  {candidate.path[:70]}")
+    if len(high) < args.expected:
+        print(f"\nGAP: {args.expected - len(high)} of the {args.expected} "
+              "manuals are not accounted for at high confidence.")
+        print("They may be named differently, unreadable, or not written. "
+              "Which it is changes what C6 can claim (§1.1).")
+    print(f"\nwritten: {out}")
+    print("Tick the governing manuals in that file; clause extraction runs "
+          "only against confirmed ones.")
+    return 0
+
+
+def cmd_backup(args) -> int:
+    """Continuity — §5.2, decision D-11."""
+    import tempfile
+
+    import yaml
+
+    from .backup import (
+        BackupResult, continuity_lines, create_backup, create_key,
+        latest_backup, prune, resolve_destination, restore, restore_test,
+    )
+
+    control_root = Path(args.control_root)
+    config_path = control_root / "config" / "backup.yaml"
+    if not config_path.is_file():
+        print(f"no backup.yaml at {config_path}. Run 'init' first.")
+        return 1
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    today = date.fromisoformat(args.today) if args.today else date.today()
+
+    if args.init_key:
+        key = create_key(config)
+        print("A new backup encryption key has been created and stored in "
+              "the Windows credential store.\n")
+        print(f"  {key}\n")
+        print("Write it down somewhere off this machine, now. A key that")
+        print("exists only on the laptop the backup protects against is not")
+        print("a key. Without it the backups cannot be restored by anyone,")
+        print("including you.")
+        return 0
+
+    destination = resolve_destination(config)
+    print(f"destination: {destination or 'NOT CONFIGURED'}")
+
+    if args.restore:
+        archive = Path(args.archive) if args.archive else latest_backup(config)
+        if archive is None:
+            print("no backup to restore.")
+            return 1
+        target = restore(archive, Path(args.restore), config)
+        print(f"restored {archive.name} -> {target}")
+        return 0
+
+    if args.test:
+        with tempfile.TemporaryDirectory() as tmp:
+            outcome = restore_test(config, Path(tmp) / "restored")
+        if outcome.get("error"):
+            print(f"restore test: {outcome['error']}")
+            return 1
+        print(f"restore test on {outcome['archive']}")
+        print(f"  files restored: {outcome['files']}")
+        print(f"  database:       {outcome['db']}")
+        print(f"  audit chain:    {outcome['chain']}")
+        print(f"\n{'PASS' if outcome['ok'] else 'FAIL'}")
+        if outcome["ok"]:
+            print("\nRecord this in backup.yaml: restore_test.last_tested = "
+                  f"{today.isoformat()}")
+        return 0 if outcome["ok"] else 1
+
+    result: BackupResult = create_backup(control_root, config, on_date=today)
+    for gap in result.gaps:
+        print(f"GAP: {gap}")
+    if not result.written:
+        return 1
+    print(f"wrote {result.path.name}")
+    print(f"  files:     {result.files}")
+    print(f"  plaintext: {result.plaintext_bytes:,} bytes")
+    print(f"  encrypted: {result.encrypted_bytes:,} bytes")
+    print(f"  sha256:    {result.sha256[:32]}…")
+    removed = prune(config, on_date=today)
+    if removed:
+        print(f"  pruned:    {len(removed)} past retention")
+    for line in continuity_lines(config, on_date=today):
+        print(f"\n{line}")
     return 0
 
 
@@ -512,21 +981,80 @@ def main(argv: list[str] | None = None) -> int:
                       help="config template directory (default: repo config/)")
     init.set_defaults(fn=cmd_init)
 
-    classify = sub.add_parser(
-        "classify",
-        help="§9 category profile over scan output (metadata only, no mailbox access)")
-    classify.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
-    classify.add_argument("--mailbox", default="",
-                          help="restrict to these addresses (default: every scan)")
-    classify.set_defaults(fn=cmd_classify)
-
     contracts = sub.add_parser(
         "contracts",
         help="Stage C: extract guarantee, LD, notice and accreditation terms")
     contracts.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
-    contracts.add_argument("--source", required=True,
-                           help="folder holding contracts and agreements")
+    contracts.add_argument("--source", default=os.environ.get("UB_ROOT", ""),
+                           help="folder to scan (default: UB_ROOT — the whole "
+                                "drive, so a guarantee filed somewhere nobody "
+                                "remembered is still found)")
+    contracts.add_argument("--confidential-dates", action="store_true",
+                           help="D-05: extract dates and term durations from "
+                                "confidential contracts (no clause text kept)")
     contracts.set_defaults(fn=cmd_contracts)
+
+    registers = sub.add_parser(
+        "registers", help="class 2 registers (§2.2): import rows, show the horizon")
+    registers.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    registers.add_argument("--import-file", default="",
+                           help="YAML file of register rows to append")
+    registers.add_argument("--days", type=int, default=30)
+    registers.add_argument("--today", default="", help="ISO date, for testing")
+    registers.set_defaults(fn=cmd_registers)
+
+    classify = sub.add_parser(
+        "classify",
+        help="O-04: build the domain confidentiality worksheet, or apply it")
+    classify.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    classify.add_argument("--apply", default="",
+                          help="path to the filled-in worksheet CSV")
+    classify.add_argument("--decided-by", default="ahmed@ubcsis.com")
+    classify.add_argument("--decided-on", default="",
+                          help="ISO date of the decision (default: today)")
+    classify.set_defaults(fn=cmd_classify)
+
+    classify_scan = sub.add_parser(
+        "classify-scan",
+        help="§9 category profile over scan output (metadata only, no mailbox access)")
+    classify_scan.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    classify_scan.add_argument("--mailbox", default="",
+                               help="restrict to these addresses (default: every scan)")
+    classify_scan.set_defaults(fn=cmd_classify_scan)
+
+    cycle = sub.add_parser(
+        "cycle", help="one sweep: fetch, classify, evaluate, enforce, gate")
+    _common(cycle)
+    cycle.add_argument("--today", default="", help="ISO date, for testing")
+    cycle.add_argument("--allow-send", action="store_true",
+                       help="permit the transport to send what the §10 gate "
+                            "has already approved for this run mode")
+    cycle.set_defaults(fn=cmd_cycle)
+
+    manuals = sub.add_parser(
+        "manuals",
+        help="Stage C: find the governing manuals, for CEO confirmation")
+    manuals.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    manuals.add_argument("--source", default=os.environ.get("UB_ROOT", ""),
+                         help="folder to scan (default: UB_ROOT)")
+    manuals.add_argument("--expected", type=int, default=12,
+                         help="how many manuals the charter names (§6)")
+    manuals.set_defaults(fn=cmd_manuals)
+
+    backup = sub.add_parser(
+        "backup", help="§5.2 continuity: encrypted backup of CONTROL_ROOT")
+    backup.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    backup.add_argument("--init-key", action="store_true",
+                        help="create and store the encryption key (once)")
+    backup.add_argument("--test", action="store_true",
+                        help="§13.3 restore test: unpack the latest backup "
+                             "and verify the database and audit chain")
+    backup.add_argument("--restore", default="",
+                        help="restore into this directory")
+    backup.add_argument("--archive", default="",
+                        help="specific archive to restore (default: latest)")
+    backup.add_argument("--today", default="", help="ISO date, for testing")
+    backup.set_defaults(fn=cmd_backup)
 
     doctor = sub.add_parser("doctor",
                             help="check this machine can run Control")
@@ -534,12 +1062,13 @@ def main(argv: list[str] | None = None) -> int:
     doctor.set_defaults(fn=cmd_doctor)
 
     args = parser.parse_args(argv)
-    if args.command in ("startup", "discovery") and (
+    if args.command in ("startup", "discovery", "cycle") and (
             not args.control_root or not args.ub_root):
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init",
-                         "contracts", "classify")
+                         "contracts", "registers", "classify", "classify-scan",
+                         "backup", "manuals")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
