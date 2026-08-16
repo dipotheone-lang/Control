@@ -849,6 +849,7 @@ Standing decisions taken by Ahmed Diab. Control operates on these as settled. Ea
 | D-02 | 12-Aug-2026 | Shared mailbox visibility (`sales@`, `procure@`): **decision deferred to end of Phase 0**, to be taken on Stage H measured evidence. Operate on Option A meanwhile, with the limitation stated in every report | §3.1a | **Never** |
 | D-03 | 12-Aug-2026 | Golden-set verdicts: **CEO only**, unanchored — Control does not show its own verdict before the CEO judges | §13.1 | **Never** |
 | D-04 | 11-Aug-2026 | Continuity CC to contact.ubcsis@gmail.com retained as the **sole scoped exception** to the external gate, **excluding** `SUSPECTED_FRAUD`, S1–S4 flags, SOD itemisations, and confidential-client content; replacement with a company-controlled mailbox recommended monthly until resolved | §3.1, §10 | **Never** |
+| D-06 | 16-Aug-2026 | **Authority thresholds: interim itemise-everything, reviewed 16-Sep-2026.** `authority.yaml` thresholds stay at zero so every commitment is itemised weekly while one month of actual transaction volume and value is observed, so the eventual numbers are set from evidence rather than estimate. This is a chosen operating position, not an unfilled gap; Control raises the review in the weekly digest until thresholds are set or the interim period is extended in writing | §3.2, §7.3 S2, O-02 | **Never** |
 | D-05 | 16-Aug-2026 | **Narrow exception to D-01 for class 2 registers only.** Control may extract from client-confidential contracts: dates (guarantee and bond expiry, retention release, contract end, defects liability end, milestone dates) and term *durations* (notice periods, LD rate and cap, retention percentage, payment terms). Conditions, all binding: processing is **local only** — no content passes to any model or external service; **no clause text is stored, quoted or reproduced** in any register, report or reply; only the extracted value and its document reference are retained; the metadata-only rule of §12.1.2 continues to govern **everything else** in those documents. Reason: §6 Stage C requires these dates in the class 2 registers, and without them Control is blind to guarantee expiries and forfeitable claim windows for the largest clients — the charter's most expensive failure class | §12.1, §6 Stage C, §2.2 | **Never** |
 
 *Note (v4.3): D-01–D-03 carry a recorded date later than the charter's own commit date — a data-quality observation raised as review finding V15. Rows are append-only and stand as written; the CEO should confirm the intended dates by appending corrected rows if needed.*
@@ -857,8 +858,8 @@ Standing decisions taken by Ahmed Diab. Control operates on these as settled. Ea
 
 | # | Decision required | Blocks | Needed by |
 |---|---|---|---|
-| O-01 | Confirm the eight ⚠ reporting lines in §3 | All escalation routing | Phase 0 gate |
-| O-02 | Approval thresholds and delegated limits → `authority.yaml` | §7.3 S2 authority check; SOD compensating controls | Phase 0 gate |
+| ~~O-01~~ | ~~Confirm the eight ⚠ reporting lines in §3~~ — **CLOSED 16-Aug-2026.** Two corrected (Shymaa Mekkawy and Mohamed Ali report to the CEO); Hadeer Mohamed carries a dotted line to HR for HR matters | — | — |
+| O-02 | Approval thresholds and delegated limits → `authority.yaml` — **interim position taken (D-06), review due 16-Sep-2026** | §7.3 S2 authority check; SOD compensating controls | Review 16-Sep-2026 |
 | O-03 | Statutory deadline rules verified with the tax advisor | Class 1 obligations | Phase 0 gate |
 | O-04 | Confirm `confidential.yaml` classifications from Stage I | §12.1 scope | Phase 0 gate |
 | O-05 | §3.1a shared-mailbox option, on Stage H evidence | External SLA coverage | Phase 0 gate |
