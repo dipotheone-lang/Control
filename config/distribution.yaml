@@ -1,12 +1,37 @@
 # Management report distribution — charter §11
 # Reports are always drafted for approval; the external gate never opens (§10).
 
+# CEO DECISION D-13 (16-Aug-2026): distribution is narrowed for Phase 2
+# and widens to the §11 default once the Phase 2 gate is passed.
+#
+# The reasoning is about first impressions rather than secrecy. During
+# the 30 supervised days the report carries Control's own false
+# positives and disagreements -- that is what the phase is for. §13.1
+# already warns that a system which wrongly returns correct work loses
+# authority permanently and only gets one chance to make that
+# impression. Widening later is easy; unwinding a bad first impression
+# across four people is not.
+#
+# It is a narrowing by PHASE, not a private pilot. §12.4 requires the
+# policy circulated and acknowledged by everyone before the first live
+# reminder, so the whole company knows the system exists, what it reads
+# and how to dispute it -- while the early error rate is worked through
+# by the two people who can judge readiness.
+
 management_reports:
+  phase: PHASE_2                # PHASE_2 | STEADY_STATE
+  # Control never advances this. It follows the maturity promotion,
+  # which is a CEO decision (§15).
   default_recipients:
+    - ahmed@ubcsis.com      # CEO
+    - ghareeb@ubcsis.com    # COO
+  steady_state_recipients:
     - ahmed@ubcsis.com      # CEO
     - ghareeb@ubcsis.com    # COO
     - accounts@ubcsis.com   # Acting CFO
     - info@ubcsis.com       # Ahmed Hassan
+  widen_when: Phase 2 gate passed (30 days no material false alert,
+    acceptable dispute rate, clean self-audit) and level 3 confirmed
   format: xlsx export plus bilingual summary
   standing_cc: contact.ubcsis@gmail.com   # §3.1 continuity backup — D-04:
   # sole scoped exception to the external gate. NEVER CC'd on:

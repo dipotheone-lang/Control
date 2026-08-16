@@ -1,4 +1,4 @@
-"""Control — adaptive obligation & deadline control engine (charter v4.8).
+"""Control — adaptive obligation & deadline control engine (charter v4.9).
 
 Core invariants enforced at this layer, not left to discipline:
 - append-only system of record (§5.2)
@@ -7,7 +7,7 @@ Core invariants enforced at this layer, not left to discipline:
 - halt on missing config or failed integrity (§5.6)
 """
 
-CHARTER_VERSION = "4.8"
+CHARTER_VERSION = "4.9"
 
 
 class HaltError(Exception):
