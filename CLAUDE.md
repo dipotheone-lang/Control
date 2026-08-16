@@ -434,7 +434,7 @@ No ladder. Fixed alert schedule per §2. On the deadline day, unresolved items g
 **Reliability suppression:** three consecutive periods at 100% first-pass → pre-deadline reminders suppressed for that person; reinstated on first miss. Reward reliability with silence.
 
 ### 8.3 Working calendar
-Sunday–Thursday. Working *hours* — required by the §7.3 S1 out-of-hours signal — are defined in `sla.yaml`, set by HR and confirmed by the CEO (O-11); that signal stays silent until they are set. Deadlines move to the next working day. No class 3 reminders on non-working days. Egyptian holidays in `sla.yaml`; stale by 60+ days → flag. **Class 1 and 2 ignore all of this.**
+Sunday–Thursday. Working *hours* — required by the §7.3 S1 out-of-hours signal — are defined in `sla.yaml`: **09:00–17:00, closed by the CEO on 16-Aug-2026 (O-11)**. The signal stays silent unless start, end **and** the CEO confirmation are all present; it produces observations about when named people work, so an unconfirmed config edit must not be able to switch it on. Deadlines move to the next working day. No class 3 reminders on non-working days. Egyptian holidays in `sla.yaml`; stale by 60+ days → flag. **Class 1 and 2 ignore all of this.**
 
 ### 8.4 Disputes
 Reply `DISPUTE` / `اعتراض` on the first line → log, **suspend the escalation clock on that item**, list for CEO adjudication. Never argue, never re-evaluate on your own initiative. **Every dispute outcome is training signal** (§14.3).
@@ -878,7 +878,7 @@ Standing decisions taken by Ahmed Diab. Control operates on these as settled. Ea
 | O-08 | Usage policy (§12.4) circulated and acknowledged, **stating the D-07 extended mailbox scope explicitly** | Phase 2; §3.1a scope change | Phase 1 gate |
 | ~~O-09~~ | ~~`UB_ROOT` absolute path confirmed~~ — **CLOSED 16-Aug-2026:** `E:\UBCSIS Co Date Jan 2026` | — | — |
 | O-10 | Retention schedule per record class, confirmed with counsel — **now also gates D-07 Option C** | Phase 2; §3.1a scope change | Phase 1 gate |
-| O-11 | Working hours for the S1 out-of-hours signal → `sla.yaml`, set by HR, confirmed by CEO | §7.3 S1 out-of-hours signal | Phase 1 gate |
+| ~~O-11~~ | ~~Working hours for the S1 out-of-hours signal~~ — **CLOSED 16-Aug-2026: 09:00–17:00, Sunday–Thursday** (`sla.yaml`). Set by the CEO directly rather than by HR; recorded as such, and HR countersigns into the IWR under O-06 so the employment record and the config agree | — | — |
 
 ---
 
