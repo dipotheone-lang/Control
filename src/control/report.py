@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from . import HaltError
 from .scope import (
     MailboxScope, limitation_lines, load_scope_file, open_precondition_lines,
 )
@@ -247,6 +248,38 @@ def _continuity_notes(config_dir: Path, as_of: date) -> list[str]:
     return continuity_lines(data, on_date=as_of)
 
 
+VALID_DISTRIBUTION_PHASES = ("PHASE_2", "STEADY_STATE")
+
+
+def report_recipients(distribution: dict | None) -> tuple[list[str], str]:
+    """Who receives the management report, and why that set (D-13).
+
+    Narrowed for Phase 2 and widened at the gate. Returns the note as
+    well as the list, because a recipient set that changed for a reason
+    should carry the reason into the report rather than looking like a
+    configuration accident.
+    """
+    config = (distribution or {}).get("management_reports") or {}
+    phase = str(config.get("phase") or "STEADY_STATE").upper()
+    if phase not in VALID_DISTRIBUTION_PHASES:
+        raise HaltError(
+            f"distribution.yaml: phase must be one of "
+            f"{', '.join(VALID_DISTRIBUTION_PHASES)}, not {phase!r} (D-13)"
+        )
+    if phase == "PHASE_2":
+        recipients = list(config.get("default_recipients") or [])
+        note = (
+            "DISTRIBUTION: narrowed to CEO and COO for Phase 2 (D-13). This "
+            "report carries Control's own false positives while the system "
+            "proves itself; it widens to the §11 default at the Phase 2 gate. "
+            "The §12.4 usage policy is circulated to everyone regardless — "
+            "the narrowing is by phase, not a private pilot."
+        )
+        return recipients, note
+    return list(config.get("steady_state_recipients")
+                or config.get("default_recipients") or []), ""
+
+
 def vacancy_burden(conn, people: dict | None, since: datetime) -> list[str]:
     """§3.2 — the standing monthly line quantifying the vacancies.
 
@@ -330,6 +363,20 @@ def _holiday_notes(config_dir: Path, as_of: date) -> list[str]:
     except Exception:
         return ["HOLIDAY CALENDAR: sla.yaml is unreadable (§8.3)."]
     return holiday_calendar_status(data, as_of)
+
+
+def _distribution_note(config_dir: Path) -> list[str]:
+    import yaml
+
+    path = Path(config_dir) / "distribution.yaml"
+    if not path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    _, note = report_recipients(data)
+    return [note] if note else []
 
 
 def _vacancy_notes(conn, config_dir: Path, since: datetime) -> list[str]:
@@ -423,6 +470,7 @@ def weekly_report(
         extra += _continuity_notes(config_dir, as_of)
         extra += _holiday_notes(config_dir, as_of)
         extra += _vacancy_notes(conn, config_dir, since)
+        extra += _distribution_note(config_dir)
     sections += _decisions_section(conn, as_of, open_decisions + extra)
     shared_en, shared_ar = limitation_lines(scope)
 
