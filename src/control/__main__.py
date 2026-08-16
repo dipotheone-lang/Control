@@ -283,7 +283,11 @@ def cmd_contracts(args) -> int:
 
     print(f"scanning {source} for commercial terms")
     print(f"confidential clients: {len(clients)} | folders: {len(folders)}")
-    result = run_stage_c(source, clients, folders, exclude=[control_root])
+    if args.confidential_dates:
+        print("D-05 ACTIVE: dates and term durations will be extracted from "
+              "confidential contracts; no clause text is retained.")
+    result = run_stage_c(source, clients, folders, exclude=[control_root],
+                         permit_confidential_dates=args.confidential_dates)
 
     out = control_root / "discovery" / "COMMERCIAL-EXPOSURE.md"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -292,6 +296,8 @@ def cmd_contracts(args) -> int:
     print(f"\ndocuments seen:      {len(result.documents)}")
     print(f"terms extracted:     {len(result.terms)}")
     print(f"confidential, unread: {len(result.blocked)}  (D-01)")
+    if result.d05_extracted:
+        print(f"confidential, dates only: {len(result.d05_extracted)}  (D-05)")
     print(f"unreadable/scanned:   {len(result.unreadable)}  (OCR needed)")
     dated = [t for t in result.terms if t.found_date]
     if dated:
@@ -543,6 +549,9 @@ def main(argv: list[str] | None = None) -> int:
     contracts.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     contracts.add_argument("--source", required=True,
                            help="folder holding contracts and agreements")
+    contracts.add_argument("--confidential-dates", action="store_true",
+                           help="D-05: extract dates and term durations from "
+                                "confidential contracts (no clause text kept)")
     contracts.set_defaults(fn=cmd_contracts)
 
     registers = sub.add_parser(

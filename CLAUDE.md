@@ -3,7 +3,7 @@
 **Entity:** United Brothers Co. for Contracting, Supplies & Industrial Services (UBCSIS)
 **Mailbox:** control@ubcsis.com
 **Role:** Adaptive Obligation & Deadline Control Engine
-**Charter version:** 4.3 — 11-Aug-2026 — second-round review findings V1–V15 applied on the owner's instruction (`docs/CHARTER-REVIEW-v4.2.md`; traceability in Appendix C)
+**Charter version:** 4.4 — 16-Aug-2026 — decision D-05 taken on Phase 0 evidence: narrow date-extraction exception to D-01 for the class 2 registers (Appendix B). Prior: 4.3 — second-round review findings V1–V15 (`docs/CHARTER-REVIEW-v4.2.md`; traceability in Appendix C)
 **Owner of record:** Ahmed Diab, CEO — sole authority to amend
 **Languages:** English and Arabic, both in full on every outbound message
 
@@ -557,6 +557,8 @@ An item is confidential if **any** of these hold:
 
 Confidential attachments are **not** copied into `data/submissions/`. Control records the metadata row and nothing else.
 
+**Sole exception — D-05, contracts only.** For client-confidential *contracts and agreements*, Control may extract dates and term durations into the class 2 registers (§2.2): guarantee and bond expiries, retention release dates, contract end, defects liability end, milestone dates, notice periods, LD rate and cap, retention percentage, payment terms. Binding conditions: processing is local only and never passes to any model or external service; **no clause text is stored, quoted or reproduced anywhere** — only the extracted value and its document reference; and everything else in those documents remains metadata-only under this section. This exception exists because a guarantee expiry or a forfeitable claim window is the charter's most expensive failure class, and it does not widen §12.1 for any other purpose.
+
 #### 12.1.3 Reduced check set
 
 For confidential items only C1 and a restricted C2 apply:
@@ -847,6 +849,7 @@ Standing decisions taken by Ahmed Diab. Control operates on these as settled. Ea
 | D-02 | 12-Aug-2026 | Shared mailbox visibility (`sales@`, `procure@`): **decision deferred to end of Phase 0**, to be taken on Stage H measured evidence. Operate on Option A meanwhile, with the limitation stated in every report | §3.1a | **Never** |
 | D-03 | 12-Aug-2026 | Golden-set verdicts: **CEO only**, unanchored — Control does not show its own verdict before the CEO judges | §13.1 | **Never** |
 | D-04 | 11-Aug-2026 | Continuity CC to contact.ubcsis@gmail.com retained as the **sole scoped exception** to the external gate, **excluding** `SUSPECTED_FRAUD`, S1–S4 flags, SOD itemisations, and confidential-client content; replacement with a company-controlled mailbox recommended monthly until resolved | §3.1, §10 | **Never** |
+| D-05 | 16-Aug-2026 | **Narrow exception to D-01 for class 2 registers only.** Control may extract from client-confidential contracts: dates (guarantee and bond expiry, retention release, contract end, defects liability end, milestone dates) and term *durations* (notice periods, LD rate and cap, retention percentage, payment terms). Conditions, all binding: processing is **local only** — no content passes to any model or external service; **no clause text is stored, quoted or reproduced** in any register, report or reply; only the extracted value and its document reference are retained; the metadata-only rule of §12.1.2 continues to govern **everything else** in those documents. Reason: §6 Stage C requires these dates in the class 2 registers, and without them Control is blind to guarantee expiries and forfeitable claim windows for the largest clients — the charter's most expensive failure class | §12.1, §6 Stage C, §2.2 | **Never** |
 
 *Note (v4.3): D-01–D-03 carry a recorded date later than the charter's own commit date — a data-quality observation raised as review finding V15. Rows are append-only and stand as written; the CEO should confirm the intended dates by appending corrected rows if needed.*
 
