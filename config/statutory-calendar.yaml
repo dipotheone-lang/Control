@@ -26,9 +26,39 @@ obligations:
   - id: STAT-SOCINS
     name: Social insurance contributions and headcount declarations
     rule: UNVERIFIED — CONFIRM WITH ADVISOR
-  - id: STAT-ETA
-    name: ETA electronic invoicing — submission and rejection clearance
+  # ETA e-invoicing is split into two obligations because they fail
+  # differently. Submission is a recurring deadline. Rejection clearance
+  # is an EVENT-DRIVEN window that starts when ETA rejects an invoice
+  # and expires quietly — §2.2's forfeiture shape, in a class 1 setting.
+  #
+  # Phase 0 found 767 messages from invoicing.eta.gov.eg, so this is
+  # live and active, not dormant.
+  #
+  # Ownership confirmed by the CEO 16-Aug-2026, matching the §2.1 split.
+  - id: STAT-ETA-SUB
+    name: ETA electronic invoicing — submission
     rule: UNVERIFIED — CONFIRM WITH ADVISOR
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    evidence: Phase 0 — 767 messages from invoicing.eta.gov.eg
+  - id: STAT-ETA-REJ
+    name: ETA electronic invoicing — rejection clearance
+    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+    owner: accounts@ubcsis.com
+    preparer: hadeer@ubcsis.com
+    escalation: ahmed@ubcsis.com
+    # Event-driven: the clock starts at the rejection, not on a calendar
+    # date, so the window LENGTH is what the advisor must supply. Until
+    # then no deadline can be computed, and Control says so rather than
+    # assuming a number (O-03, §1.1).
+    trigger: rejection notice received from ETA
+    window_days: null                   # TO BE CONFIRMED — advisor
+    note: >
+      A rejected invoice that is never cleared is an unbilled invoice
+      and a compliance gap at once. The window cannot be tracked until
+      its length is confirmed; this row exists so the gap has an owner
+      rather than being invisible.
   - id: STAT-CIT
     name: Corporate income tax return and instalments
     rule: UNVERIFIED — CONFIRM WITH ADVISOR

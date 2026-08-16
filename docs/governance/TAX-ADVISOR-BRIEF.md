@@ -50,7 +50,7 @@ alert on.
 | 4 | Social insurance contributions | | | | | |
 | 5 | Social insurance headcount declarations (joiners/leavers) | | | | | |
 | 6 | **ETA electronic invoicing — submission** | | | | | |
-| 7 | **ETA electronic invoicing — rejection clearance window** | | | | | |
+| 7 | **ETA electronic invoicing — rejection clearance window** | *(event-driven — see below)* | | | | |
 | 8 | Corporate income tax return | | | | | |
 | 9 | Corporate income tax instalments | | | | | |
 | 10 | Commercial register renewal | | | | | |
@@ -71,6 +71,15 @@ questions follow:
   resubmit, and what happens if it closes?** A rejection clearance
   window is a deadline the company may not currently be tracking at
   all, and it is the kind that expires quietly.
+
+Row 7 is event-driven rather than calendar-driven: the clock starts when
+ETA rejects an invoice. What we need is the **window length in days** and
+what the trigger event formally is. `config/statutory-calendar.yaml`
+carries `window_days: null` until you supply it, and Control computes no
+deadline from a null — it reports the gap instead.
+
+Ownership is now recorded: Hadeer Mohamed prepares, Mohamed Abdelsadiq
+owns, escalating to the CEO the same day.
 
 **Social insurance headcount declarations (row 5).** These are
 event-driven rather than calendar-driven — they run from a joiner or

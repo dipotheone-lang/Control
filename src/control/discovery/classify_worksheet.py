@@ -208,6 +208,22 @@ def confidential_domains(config: dict) -> set[str]:
     return {d for d in domains if d}
 
 
+def known_domains(config: dict) -> set[str]:
+    """Every domain Control has ever seen and a human has classified.
+
+    This is the reference set for the §7.3 S1 near-miss signal, and it
+    is deliberately WIDER than `confidential_domains`. Comparing only
+    against confidential clients would leave supplier domains
+    unprotected — and a spoofed supplier is the vector §7.3 names as the
+    most common SME payment fraud in Egypt. The fraud does not care
+    whether the counterparty is under NDA.
+    """
+    decided = (config or {}).get("domain_classifications") or {}
+    domains = set(confidential_domains(config))
+    domains |= {str(d).lower() for d in decided.get("not_confidential") or []}
+    return {d for d in domains if d}
+
+
 def apply_worksheet(decisions: dict[str, str], config_path: Path,
                     decided_by: str, decided_on: str) -> dict:
     """Write decisions into confidential.yaml.
