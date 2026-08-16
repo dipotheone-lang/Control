@@ -44,6 +44,18 @@ def test_inventory_classification_and_flags(tmp_path):
     assert result["dormant_folders"] == ["old-project"]
 
 
+def test_inventory_paths_are_posix_on_every_platform(tmp_path):
+    """file-inventory.csv is a record. Paths that change shape with the
+    operating system make two runs of the same tree incomparable, and
+    they do not match folder entries written with forward slashes in
+    config."""
+    root = _make_tree(tmp_path)
+    result = build_inventory(root, exclude=[root / "CONTROL"], today=date(2026, 8, 11))
+    nested = [r.path for r in result["records"] if "/" in r.path or "\\" in r.path]
+    assert nested, "expected at least one file below the root"
+    assert all("\\" not in p for p in nested)
+
+
 def test_csv_written(tmp_path):
     root = _make_tree(tmp_path)
     out = tmp_path / "discovery"

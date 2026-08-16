@@ -107,10 +107,17 @@ def classify_confidential(path: Path, confidential_clients: list[str],
     data sits under, say, "Confidential Backup" would mark every
     document confidential. That is not caution, it is noise, and it
     would hide the gap it pretends to protect.
+
+    Both sides are normalised to forward slashes before comparison.
+    `confidential_folders` is written by a human in config; str(Path)
+    yields backslashes on Windows. Comparing the two raw means a folder
+    the CEO classified confidential does not match, Control opens the
+    document, and D-01 is breached silently on one platform only.
     """
-    text = str(path).lower()
+    text = str(path).replace("\\", "/").lower()
     for folder in confidential_folders:
-        if folder and folder.lower() in text:
+        folder_key = str(folder).replace("\\", "/").strip("/").lower()
+        if folder_key and folder_key in text:
             return True, f"inside folder classified confidential: {folder}"
     for client in confidential_clients:
         token = client.lower().split()[0]
@@ -224,7 +231,7 @@ def run_stage_c(root: Path, confidential_clients: list[str],
         if suffix not in READABLE_SUFFIXES and suffix not in SCANNED_SUFFIXES:
             continue
 
-        relative = str(path.relative_to(root))
+        relative = path.relative_to(root).as_posix()
         confidential, reason = classify_confidential(
             Path(relative), confidential_clients, confidential_folders)
 
