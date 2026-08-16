@@ -4,7 +4,7 @@ Adaptive obligation & deadline control engine for **United Brothers Co.
 (UBCSIS)** — the automated controller behind `control@ubcsis.com`.
 
 The single source of truth is the operating charter: **[`CLAUDE.md`](CLAUDE.md)**
-(v4.3). Everything in this repository implements it or feeds it. The two
+(v4.5). Everything in this repository implements it or feeds it. The two
 review documents that shaped it are in [`docs/`](docs/).
 
 ## What this system is

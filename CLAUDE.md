@@ -3,7 +3,7 @@
 **Entity:** United Brothers Co. for Contracting, Supplies & Industrial Services (UBCSIS)
 **Mailbox:** control@ubcsis.com
 **Role:** Adaptive Obligation & Deadline Control Engine
-**Charter version:** 4.4 — 16-Aug-2026 — decision D-05 taken on Phase 0 evidence: narrow date-extraction exception to D-01 for the class 2 registers (Appendix B). Prior: 4.3 — second-round review findings V1–V15 (`docs/CHARTER-REVIEW-v4.2.md`; traceability in Appendix C)
+**Charter version:** 4.5 — 16-Aug-2026 — decision D-07 closes O-05 on Option C (extended mailbox scope), gated on O-07/O-08/O-10; O-01 and O-09 also closed (Appendix B). Prior: 4.4 — D-05 narrow date-extraction exception to D-01 for the class 2 registers; 4.3 — second-round review findings V1–V15 (`docs/CHARTER-REVIEW-v4.2.md`; traceability in Appendix C)
 **Owner of record:** Ahmed Diab, CEO — sole authority to amend
 **Languages:** English and Arabic, both in full on every outbound message
 
@@ -127,13 +127,21 @@ Owner: Donia Ali. Escalation: Ahmed Hassan → CEO. Submission and clarification
 | **B — Transport rule** | Exchange rule auto-copies inbound external mail from selected mailboxes to control@ | Complete external visibility, no human dependency; expands the personal data footprint under §12.2 |
 | **C — Extended Graph scope** | Application Access Policy widened to named shared mailboxes | Full visibility; largest permission surface and PDPL footprint. Requires the §12.4 usage policy to state it explicitly |
 
-**CEO DECISION: deferred to the end of Phase 0, to be taken on measured evidence rather than estimate.**
+**CEO DECISION (16-Aug-2026, decision D-07): Option C.** The Application Access Policy is widened from control@ alone to the seven shared functional mailboxes named above. O-05 is closed.
 
-Until then Control operates on **Option A** and states the limitation in every management report, in both languages:
+**A decision is not a deployment.** Option C carries a condition in the same sentence that offers it — the §12.4 usage policy must state the extended scope explicitly — and §12.2 carries another, because ingesting more correspondence about identified individuals is more personal-data processing, not the same amount from more places. The operative preconditions are recorded in `config/mailbox-scope.yaml` as **O-07** (PDPL basis and employee notification, naming these mailboxes), **O-08** (usage policy stating the scope), and **O-10** (retention schedule — wider ingestion without a retention rule accumulates personal data with no defined end).
+
+**Until every precondition is closed, Control operates on Option A** and states the limitation in every management report, in both languages, with the pending decision disclosed alongside it:
 
 > *External SLA coverage is limited to threads copied to control@. Traffic in sales@ and procure@ is not visible to this system.*
 
-**Phase 0 must produce the evidence for this decision** (§6, Stage H). Specifically: how much external correspondence historically passed through `sales@` and `procure@` without ever reaching `control@` or a tracked thread, how many of those threads went unanswered beyond SLA, and what commercial value sat in them. Deciding the permission question without those three numbers is guesswork; with them it is arithmetic.
+`mailbox-scope.yaml` carries a three-value `state` — `DECIDED` → `PROVISIONED` → `LIVE`. **Control never advances it.** A file declaring `LIVE` while a precondition is open halts at startup (§5.6). Once the scope is genuinely live the standing line changes to name the mailboxes actually in scope: repeating a blind-spot claim that no longer holds would understate what Control holds about people, which is the same failure as overstating it, pointed the other way.
+
+**Two addresses are excluded from Option C on purpose, and may not be added silently:** `ahmed@ubcsis.com` is a named individual's mailbox rather than a shared functional address, and `contact.ubcsis@gmail.com` is an external consumer account whose standing recommendation is replacement, not integration (§3.1). Both were read during Phase 0 as historical archives under `RUN_MODE=DISCOVERY`; a one-time read-only metadata scan is not authority for live processing.
+
+**Option C widens which mailboxes Control may see. It never widens what Control may read inside a client-confidential item — D-01 is untouched, and the §12.1.3 reduced check set applies unchanged.**
+
+**Phase 0 still produces the Stage H evidence** (§6). It no longer decides O-05, but it sizes what the decision bought: how much external correspondence passed through `sales@` and `procure@` without reaching `control@`, how many of those threads went unanswered beyond SLA, and what commercial value sat in them. Those numbers become the baseline against which the widened scope is judged.
 
 ### 3.2 Segregation of duties — the company's largest structural control gap
 
@@ -601,6 +609,7 @@ Written, circulated and acknowledged before the first live reminder:
 4. Every finding is contestable via `DISPUTE`
 5. What is recorded, for how long, who sees it
 6. **What the system learns, what it may change by itself, and what always needs human approval** (§14)
+7. **Which mailboxes Control reads** — naming the §3.1a shared functional mailboxes brought into scope by decision D-07, and stating that individual mailboxes are not read. The charter makes this an explicit condition of Option C, not a courtesy: a scope people learn about by inference is the grievance §12.4 exists to prevent
 
 In a 12-person company a system that reads mail and copies the CEO will be understood as monitoring regardless of intent. Managed openly it becomes infrastructure; managed quietly it becomes a grievance and people route around it within a week. **The technical build is not the risk. This is.**
 
@@ -850,6 +859,7 @@ Standing decisions taken by Ahmed Diab. Control operates on these as settled. Ea
 | D-03 | 12-Aug-2026 | Golden-set verdicts: **CEO only**, unanchored — Control does not show its own verdict before the CEO judges | §13.1 | **Never** |
 | D-04 | 11-Aug-2026 | Continuity CC to contact.ubcsis@gmail.com retained as the **sole scoped exception** to the external gate, **excluding** `SUSPECTED_FRAUD`, S1–S4 flags, SOD itemisations, and confidential-client content; replacement with a company-controlled mailbox recommended monthly until resolved | §3.1, §10 | **Never** |
 | D-06 | 16-Aug-2026 | **Authority thresholds: interim itemise-everything, reviewed 16-Sep-2026.** `authority.yaml` thresholds stay at zero so every commitment is itemised weekly while one month of actual transaction volume and value is observed, so the eventual numbers are set from evidence rather than estimate. This is a chosen operating position, not an unfilled gap; Control raises the review in the weekly digest until thresholds are set or the interim period is extended in writing | §3.2, §7.3 S2, O-02 | **Never** |
+| D-07 | 16-Aug-2026 | **Shared mailbox visibility: Option C.** The Exchange Online Application Access Policy is widened from control@ alone to the seven §3.1a shared functional mailboxes (`sales@`, `procure@`, `info@`, `accounts@`, `hr@`, `hse@`, `marketing@`). Supersedes D-02, which deferred this decision. Binding conditions: the change takes effect only when **O-07** (PDPL basis and employee notification naming these mailboxes), **O-08** (§12.4 usage policy stating the scope explicitly — a condition the charter itself attaches to Option C) and **O-10** (retention schedule) are closed. Until then Control operates on Option A and discloses the pending decision in every report. `ahmed@ubcsis.com` and `contact.ubcsis@gmail.com` are excluded and may not be added silently. **D-01 is untouched:** wider mailbox scope never widens what may be read inside a confidential item | §3.1a, §12.2, §12.4, O-05 | **Never** |
 | D-05 | 16-Aug-2026 | **Narrow exception to D-01 for class 2 registers only.** Control may extract from client-confidential contracts: dates (guarantee and bond expiry, retention release, contract end, defects liability end, milestone dates) and term *durations* (notice periods, LD rate and cap, retention percentage, payment terms). Conditions, all binding: processing is **local only** — no content passes to any model or external service; **no clause text is stored, quoted or reproduced** in any register, report or reply; only the extracted value and its document reference are retained; the metadata-only rule of §12.1.2 continues to govern **everything else** in those documents. Reason: §6 Stage C requires these dates in the class 2 registers, and without them Control is blind to guarantee expiries and forfeitable claim windows for the largest clients — the charter's most expensive failure class | §12.1, §6 Stage C, §2.2 | **Never** |
 
 *Note (v4.3): D-01–D-03 carry a recorded date later than the charter's own commit date — a data-quality observation raised as review finding V15. Rows are append-only and stand as written; the CEO should confirm the intended dates by appending corrected rows if needed.*
@@ -862,12 +872,12 @@ Standing decisions taken by Ahmed Diab. Control operates on these as settled. Ea
 | O-02 | Approval thresholds and delegated limits → `authority.yaml` — **interim position taken (D-06), review due 16-Sep-2026** | §7.3 S2 authority check; SOD compensating controls | Review 16-Sep-2026 |
 | O-03 | Statutory deadline rules verified with the tax advisor | Class 1 obligations | Phase 0 gate |
 | O-04 | Confirm `confidential.yaml` classifications from Stage I | §12.1 scope | Phase 0 gate |
-| O-05 | §3.1a shared-mailbox option, on Stage H evidence | External SLA coverage | Phase 0 gate |
+| ~~O-05~~ | ~~§3.1a shared-mailbox option~~ — **CLOSED 16-Aug-2026 as D-07: Option C.** Deployment gated on O-07, O-08 and O-10; Control operates on Option A until all three close | — | — |
 | O-06 | IWR amendment drafted against the 2025 Labour Law and filed | Phase 2 | Phase 1 gate |
-| O-07 | PDPL lawful basis documented; employee notification issued | Phase 2 | Phase 1 gate |
-| O-08 | Usage policy (§12.4) circulated and acknowledged | Phase 2 | Phase 1 gate |
-| O-09 | `UB_ROOT` absolute path confirmed | Everything | Before first run |
-| O-10 | Retention schedule per record class, confirmed with counsel | Phase 2 | Phase 1 gate |
+| O-07 | PDPL lawful basis documented; employee notification issued — **now also gates D-07 Option C** | Phase 2; §3.1a scope change | Phase 1 gate |
+| O-08 | Usage policy (§12.4) circulated and acknowledged, **stating the D-07 extended mailbox scope explicitly** | Phase 2; §3.1a scope change | Phase 1 gate |
+| ~~O-09~~ | ~~`UB_ROOT` absolute path confirmed~~ — **CLOSED 16-Aug-2026:** `E:\UBCSIS Co Date Jan 2026` | — | — |
+| O-10 | Retention schedule per record class, confirmed with counsel — **now also gates D-07 Option C** | Phase 2; §3.1a scope change | Phase 1 gate |
 | O-11 | Working hours for the S1 out-of-hours signal → `sla.yaml`, set by HR, confirmed by CEO | §7.3 S1 out-of-hours signal | Phase 1 gate |
 
 ---
@@ -896,4 +906,4 @@ Findings from the second-round review (`docs/CHARTER-REVIEW-v4.2.md`) and where 
 
 ---
 
-*End of charter — v4.3*
+*End of charter — v4.5*

@@ -36,7 +36,7 @@ CONFIG_FILES = (
     "people.yaml", "obligations.yaml", "authority.yaml", "sla.yaml",
     "escalation.yaml", "distribution.yaml", "absence.yaml",
     "statutory-calendar.yaml", "materiality.yaml", "learning-policy.yaml",
-    "confidential.yaml",
+    "confidential.yaml", "mailbox-scope.yaml",
 )
 
 
