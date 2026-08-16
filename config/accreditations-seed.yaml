@@ -1,0 +1,145 @@
+# Client accreditation register — seed rows (charter §2.2)
+#
+# Load with:
+#   python -m control registers --import-file config/accreditations-seed.yaml
+#
+# WHY THESE ROWS EXIST WITH NO EXPIRY DATES
+#
+# §2.2: "A lapsed prequalification produces silent revenue decline: you
+# stop being invited rather than being rejected."
+#
+# That failure is invisible by construction, so an empty register and a
+# healthy one look identical. These rows make the gap visible instead:
+# every known client is on the register with status UNKNOWN and a named
+# renewal owner, so the missing expiry date is a finding with somebody's
+# name on it rather than an absence nobody notices.
+#
+# status UNKNOWN is deliberately not PENDING. Pending means an
+# application is in progress. Unknown means nobody has checked, and
+# conflating the two would hide exactly the case §2.2 warns about.
+#
+# Alerts at 90/60/30 days cannot fire until expiry_date is filled. Until
+# then these rows are a to-do list, and they say so.
+#
+# source: BACKFILL — these come from Phase 0 evidence, not from a
+# received document (§5.2).
+
+accreditations:
+  # ---- CEO-confirmed as active clients, 16-Aug-2026, from mail volume.
+  # Correspondence is heavy, so the commercial relationship is real; the
+  # prequalification status behind it is simply unrecorded.
+  - client: Enova
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: UNKNOWN — locate the prequalification file
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+  - client: Suez Steel
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: UNKNOWN — locate the prequalification file
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+  - client: Lafarge
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: UNKNOWN — locate the prequalification file
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+  - client: IVL Dhunseri
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: UNKNOWN — locate the prequalification file
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+  - client: Fertiglobe
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: UNKNOWN — locate the prequalification file
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+
+  # ---- Charter §12.1.1 clients. Siemens Energy, Saint-Gobain and
+  # Galaxy Chemicals appear in the scanned correspondence.
+  - client: Siemens Energy
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: UNKNOWN — locate the prequalification file
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+  - client: Saint-Gobain
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: UNKNOWN — locate the prequalification file
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+  - client: Galaxy Chemicals
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: UNKNOWN — locate the prequalification file
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+
+  # ---- Named in the charter, BARELY PRESENT in the scanned mail.
+  #
+  # This is the shape §2.2 describes. It is not evidence of a lapse —
+  # the mail may simply have been handled elsewhere, or the scan may
+  # have missed it — but it is the pattern worth checking first, and
+  # checking it costs one phone call each.
+  - client: KNAUF
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: >
+      UNKNOWN — CHECK FIRST. Named in the charter but barely present in
+      scanned correspondence. §2.2: a lapsed prequalification shows up
+      as silence, not rejection.
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+  - client: Canal Sugar
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: >
+      UNKNOWN — CHECK FIRST. Named in the charter but barely present in
+      scanned correspondence.
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+  - client: Sukari Gold Mines
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: >
+      UNKNOWN — CHECK FIRST. Named in the charter but barely present in
+      scanned correspondence.
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026
+  - client: Air Liquide
+    status: UNKNOWN
+    expiry_date: null
+    documents_required: >
+      UNKNOWN — CHECK FIRST. Named in the charter but barely present in
+      scanned correspondence.
+    renewal_owner: donia@ubcsis.com
+    source: BACKFILL
+    submitted_by: phase0-discovery
+    period: 2026

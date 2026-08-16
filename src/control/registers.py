@@ -249,6 +249,42 @@ def horizon(conn, today: date, days: int = 30) -> list[RegisterDeadline]:
     return sorted(upcoming, key=lambda d: d.item.due)
 
 
+# Register, key column, and the date whose absence makes a row silent.
+_UNDATED = (
+    ("registers_accreditations", "client", "expiry_date", "accreditation"),
+    # registers_instruments is deliberately absent: expiry_date is NOT
+    # NULL there, so a guarantee cannot be registered without one. The
+    # schema already forbids the silent case. The residual risk is a
+    # guarantee never entered at all, which Stage C surfaces from the
+    # documents rather than from the register.
+    ("registers_tenders", "tender_ref", "submission_deadline", "tender"),
+    ("registers_quotations", "quote_ref", "valid_until", "quotation"),
+)
+
+
+def undated(conn) -> list[dict]:
+    """Register rows that exist but carry no date, so alert on nothing.
+
+    These are the most dangerous rows in the system, and the least
+    visible. A register holding twelve accreditations with unknown
+    expiry produces exactly the same empty horizon as a register holding
+    nothing — which would let "we have not found the dates yet" read as
+    "there is nothing due". §1.1: the gap is the finding.
+    """
+    rows: list[dict] = []
+    for table, key, date_column, kind in _UNDATED:
+        for row in current(conn, table, key):
+            if not row.get(date_column):
+                rows.append({
+                    "kind": kind,
+                    "ref": row.get(key, ""),
+                    "missing": date_column,
+                    "status": row.get("status", ""),
+                    "owner": row.get("renewal_owner") or row.get("owner") or "",
+                })
+    return rows
+
+
 def notice_periods(conn) -> list[dict]:
     """Standing claim/variation windows — §2.2: in Egyptian contracting
     practice a claim not noticed within its window is generally

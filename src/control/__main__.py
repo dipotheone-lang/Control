@@ -231,17 +231,30 @@ def cmd_registers(args) -> int:
 
         print(f"\nCLASS 2 HORIZON — next {args.days} days (and anything overdue)")
         print(f"as of {today:%d-%b-%Y}\n")
+        undated_rows = reg.undated(conn)
         if not upcoming:
-            print("  Nothing on record.")
-            print("  An empty class 2 horizon before the registers are "
-                  "populated means the registers are empty, not that the")
-            print("  company has no commercial deadlines (§1.1).")
+            print("  Nothing due on record.")
+            if not undated_rows:
+                print("  An empty class 2 horizon before the registers are "
+                      "populated means the registers are empty, not that the")
+                print("  company has no commercial deadlines (§1.1).")
         for deadline in upcoming:
             days = (deadline.item.due - today).days
             marker = "OVERDUE" if days < 0 else f"T-{days}"
             print(f"  {deadline.item.due:%d-%b-%Y}  {marker:>8}  "
                   f"[{deadline.register}] {deadline.item.name[:60]}")
             print(f"{'':32}owner: {deadline.item.owner}")
+
+        if undated_rows:
+            print(f"\nON THE REGISTER, ALERTING ON NOTHING — {len(undated_rows)} rows")
+            print("  These exist but carry no date, so no alert can fire for")
+            print("  them. §2.2: a lapsed prequalification shows up as silence,")
+            print("  not rejection — which is what an undated row looks like.\n")
+            for row in undated_rows:
+                status = f" [{row['status']}]" if row["status"] else ""
+                print(f"  {row['kind']:14} {row['ref'][:40]:40}{status}")
+                print(f"{'':17}missing {row['missing']} — owner "
+                      f"{row['owner'] or 'NOT ASSIGNED'}")
 
         windows = reg.notice_periods(conn)
         if windows:
@@ -265,6 +278,9 @@ def cmd_contracts(args) -> int:
     from .discovery.stage_c import render_commercial_exposure, run_stage_c
 
     control_root = Path(args.control_root)
+    if not args.source:
+        print("no --source and no UB_ROOT set. Nothing scanned.")
+        return 1
     source = Path(args.source)
     if not source.is_dir():
         print(f"source folder not found: {source}")
@@ -468,7 +484,8 @@ def cmd_classify(args) -> int:
     """Decision O-04 — build the domain worksheet, or apply the answers."""
     from .discovery.analyse import load_rows
     from .discovery.classify_worksheet import (
-        apply_worksheet, build_rows, read_worksheet, write_worksheet,
+        apply_worksheet, build_rows, client_hints_from_config, read_worksheet,
+        write_worksheet,
     )
 
     control_root = Path(args.control_root)
@@ -521,7 +538,15 @@ def cmd_classify(args) -> int:
         print("scan files are empty.")
         return 1
 
-    domains = build_rows(rows)
+    # Hints come from the confirmed client list, so a client added to
+    # confidential.yaml is never proposed NOT_CONFIDENTIAL here.
+    import yaml as _yaml
+
+    config_path = control_root / "config" / "confidential.yaml"
+    hints = client_hints_from_config(
+        _yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if config_path.is_file() else None)
+    domains = build_rows(rows, hints)
     out = write_worksheet(domains, discovery / "DOMAIN-CLASSIFICATION.csv")
 
     proposed_conf = sum(1 for d in domains if d.proposed == "CONFIDENTIAL")
@@ -706,8 +731,10 @@ def main(argv: list[str] | None = None) -> int:
         "contracts",
         help="Stage C: extract guarantee, LD, notice and accreditation terms")
     contracts.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
-    contracts.add_argument("--source", required=True,
-                           help="folder holding contracts and agreements")
+    contracts.add_argument("--source", default=os.environ.get("UB_ROOT", ""),
+                           help="folder to scan (default: UB_ROOT — the whole "
+                                "drive, so a guarantee filed somewhere nobody "
+                                "remembered is still found)")
     contracts.add_argument("--confidential-dates", action="store_true",
                            help="D-05: extract dates and term durations from "
                                 "confidential contracts (no clause text kept)")

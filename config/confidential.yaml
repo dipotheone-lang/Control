@@ -11,7 +11,42 @@
 processing: DISABLED
 
 confidential_clients:
-  # Default: all clients under NDA (§12.1.1), pending Stage I evidence.
+  # ---- Added 16-Aug-2026 from Phase 0 evidence, CEO-confirmed as
+  # active clients. None of these appear in the charter's §12.1.1 list,
+  # which was written from memory; the mail says otherwise, and that
+  # disagreement is exactly what Phase 0 exists to surface.
+  #
+  # Message volumes are what discovery observed, recorded so the
+  # accreditation register has a reason attached to each row.
+  - name: Enova
+    domains: [enova-me.com]
+    confirmed: true
+    source: Phase 0 discovery — 445 messages
+  - name: Suez Steel
+    domains: [suezsteel.com]
+    confirmed: true
+    source: Phase 0 discovery — 404 messages
+  - name: Lafarge
+    domains: [lafarge.com]
+    confirmed: true
+    source: Phase 0 discovery — 203 messages
+  - name: IVL Dhunseri
+    domains: [eg.ivldhunseri.com]
+    confirmed: true
+    source: Phase 0 discovery — 152 messages
+  - name: Fertiglobe
+    domains: []          # domain to be confirmed from the O-04 worksheet
+    confirmed: true
+    source: Phase 0 discovery — present in correspondence
+
+  # ---- Charter §12.1.1 defaults, pending Stage I evidence.
+  #
+  # Observation worth keeping visible rather than burying: KNAUF, Canal
+  # Sugar, Sukari and Air Liquide barely appear in the scanned mail.
+  # §2.2 warns that a lapsed prequalification shows up as silence — you
+  # stop being invited rather than being rejected — and silence is what
+  # this looks like. Their accreditation status is a Phase 0 question,
+  # not a conclusion.
   - name: Siemens Energy
     domains: []          # populated by Stage I
     confirmed: false

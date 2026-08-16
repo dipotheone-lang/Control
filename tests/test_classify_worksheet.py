@@ -17,8 +17,8 @@ import pytest
 import yaml
 
 from control.discovery.classify_worksheet import (
-    apply_worksheet, build_rows, confidential_domains, read_worksheet,
-    write_worksheet,
+    apply_worksheet, build_rows, client_hints_from_config,
+    confidential_domains, read_worksheet, write_worksheet,
 )
 
 REPO_CONFIG = Path(__file__).resolve().parent.parent / "config"
@@ -93,7 +93,38 @@ def test_known_client_is_proposed_confidential_with_its_name():
     entry = build_rows([row("eng@siemens-energy.com")])[0]
     assert entry.proposed == "CONFIDENTIAL"
     assert entry.matched_client == "Siemens Energy"
-    assert "12.1.1" in entry.note
+    assert "confirmed client" in entry.note
+
+
+def test_clients_found_in_the_mail_are_recognised_too():
+    """The charter's list was written from memory; these came from
+    Phase 0 evidence and were CEO-confirmed on 16-Aug-2026."""
+    for domain, name in (("enova-me.com", "Enova"),
+                         ("suezsteel.com", "Suez Steel"),
+                         ("lafarge.com", "Lafarge"),
+                         ("eg.ivldhunseri.com", "IVL Dhunseri")):
+        entry = build_rows([row(f"x@{domain}")])[0]
+        assert entry.matched_client == name
+        assert entry.proposed == "CONFIDENTIAL"
+
+
+def test_hints_are_derived_from_the_confirmed_client_list():
+    """Adding a client to config must not leave the worksheet
+    proposing NOT_CONFIDENTIAL for its domain."""
+    hints = client_hints_from_config(
+        {"confidential_clients": [{"name": "New Co", "domains": ["newco.eg"]}]})
+    entry = build_rows([row("a@newco.eg")], hints)[0]
+    assert entry.matched_client == "New Co"
+
+
+def test_the_repo_client_list_covers_every_confirmed_domain():
+    data = yaml.safe_load(
+        (REPO_CONFIG / "confidential.yaml").read_text(encoding="utf-8"))
+    hints = client_hints_from_config(data)
+    for client in data["confidential_clients"]:
+        for domain in client.get("domains") or []:
+            entry = build_rows([row(f"x@{domain}")], hints)[0]
+            assert entry.matched_client, f"{domain} matched nothing"
 
 
 def test_platform_noise_is_proposed_not_confidential():
@@ -104,7 +135,7 @@ def test_platform_noise_is_proposed_not_confidential():
 
 def test_an_unrecognised_counterparty_defaults_to_confidential():
     """The §12.1.1 asymmetry: a wrong check costs less than a client."""
-    entry = build_rows([row("procurement@enova-me.com")])[0]
+    entry = build_rows([row("procurement@unknown-counterparty.eg")])[0]
     assert entry.proposed == "CONFIDENTIAL"
     assert "conservative default" in entry.note
 
@@ -176,7 +207,8 @@ def test_d01_survives_the_write(config):
                     "2026-08-16")
     data = yaml.safe_load(config.read_text(encoding="utf-8"))
     assert data["processing"] == "DISABLED"
-    assert len(data["confidential_clients"]) == 7
+    # 7 charter defaults + 5 confirmed from Phase 0 evidence.
+    assert len(data["confidential_clients"]) == 12
 
 
 def test_a_decided_domain_is_attached_to_its_client(config):
@@ -203,7 +235,7 @@ def test_undecided_domains_do_not_appear_anywhere(config):
     apply_worksheet({"enova-me.com": "CONFIDENTIAL"}, config,
                     "ahmed@ubcsis.com", "2026-08-16")
     text = config.read_text(encoding="utf-8")
-    assert "suezsteel.com" not in text
+    assert "never-decided.example" not in text
 
 
 # ---- what the engine reads -------------------------------------------
@@ -233,7 +265,9 @@ def test_empty_config_yields_no_domains_without_crashing():
 
 def test_repo_config_still_parses_through_the_reader():
     data = yaml.safe_load((REPO_CONFIG / "confidential.yaml").read_text(encoding="utf-8"))
-    # O-04 is open, so the lists are empty — that is the honest state,
-    # and the reader must survive it rather than assume population.
-    assert confidential_domains(data) == set()
+    # The five CEO-confirmed clients carry domains; the charter's seven
+    # do not yet, and O-04 remains open for the long tail. Partial
+    # population is the honest state and the reader must survive it.
+    assert confidential_domains(data) == {
+        "enova-me.com", "suezsteel.com", "lafarge.com", "eg.ivldhunseri.com"}
     assert data["processing"] == "DISABLED"

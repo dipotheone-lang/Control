@@ -268,8 +268,11 @@ CREATE TABLE IF NOT EXISTS registers_instruments (
 CREATE TABLE IF NOT EXISTS registers_accreditations (
     id INTEGER PRIMARY KEY,
     client TEXT NOT NULL,
+    -- UNKNOWN is not PENDING. A prequalification whose status nobody
+    -- has checked is a different fact from one under application, and
+    -- §2.2 warns the dangerous case looks like silence (§1.1).
     status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN (
-        'ACTIVE','PENDING','LAPSED','WITHDRAWN')),
+        'ACTIVE','PENDING','LAPSED','WITHDRAWN','UNKNOWN')),
     registered_on TEXT,
     expiry_date TEXT,
     documents_required TEXT,
@@ -355,8 +358,13 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     for table in APPEND_ONLY:
         conn.executescript(_append_only_triggers(table))
+    # Stamped from the package constant rather than a literal, which
+    # had already drifted three charter versions behind.
+    from . import CHARTER_VERSION
+
     conn.execute(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('charter_version', '4.3')"
+        "INSERT OR REPLACE INTO schema_meta (key, value)"
+        " VALUES ('charter_version', ?)", (CHARTER_VERSION,)
     )
     conn.commit()
     return conn
