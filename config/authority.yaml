@@ -1,18 +1,40 @@
 # Authority matrix — charter §3.2, §7.3 S2
-# PENDING: approval thresholds and delegated limits are open decision O-02
-# (Phase 0 gate). Nothing below carries an assumed value — null means
-# "not yet decided by the CEO", and the S2 check cannot run until set.
+#
+# STATUS: interim position taken by the CEO on 16-Aug-2026 (decision D-06).
+# Thresholds are deliberately left at zero so that EVERY commitment is
+# itemised weekly, while a month of real transaction volume is observed.
+# This is a chosen operating position, not an unfilled gap — but it is
+# also not the end state: an itemisation list nobody can read is as
+# useless as no list at all.
+#
+# REVIEW DUE: 16-Sep-2026. Control raises this in the weekly digest until
+# real thresholds are set or the CEO extends the interim period.
+#
 # The learning engine may never modify authority limits (§14.2 Tier C).
 
+interim:
+  active: true
+  decided: 2026-08-16
+  decided_by: ahmed@ubcsis.com
+  review_due: 2026-09-16
+  reason: >
+    Observe one month of actual commitment volume and value before
+    setting thresholds, so the numbers are chosen from evidence rather
+    than estimate.
+
 thresholds:
-  ceo_weekly_itemisation: null   # every commitment above this -> itemised to CEO weekly (§3.2)
-  second_approval_above: null
+  # Zero means: itemise everything. §3.2 makes this the operative
+  # default until authority.yaml is populated, so the conservative
+  # position is live rather than switched off.
+  ceo_weekly_itemisation: 0
+  second_approval_above: null      # not yet set
 
 delegated_limits:
-  # email: limit_egp
-  info@ubcsis.com: null
-  ghareeb@ubcsis.com: null
-  accounts@ubcsis.com: null
+  # email: limit_egp. null = no limit configured, which S2 reports as
+  # LIMIT_NOT_SET rather than silently passing the check.
+  info@ubcsis.com: null            # Ahmed Hassan
+  ghareeb@ubcsis.com: null         # Ghareeb Mahmoud, COO
+  accounts@ubcsis.com: null        # Mohamed Abdelsadiq, Acting CFO
 
 rules:
   - id: S2-1

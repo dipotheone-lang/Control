@@ -145,6 +145,51 @@ def _flags_section(conn, since: datetime) -> list[str]:
     return lines
 
 
+def interim_reviews_due(config_dir: Path, as_of: date) -> list[str]:
+    """Interim positions whose review date has arrived.
+
+    A deliberate interim decision is legitimate; one that quietly
+    outlives its review date is not. These surface every week from the
+    date they fall due, so an operating position cannot become permanent
+    by silence.
+    """
+    import yaml
+
+    due: list[str] = []
+    path = Path(config_dir) / "authority.yaml"
+    if not path.is_file():
+        return due
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return due
+    interim = data.get("interim") or {}
+    if not interim.get("active"):
+        return due
+    review = interim.get("review_due")
+    if not review:
+        return due
+    review_date = review if isinstance(review, date) else None
+    if review_date is None:
+        try:
+            review_date = datetime.fromisoformat(str(review)).date()
+        except ValueError:
+            return due
+    days = (as_of - review_date).days
+    if days >= 0:
+        due.append(
+            f"O-02 authority thresholds: interim itemise-everything is "
+            f"{days} day(s) past its {review_date:%d-%b-%Y} review (D-06). "
+            "Every commitment is still being itemised."
+        )
+    elif days >= -7:
+        due.append(
+            f"O-02 authority thresholds: interim position reviews "
+            f"{review_date:%d-%b-%Y} ({-days} days) (D-06)."
+        )
+    return due
+
+
 def _decisions_section(conn, as_of: date, open_decisions: list[str]) -> list[str]:
     lines = ["6. DECISIONS REQUIRED"]
     pending = conn.execute(
@@ -193,6 +238,7 @@ def weekly_report(
     conn,
     *,
     as_of: date,
+    config_dir: Path | None = None,
     horizon: list[HorizonItem],
     open_items: list[OpenItem],
     open_decisions: list[str],
@@ -212,7 +258,8 @@ def weekly_report(
     sections.append("")
     sections += _flags_section(conn, since)
     sections.append("")
-    sections += _decisions_section(conn, as_of, open_decisions)
+    reviews = interim_reviews_due(config_dir, as_of) if config_dir else []
+    sections += _decisions_section(conn, as_of, open_decisions + reviews)
 
     flags_rows = conn.execute(
         "SELECT signal, detail FROM anomalies WHERE posted_at >= ?",
