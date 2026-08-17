@@ -296,3 +296,121 @@ def test_missing_config_yields_ocr_off_not_ocr_on():
     assert OcrSettings.from_config(None).enabled is False
     assert OcrSettings.from_config({}).enabled is False
     assert OcrSettings.from_config({}).floor == DEFAULT_FLOOR
+
+
+# ---- D-14: OCR on confidential contracts, text never retained --------
+
+def _confidential_run(tmp_path, monkeypatch, *, permit, accepted=True):
+    from control.discovery import stage_c
+    import control.ocr as ocr_module
+
+    (tmp_path / "Enova").mkdir()
+    (tmp_path / "Enova" / "contract.png").write_bytes(b"x")
+    monkeypatch.setattr(
+        ocr_module, "ocr_image",
+        lambda path, settings, **kw: ocr_module.OcrResult(
+            path=str(path),
+            text="Letter of guarantee valid until 31/12/2026. "
+                 "Clause 14: the Contractor shall indemnify...",
+            confidence=94.0, floor=settings.floor, accepted=accepted))
+    return stage_c.run_stage_c(
+        tmp_path, ["Enova"], [], permit_confidential_dates=permit,
+        ocr_settings=OcrSettings(enabled=True))
+
+
+def test_a_confidential_scan_is_not_ocrd_without_d05(tmp_path, monkeypatch):
+    """D-01 governs until the exception is switched on deliberately."""
+    result = _confidential_run(tmp_path, monkeypatch, permit=False)
+    assert result.ocr_results == []
+    assert len(result.blocked) == 1
+    assert result.terms == []
+
+
+def test_d14_permits_ocr_on_a_confidential_contract(tmp_path, monkeypatch):
+    result = _confidential_run(tmp_path, monkeypatch, permit=True)
+    assert len(result.ocr_results) == 1
+    assert result.ocr_results[0].accepted is True
+    assert any(t.kind == "GUARANTEE_EXPIRY" for t in result.terms)
+    assert any(t.found_date == "2026-12-31" for t in result.terms)
+
+
+def test_the_ocr_text_of_a_confidential_document_is_never_retained(
+        tmp_path, monkeypatch):
+    """The condition that makes D-14 safe. Retaining the buffer would put
+    the full body of an NDA contract somewhere the report layer can
+    reach — the leak D-05's redaction-at-capture rule exists to prevent,
+    arriving through a different door."""
+    result = _confidential_run(tmp_path, monkeypatch, permit=True)
+    stored = result.ocr_results[0]
+    assert stored.text == ""
+    assert stored.text_redacted is True
+    assert stored.confidence == 94.0          # the measurement survives
+
+    # And no clause text reached the register either (D-05).
+    blob = " ".join(t.context for t in result.terms)
+    assert "indemnify" not in blob
+    assert "REDACTED" in blob
+
+
+def test_a_non_confidential_ocr_result_keeps_its_text(tmp_path, monkeypatch):
+    from control.discovery import stage_c
+    import control.ocr as ocr_module
+
+    (tmp_path / "public.png").write_bytes(b"x")
+    monkeypatch.setattr(
+        ocr_module, "ocr_image",
+        lambda path, settings, **kw: ocr_module.OcrResult(
+            path=str(path), text="valid until 31/12/2026",
+            confidence=94.0, floor=settings.floor, accepted=True))
+    result = stage_c.run_stage_c(
+        tmp_path, [], [], ocr_settings=OcrSettings(enabled=True))
+    assert result.ocr_results[0].text
+    assert result.ocr_results[0].text_redacted is False
+
+
+# ---- the accounting appears on the page ------------------------------
+
+def test_the_report_carries_the_ocr_numbers(tmp_path, monkeypatch):
+    from control.discovery.stage_c import render_commercial_exposure
+
+    result = _confidential_run(tmp_path, monkeypatch, permit=True)
+    page = render_commercial_exposure(result)
+    assert "## OCR (§5.5)" in page
+    assert "**1 document(s)** were put through OCR" in page
+    assert "cleared the confidence floor" in page
+    assert "D-14" in page and "never clause text" in page
+
+
+def test_zero_trusted_readings_are_called_out(tmp_path, monkeypatch):
+    """'23 attempted, 0 trusted' is the number §1.1 wants on the page.
+    Without it, a register thinned by unreadable scans looks identical
+    to one thinned by there being nothing to find."""
+    from control.discovery.stage_c import render_commercial_exposure
+
+    result = _confidential_run(tmp_path, monkeypatch, permit=True,
+                               accepted=False)
+    page = render_commercial_exposure(result)
+    assert "Nothing was trusted" in page
+    assert "covering only the documents that were machine-readable" in page
+
+
+def test_no_ocr_section_when_ocr_never_ran(tmp_path):
+    from control.discovery.stage_c import render_commercial_exposure, run_stage_c
+
+    (tmp_path / "scan.png").write_bytes(b"x")
+    page = render_commercial_exposure(run_stage_c(tmp_path, [], []))
+    assert "## OCR (§5.5)" not in page
+
+
+def test_the_prohibited_list_is_eight_items_not_ten():
+    """A YAML flow list splits on commas inside an unquoted scalar, which
+    silently turned one carve-out into three phantom prohibitions."""
+    data = yaml.safe_load((REPO_CONFIG / "confidential.yaml").read_text(encoding="utf-8"))
+    prohibited = data["metadata_only_mode"]["prohibited"]
+    assert len(prohibited) == 8
+    ocr_entry = next(x for x in prohibited if x.startswith("OCR"))
+    assert "D-14" in ocr_entry
+    assert "never retained" in ocr_entry
+    # D-01's core prohibitions are untouched by the carve-out.
+    assert "opening body" in prohibited
+    assert "passing contents to any model or external service" in prohibited

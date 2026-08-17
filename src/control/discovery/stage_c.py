@@ -35,7 +35,7 @@ stays honest about the shape of its own holes (§1.1).
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
 
@@ -295,16 +295,41 @@ def run_stage_c(root: Path, confidential_clients: list[str],
 
     ocr = ocr_settings or OcrSettings()
 
-    def _try_ocr(path: Path, relative: str):
-        """(text, note). Text is None unless OCR cleared the floor."""
+    def _try_ocr(path: Path, relative: str, confidential: bool = False):
+        """(text, note). Text is None unless OCR cleared the floor.
+
+        D-14 permits OCR on client-confidential contracts for the D-05
+        purpose only, and adds one condition enforced here: the OCR text
+        buffer is never retained for a confidential document. The text
+        is passed to term extraction transiently and the stored result
+        keeps only the confidence and the reference.
+
+        Retaining it would put the full body of an NDA contract in a
+        structure the report layer can reach — which is the leak D-05's
+        redaction-at-capture rule exists to prevent, arriving by a
+        different door.
+        """
         if not ocr.enabled:
             return None, ""
+        if confidential and not permit_confidential_dates:
+            # Belt and braces: this path is unreachable because blocked
+            # documents return earlier, but an OCR call on a
+            # confidential document without D-05 in force must never
+            # become reachable by a later edit (§12.1.2).
+            return None, "OCR not permitted on a confidential document (D-01)"
+
         outcome = read_scanned(path, ocr)
-        result.ocr_results.append(outcome)
+        if confidential:
+            stored = replace(outcome, text="", text_redacted=True)
+        else:
+            stored = outcome
+        result.ocr_results.append(stored)
+
         if outcome.accepted:
             return outcome.text, (
                 f"read by OCR at confidence {outcome.confidence:.1f} "
-                f"(floor {outcome.floor:.1f})")
+                f"(floor {outcome.floor:.1f})"
+                + (" — text not retained (D-14)" if confidential else ""))
         return None, f"OCR: {outcome.reason}"
 
     for path in sorted(root.rglob("*")):
@@ -330,7 +355,7 @@ def run_stage_c(root: Path, confidential_clients: list[str],
             continue
 
         if suffix in SCANNED_SUFFIXES:
-            text, note = _try_ocr(path, relative)
+            text, note = _try_ocr(path, relative, confidential)
             if text is None:
                 record = DocumentRecord(
                     path=relative, confidential=confidential, readable=False,
@@ -343,7 +368,7 @@ def run_stage_c(root: Path, confidential_clients: list[str],
             text = extract_text(path)
             if text is None:
                 # A PDF with no text layer is a scan in a PDF wrapper.
-                text, note = _try_ocr(path, relative)
+                text, note = _try_ocr(path, relative, confidential)
             else:
                 note = ""
             if text is None:
@@ -382,6 +407,54 @@ def run_stage_c(root: Path, confidential_clients: list[str],
     return result
 
 
+def _ocr_lines(result: "StageCResult") -> list[str]:
+    """§5.5 accounting, on the page rather than in a log.
+
+    "23 attempted, 0 trusted" is exactly the number §1.1 wants a reader
+    to see. Without it, a register thinned by unreadable scans looks
+    identical to a register thinned by there being nothing to find.
+
+    The three counts stay separate deliberately: below-floor means the
+    engine read it and the reading was not trustworthy; failed means
+    nothing looked at it. They have different fixes.
+    """
+    if not result.ocr_results:
+        return []
+
+    from ..ocr import summarise
+
+    counts = summarise(result.ocr_results)
+    mean = counts["mean_confidence_accepted"]
+    redacted = sum(1 for r in result.ocr_results if r.text_redacted)
+
+    lines = [
+        "",
+        "## OCR (§5.5)",
+        "",
+        f"- **{counts['total']} document(s)** were put through OCR.",
+        f"- **{counts['accepted']} cleared the confidence floor**"
+        + (f", mean confidence {mean:.1f}." if mean else "."),
+        f"- **{counts['below_floor']} fell below the floor** — recorded as "
+        "UNREADABLE and not posted. A below-floor reading is a gap, not a "
+        "document without terms.",
+        f"- **{counts['not_attempted_or_failed']}** could not be attempted or "
+        "the engine failed. Nothing looked at these.",
+    ]
+    if redacted:
+        lines.append(
+            f"- {redacted} of them {'is' if redacted == 1 else 'are'} "
+            "client-confidential. Under D-14 the OCR text was dropped at "
+            "capture: only the extracted date and its document reference are "
+            "retained, never clause text.")
+    if counts["accepted"] == 0 and counts["total"]:
+        lines.append("")
+        lines.append(
+            "> **Nothing was trusted.** Every date this register would have "
+            "drawn from a scan is still missing. Treat the register below as "
+            "covering only the documents that were machine-readable.")
+    return lines
+
+
 def render_commercial_exposure(result: StageCResult, today: date | None = None) -> str:
     today = today or datetime.now().date()
     dated = [t for t in result.terms if t.found_date]
@@ -418,6 +491,8 @@ def render_commercial_exposure(result: StageCResult, today: date | None = None) 
                      f"{term.context[:100]} |")
     if not past:
         lines.append("| — | — | none found | — |")
+
+    lines += _ocr_lines(result)
 
     lines += ["", "## Terms found without a date", "",
               "These carry obligations whose timing must be established from "
