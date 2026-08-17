@@ -104,6 +104,7 @@ class StageCResult:
     blocked: list = field(default_factory=list)     # confidential, not read
     d05_extracted: list = field(default_factory=list)  # confidential, dates only
     unreadable: list = field(default_factory=list)  # scanned/OCR needed
+    ocr_results: list = field(default_factory=list)  # every OCR attempt (§5.5)
 
 
 # Words that identify an industry, not a counterparty. A client name
@@ -282,10 +283,29 @@ def run_stage_c(root: Path, confidential_clients: list[str],
                 confidential_folders: list[str],
                 exclude: list[Path] | None = None,
                 permit_confidential_dates: bool = False,
-                confidential_projects: list[str] | None = None) -> StageCResult:
+                confidential_projects: list[str] | None = None,
+                ocr_settings=None) -> StageCResult:
     root = Path(root)
     excluded = [Path(e).resolve() for e in (exclude or [])]
     result = StageCResult()
+    # §5.5. Disabled unless the caller passes settings with enabled=True,
+    # so a machine without an engine behaves exactly as before rather
+    # than silently degrading.
+    from ..ocr import OcrSettings, read_scanned
+
+    ocr = ocr_settings or OcrSettings()
+
+    def _try_ocr(path: Path, relative: str):
+        """(text, note). Text is None unless OCR cleared the floor."""
+        if not ocr.enabled:
+            return None, ""
+        outcome = read_scanned(path, ocr)
+        result.ocr_results.append(outcome)
+        if outcome.accepted:
+            return outcome.text, (
+                f"read by OCR at confidence {outcome.confidence:.1f} "
+                f"(floor {outcome.floor:.1f})")
+        return None, f"OCR: {outcome.reason}"
 
     for path in sorted(root.rglob("*")):
         if not path.is_file():
@@ -310,22 +330,31 @@ def run_stage_c(root: Path, confidential_clients: list[str],
             continue
 
         if suffix in SCANNED_SUFFIXES:
-            record = DocumentRecord(path=relative, confidential=False,
-                                    readable=False,
-                                    note="image document — OCR required (§5.5)")
-            result.documents.append(record)
-            result.unreadable.append(record)
-            continue
-
-        text = extract_text(path)
-        if text is None:
-            record = DocumentRecord(path=relative, confidential=False,
-                                    readable=False,
-                                    note="no extractable text — likely scanned; "
-                                         "OCR required (§5.5)")
-            result.documents.append(record)
-            result.unreadable.append(record)
-            continue
+            text, note = _try_ocr(path, relative)
+            if text is None:
+                record = DocumentRecord(
+                    path=relative, confidential=confidential, readable=False,
+                    reason=reason,
+                    note=note or "image document — OCR required (§5.5)")
+                result.documents.append(record)
+                result.unreadable.append(record)
+                continue
+        else:
+            text = extract_text(path)
+            if text is None:
+                # A PDF with no text layer is a scan in a PDF wrapper.
+                text, note = _try_ocr(path, relative)
+            else:
+                note = ""
+            if text is None:
+                record = DocumentRecord(
+                    path=relative, confidential=confidential, readable=False,
+                    reason=reason,
+                    note=note or ("no extractable text — likely scanned; "
+                                  "OCR required (§5.5)"))
+                result.documents.append(record)
+                result.unreadable.append(record)
+                continue
 
         terms = find_terms(text, relative)
         if confidential:

@@ -113,6 +113,42 @@ python -m control contracts --confidential-dates
 No clause text is stored either way. The redaction happens at capture,
 not at rendering, so it cannot leak through a later template change.
 
+### 3.1 OCR — for the scans
+
+The first live scan found **zero** dates across 362 legal documents:
+47% of them are photographs of text, 81% for supplier legal documents.
+Guarantee expiries and claim windows are in there; nothing could read
+them.
+
+OCR needs an engine, and it is not bundled:
+
+```powershell
+winget install UB-Mannheim.TesseractOCR
+```
+
+During that installer, tick **Additional language data** and include
+**Arabic**. Then:
+
+```powershell
+pip install pytesseract pillow pymupdf
+python -m control doctor
+```
+
+`doctor` now has an OCR section naming exactly what is missing. When it
+reports the engine, PDF rendering and Arabic data all present, set
+`enabled: true` in `%CONTROL_ROOT%\config\ocr.yaml` and re-run:
+
+```powershell
+python -m control contracts --ocr --confidential-dates
+```
+
+**Readings below the confidence floor are discarded, not used.** §5.5:
+a wrong number in a register is worse than no number, and on a scanned
+Arabic contract a permissive floor produces plausible dates that are
+wrong. The run reports three separate counts — accepted, below floor,
+and engine failed — because "the reading was not trustworthy" and
+"nothing looked at it" are different problems with different fixes.
+
 ---
 
 ## 4. The manuals

@@ -306,9 +306,26 @@ def cmd_contracts(args) -> int:
     if args.confidential_dates:
         print("D-05 ACTIVE: dates and term durations will be extracted from "
               "confidential contracts; no clause text is retained.")
+    from .ocr import OcrSettings, engine_status, summarise
+
+    ocr_config = control_root / "config" / "ocr.yaml"
+    ocr = OcrSettings.from_config(
+        yaml.safe_load(ocr_config.read_text(encoding="utf-8"))
+        if ocr_config.is_file() else None)
+    if args.ocr:
+        ocr.enabled = True
+        status = engine_status()
+        print(f"OCR: floor {ocr.floor:.0f}, languages {'+'.join(ocr.languages)}")
+        for note in status["notes"]:
+            print(f"  WARNING: {note}")
+        if not status["ocr"]:
+            print("  Nothing will be OCR'd. Scans stay unreadable, which is "
+                  "reported rather than assumed empty (§1.1).")
+
     result = run_stage_c(source, clients, folders, exclude=[control_root],
                          permit_confidential_dates=args.confidential_dates,
-                         confidential_projects=projects)
+                         confidential_projects=projects,
+                         ocr_settings=ocr)
 
     out = control_root / "discovery" / "COMMERCIAL-EXPOSURE.md"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -320,6 +337,18 @@ def cmd_contracts(args) -> int:
     if result.d05_extracted:
         print(f"confidential, dates only: {len(result.d05_extracted)}  (D-05)")
     print(f"unreadable/scanned:   {len(result.unreadable)}  (OCR needed)")
+    if result.ocr_results:
+        counts = summarise(result.ocr_results)
+        mean = counts["mean_confidence_accepted"]
+        print(f"\nOCR attempted on {counts['total']} document(s):")
+        print(f"  accepted above floor: {counts['accepted']}"
+              + (f"  (mean confidence {mean:.1f})" if mean else ""))
+        print(f"  below the §5.5 floor: {counts['below_floor']}  "
+              "— UNREADABLE, not posted")
+        print(f"  engine failed/absent: {counts['not_attempted_or_failed']}")
+        if counts["below_floor"]:
+            print("  A below-floor reading is a gap, not a document without "
+                  "terms. Those need a human (§5.5).")
     dated = [t for t in result.terms if t.found_date]
     if dated:
         soonest = sorted(dated, key=lambda t: t.found_date)[:5]
@@ -383,6 +412,18 @@ def cmd_doctor(args) -> int:
     else:
         print("\nNo CONTROL_ROOT given (--control-root or $CONTROL_ROOT)")
         ok = False
+
+    from .ocr import engine_status
+
+    ocr = engine_status()
+    print("\nOCR (§5.5):")
+    print(f"  [{'ok' if ocr['ocr'] else 'warn'}] tesseract engine")
+    print(f"  [{'ok' if ocr['pdf_render'] else 'warn'}] PDF rendering (PyMuPDF)")
+    if ocr["languages"]:
+        arabic = "ara" in ocr["languages"]
+        print(f"  [{'ok' if arabic else 'MISSING'}] Arabic language data")
+    for note in ocr["notes"]:
+        print(f"    {note}")
 
     try:
         from .outlook import _dispatch_namespace
@@ -929,6 +970,9 @@ def main(argv: list[str] | None = None) -> int:
                            help="folder to scan (default: UB_ROOT — the whole "
                                 "drive, so a guarantee filed somewhere nobody "
                                 "remembered is still found)")
+    contracts.add_argument("--ocr", action="store_true",
+                           help="§5.5: OCR scanned documents. Readings below "
+                                "the confidence floor stay UNREADABLE")
     contracts.add_argument("--confidential-dates", action="store_true",
                            help="D-05: extract dates and term durations from "
                                 "confidential contracts (no clause text kept)")
