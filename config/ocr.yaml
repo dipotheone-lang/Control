@@ -1,0 +1,43 @@
+# OCR — charter §5.5
+#
+# WHY THIS EXISTS. The Phase 0 scan read 362 legal documents and found
+# ZERO guarantee expiries, LD rates, notice periods or defects-liability
+# dates. Not because there are none: 47% of those documents are
+# photographs of text, rising to 81% for supplier legal documents. §2.2
+# calls a forfeited claim window the most expensive failure in this
+# charter, and the windows were sitting in files nothing could read.
+#
+# THE FLOOR IS THE WHOLE POINT. §5.5: below it, a document is
+# UNREADABLE — MANUAL REVIEW REQUIRED. Not evaluated, not posted. A
+# wrong number in a register is worse than no number, and on a scanned
+# Arabic contract a permissive floor produces plausible dates that are
+# wrong — which then alert confidently on the wrong day.
+#
+# The learning engine may never lower this floor (§14.4). The system
+# gets better at reading; it does not get more willing to guess.
+#
+# This file is OPTIONAL. Absent, OCR is off and scans are reported
+# unreadable exactly as before — a visible gap rather than a silent
+# degradation.
+
+enabled: false          # set true once the engine is installed
+
+confidence_floor: 80    # 0-100, tesseract's own scale
+
+languages:
+  - ara                 # Arabic FIRST — most of this estate is Arabic
+  - eng
+
+dpi: 300                # below this, Arabic diacritics degrade badly
+max_pages: 20           # per document, to bound a very long scan
+
+# INSTALL (Windows):
+#   1. Tesseract engine, with Arabic language data:
+#        winget install UB-Mannheim.TesseractOCR
+#      During setup, tick "Additional language data" and include Arabic.
+#   2. python -m pip install pytesseract pillow pymupdf
+#   3. python -m control doctor      # reports what is missing, by name
+#
+# PyMuPDF is what rasterises scanned PDFs. Without it, image files are
+# still read but PDF-wrapped scans are not — and that difference is
+# reported rather than silently narrowing the scan.
