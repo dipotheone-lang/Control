@@ -13,10 +13,13 @@ about its holes and a register that has holes nobody is filling.
 The shape follows the domain worksheet, because that shape worked: a
 CSV carrying the evidence needed to do the job, blank columns for the
 answer, and an apply step that refuses to interpret. What is typed here
-lands in the class 2 registers marked `source: MANUAL` with who entered
-it and when — never mixed in with machine-read values, because a human
+lands in the class 2 registers as a BACKFILL carrying the name of the
+person who typed it. §5.2 fixes the provenance vocabulary at
+LIVE | BACKFILL, so no third value is invented here — what marks a row
+as hand-read is `submitted_by` and the `MAN-` reference prefix. A human
 reading a photograph and a parser reading a text layer are different
-kinds of evidence and the register should say which it holds.
+kinds of evidence, and the register should be able to say which it
+holds.
 """
 
 import csv

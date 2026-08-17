@@ -9,8 +9,8 @@ CONFIDENTIALITY BOUNDARY — read this before extending the module.
 
 §6 Stage C requires extracting contractual dates and terms from
 contracts. §12.1 (decision D-01, LOCKED) forbids opening the body of
-any client-confidential document: no text extraction, no OCR, no value
-posted to a register. Contracts with NDA clients are confidential by
+any client-confidential document: no text extraction, no value posted
+to a register. Contracts with NDA clients are confidential by
 definition, so the two requirements collide precisely where the value
 is highest.
 
@@ -24,6 +24,17 @@ binding and are enforced here, not left to the report layer:
   reference are kept, the surrounding text is redacted at the point of
   capture, so it cannot leak through a later change to a template;
 - everything else in those documents stays metadata-only under §12.1.2.
+
+**Decision D-14 (17-Aug-2026) extends D-05 to OCR**, because the first
+live run found 47% of legal documents are photographs of text — so the
+guarantee expiries D-05 exists to catch are exactly the ones no text
+layer reaches. It carries one further condition, enforced in
+`_try_ocr` rather than left to the report layer: for a confidential
+document the OCR text buffer is **never retained**. It passes to term
+extraction transiently and the stored result keeps only the confidence
+and the document reference. Retaining it would put the full body of an
+NDA contract where the report layer can reach it — the same leak,
+through a different door.
 
 `permit_confidential_dates=False` is still the default. The exception
 must be switched on deliberately by a caller acting under D-05; the
