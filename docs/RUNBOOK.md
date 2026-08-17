@@ -149,6 +149,37 @@ wrong. The run reports three separate counts — accepted, below floor,
 and engine failed — because "the reading was not trustworthy" and
 "nothing looked at it" are different problems with different fixes.
 
+### 3.2 What OCR cannot reach
+
+The floor rejects readings it cannot trust, and sealed documents outside
+D-05's contract scope stay closed. Those still hold real guarantee
+expiries and claim windows, so the contracts run now also writes:
+
+```
+%CONTROL_ROOT%\discovery\MANUAL-TERMS.csv
+```
+
+One row per document that produced no usable terms, each saying **why** —
+below the confidence floor, sealed, or no engine. That matters because
+the next action differs: a below-floor scan is perfectly legible to a
+person, a sealed document may need permission first, and an engine
+failure may just need the engine.
+
+Fill in `TERM_KIND`, a date or a value, and the counterparty. Then:
+
+```powershell
+python -m control terms --apply "%CONTROL_ROOT%\discovery\MANUAL-TERMS.csv"
+```
+
+Those land in the class 2 registers and start alerting like any other
+deadline. They are recorded as `BACKFILL` carrying your address, so a
+hand-read value stays distinguishable from a machine-read one — and if
+one turns out wrong, every row from the same pass can be found.
+
+**It refuses to interpret.** A date that is not `YYYY-MM-DD`, a term
+kind it does not know, a number that is prose — each stops the apply and
+names the line. Nothing is stored on a guess.
+
 ---
 
 ## 4. The manuals

@@ -735,6 +735,61 @@ def _transport_for(report, args):
         return None
 
 
+def cmd_terms(args) -> int:
+    """§5.5 — the work queue for what OCR could not reach."""
+    from .db import connect
+    from .discovery.manual_terms import apply_rows, read_worksheet
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    worksheet = (Path(args.apply) if args.apply
+                 else control_root / "discovery" / "MANUAL-TERMS.csv")
+
+    if not args.apply:
+        print(f"To create the worksheet, run the contracts scan — it writes\n"
+              f"  {worksheet}\n"
+              "listing every document that produced no usable terms.\n\n"
+              "Fill TERM_KIND, DATE_yyyy_mm_dd or VALUE, and COUNTERPARTY,\n"
+              "then re-run this with --apply <path>.")
+        return 0
+
+    if not worksheet.is_file():
+        print(f"worksheet not found: {worksheet}")
+        return 1
+
+    rows, problems = read_worksheet(worksheet)
+    if problems:
+        print("The worksheet has entries Control will not interpret:\n")
+        for problem in problems:
+            print(f"  {problem}")
+        print("\nNothing applied. A guessed date in a class 2 register alerts "
+              "confidently on the wrong day (§1.1).")
+        return 1
+    if not rows:
+        print("No terms entered. Nothing applied.")
+        return 1
+
+    db_path = control_root / "data" / "control.db"
+    if not db_path.exists():
+        print(f"no database at {db_path}. Run 'init' first.")
+        return 1
+    conn = connect(db_path)
+    try:
+        counts = apply_rows(conn, rows, entered_by=args.entered_by,
+                            on_date=today)
+    finally:
+        conn.close()
+
+    print(f"applied {len(rows)} term(s) from {worksheet.name}")
+    for register, count in counts.items():
+        if count:
+            print(f"  {register}: +{count}")
+    print(f"\nRecorded as BACKFILL entered by {args.entered_by} (§5.2), so a "
+          "hand-read value stays distinguishable from a machine-read one.")
+    print("Check the horizon:  python -m control registers")
+    return 0
+
+
 def cmd_manuals(args) -> int:
     """Stage C — find the governing manuals, for CEO confirmation."""
     import yaml
@@ -911,7 +966,28 @@ def cmd_verify(args) -> int:
     return 1 if failures else 0
 
 
+def _harden_console() -> None:
+    """Stop a console encoding from killing a successful run.
+
+    Windows consoles default to cp1252, which cannot encode Arabic. Most
+    of this document estate is Arabic, and several commands print file
+    and folder names — so the first Arabic path would raise
+    UnicodeEncodeError and take down a scan that had otherwise worked.
+
+    Files were always written UTF-8; only the console was at risk. The
+    fallback replaces unencodable characters rather than raising, so a
+    name may render imperfectly in the terminal while the run completes
+    and the written output stays exact.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _harden_console()
     parser = argparse.ArgumentParser(prog="control")
     sub = parser.add_subparsers(dest="command", required=True)
     for name, fn in (("startup", cmd_startup), ("discovery", cmd_discovery),
@@ -1007,6 +1083,16 @@ def main(argv: list[str] | None = None) -> int:
                             "has already approved for this run mode")
     cycle.set_defaults(fn=cmd_cycle)
 
+    terms = sub.add_parser(
+        "terms",
+        help="manual entry for documents no machine could read (§5.5)")
+    terms.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    terms.add_argument("--apply", default="",
+                       help="path to the filled-in worksheet CSV")
+    terms.add_argument("--entered-by", default="ahmed@ubcsis.com")
+    terms.add_argument("--today", default="", help="ISO date, for testing")
+    terms.set_defaults(fn=cmd_terms)
+
     manuals = sub.add_parser(
         "manuals",
         help="Stage C: find the governing manuals, for CEO confirmation")
@@ -1044,7 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init",
                          "contracts", "registers", "classify", "backup",
-                         "manuals")
+                         "manuals", "terms")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
