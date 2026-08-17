@@ -54,6 +54,9 @@ class OcrResult:
     reason: str = ""
     pages: int = 0
     engine: str = ""
+    # D-14: for a client-confidential document the OCR text is dropped
+    # at capture. Only the confidence and the reference survive.
+    text_redacted: bool = False
 
     @property
     def verdict(self) -> str:

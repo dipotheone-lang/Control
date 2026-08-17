@@ -84,10 +84,20 @@ metadata_only_mode:
   permitted: [sender, recipients, timestamp, subject, attachment_filename,
               file_type, file_size, page_or_sheet_count,
               form_code_from_filename_only, thread_position]
-  prohibited: [opening body, OCR, text extraction, figure extraction,
-               posting values to registers, quoting content anywhere,
-               retaining file beyond mailbox, passing contents to any
-               model or external service]
+  # OCR is prohibited EXCEPT under decision D-14 (17-Aug-2026), which
+  # permits it on client-confidential CONTRACTS for the D-05 purpose
+  # only — dates and term durations — with the OCR text never retained.
+  # Every other D-05 condition carries over unchanged.
+  prohibited:
+    - opening body
+    - "OCR — except under D-14: contracts only, dates and term durations
+       only, OCR text never retained"
+    - text extraction
+    - figure extraction
+    - posting values to registers
+    - quoting content anywhere
+    - retaining file beyond mailbox
+    - passing contents to any model or external service
   checks: C1 full; C2 filename-only; C3-C7 not run; S1-S4 metadata signals only
   verdicts: [RECEIVED_ON_TIME, RECEIVED_LATE, NOT_RECEIVED,
              NOT ASSESSED — CONFIDENTIAL SCOPE]
