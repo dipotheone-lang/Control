@@ -3,68 +3,215 @@
 # Escalation: CEO, same day. Alerts T-7, T-3, T-1, and on the day.
 # Class 1 never suppresses for weekends, holidays, leave, or reminder limits.
 #
-# HARD RULE (§2.1): exact deadlines must be confirmed with the company's tax
-# advisor and re-verified every January. Never hardcode a statutory date from
-# assumption. Every rule below is UNVERIFIED until the advisor confirms it
-# (open decision O-03) — unverified rules still alert, erring early.
-# The learning engine may never modify a statutory deadline (§14.2 Tier C).
+# PROVENANCE — read this before trusting a date below.
+#
+# Every rule here is `ceo_stated: true, verified_by_advisor: false`. The
+# CEO supplied them in the execution order of 18-Aug-2026 so that the
+# system could start working from what is known rather than waiting for
+# what is not. That is a deliberate operating position, not an oversight.
+#
+# `ceo_stated` is NOT `verified_by_advisor` and never becomes it by
+# time passing or by the system running without incident. Only a named
+# advisor confirming a rule promotes it (O-03), and §7 of the execution
+# order makes promotion without a named human a stop condition.
+#
+# The learning engine may never modify a statutory deadline (§14.2 C).
 
 verified_by_advisor: false
+ceo_stated: true
+ceo_stated_on: 2026-08-18
+ceo_stated_by: ahmed@ubcsis.com
+source: Execution order 18-Aug-2026 §2.3
 last_verified: null
 next_annual_verification: null   # set to January after first verification
 
 obligations:
+  # D-15, D-19. Two dates, deliberately: the statutory one is when the
+  # law falls due, the operative one is when Control acts. The lead is
+  # applied to the operative rule only, so the anchor never moves.
   - id: STAT-VAT
     name: VAT return and payment
-    rule: UNVERIFIED — CONFIRM WITH ADVISOR
-  - id: STAT-WHT
-    name: Withholding tax
-    rule: UNVERIFIED — CONFIRM WITH ADVISOR
-  - id: STAT-PAYROLL
-    name: Payroll tax
-    rule: UNVERIFIED — CONFIRM WITH ADVISOR
-  - id: STAT-SOCINS
-    name: Social insurance contributions and headcount declarations
-    rule: UNVERIFIED — CONFIRM WITH ADVISOR
-  # ETA e-invoicing is split into two obligations because they fail
-  # differently. Submission is a recurring deadline. Rejection clearance
-  # is an EVENT-DRIVEN window that starts when ETA rejects an invoice
-  # and expires quietly — §2.2's forfeiture shape, in a class 1 setting.
-  #
-  # Phase 0 found 767 messages from invoicing.eta.gov.eg, so this is
-  # live and active, not dormant.
-  #
-  # Ownership confirmed by the CEO 16-Aug-2026, matching the §2.1 split.
-  - id: STAT-ETA-SUB
-    name: ETA electronic invoicing — submission
-    rule: UNVERIFIED — CONFIRM WITH ADVISOR
     owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
     preparer: hadeer@ubcsis.com         # Hadeer Mohamed
     escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: monthly
+    rule: end of the following month, -5 working days
+    statutory_rule: end of the following month
+    provenance: ceo_stated
+    decision: D-15, D-19
+
+  - id: STAT-WHT
+    name: Withholding tax
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: monthly
+    rule: end of the following month
+    provenance: ceo_stated
+    decision: D-22
+    # Lead time not yet established — Hadeer. Until it is, Control acts
+    # on the statutory date itself, which is later than ideal but never
+    # later than the law.
+    open_question: withholding lead time
+
+  # D-23, D-24. Return AND remittance — two acts, and the execution
+  # order's own highest-value test is whether the year holds twelve
+  # remittances rather than four. If it does, this rule is wrong and
+  # eleven obligations are missing.
+  - id: STAT-PAYROLL
+    name: Payroll tax — return and remittance
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: quarterly
+    rule: UNVERIFIED — quarterly dates pending (Hadeer)
+    provenance: ceo_stated
+    decision: D-23, D-24
+    open_question: payroll tax quarterly dates
+
+  - id: STAT-SOCINS
+    name: Social insurance contributions
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: monthly
+    rule: day 15
+    provenance: ceo_stated
+    decision: D-30
+
+  # ETA e-invoicing is split because the two halves fail differently.
+  # Phase 0 found 767 messages from invoicing.eta.gov.eg, so both are
+  # live rather than dormant.
+  #
+  # B2: submission is real-time. It has no countdown, so it is exception
+  # detection — a submission that did not happen — not a deadline. A
+  # countdown here would alert every day on a thing with no due date.
+  - id: STAT-ETA-SUB
+    name: ETA electronic invoicing — submission
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: continuous
+    rule: real-time — exception detection, no countdown
+    provenance: ceo_stated
+    decision: D-16
+    mechanism: exception_detection
     evidence: Phase 0 — 767 messages from invoicing.eta.gov.eg
+
+  # B1: the tightest statutory window in the system. Seven days from
+  # rejection, checked DAILY — a weekly check burns six of the seven.
+  # Event-driven: the clock starts when ETA rejects, so it cannot be a
+  # cadence and is refused by the due parser on purpose.
+  #
+  # M1 (execution order §3.1): Control reads control@ only, so it cannot
+  # see accounts@. Detection of the rejection itself stays MANUAL, and
+  # that cost is stated in every management report.
   - id: STAT-ETA-REJ
     name: ETA electronic invoicing — rejection clearance
-    rule: UNVERIFIED — CONFIRM WITH ADVISOR
-    owner: accounts@ubcsis.com
-    preparer: hadeer@ubcsis.com
-    escalation: ahmed@ubcsis.com
-    # Event-driven: the clock starts at the rejection, not on a calendar
-    # date, so the window LENGTH is what the advisor must supply. Until
-    # then no deadline can be computed, and Control says so rather than
-    # assuming a number (O-03, §1.1).
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: event
+    rule: 7 days from rejection
     trigger: rejection notice received from ETA
-    window_days: null                   # TO BE CONFIRMED — advisor
-    note: >
-      A rejected invoice that is never cleared is an unbilled invoice
-      and a compliance gap at once. The window cannot be tracked until
-      its length is confirmed; this row exists so the gap has an owner
-      rather than being invisible.
+    window_days: 7                      # D-31, ceo_stated (was null)
+    check_frequency: daily
+    provenance: ceo_stated
+    decision: D-31
+    mechanism: event_window
+    manual_detection: true
+    manual_detection_reason: >
+      Rejections arrive in accounts@, which is outside the M1 scope of
+      control@ only. Control cannot see them, so a human must enter the
+      rejection date. Until D-07 reactivates, this window is unautomated.
+
   - id: STAT-CIT
-    name: Corporate income tax return and instalments
-    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+    name: Corporate income tax — return and payment
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: annual
+    rule: 31 March
+    provenance: ceo_stated
+    decision: D-25, D-27, D-28
+    note: Financial year ends 31 December.
+
+  # B3 + B4. The clock starts at the EVENT — a joiner or leaver — not at
+  # the moment HR gets round to registering it. HR registering within
+  # five working days consumes that much of the thirty, so the effective
+  # window is twenty-five days, and computing from the registration date
+  # would hide exactly that erosion.
+  - id: STAT-SI-HEADCOUNT
+    name: Social insurance — headcount declaration
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: event
+    rule: 30 days from event
+    hr_registration_target_working_days: 5
+    effective_window_days: 25
+    provenance: ceo_stated
+    decision: D-20, D-21
+    mechanism: event_window
+
   - id: STAT-REG
-    name: Commercial register, tax card, industrial register renewals
-    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+    name: Commercial register, tax card, industrial register — renewals
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: annual
+    rule: UNVERIFIED — renewal dates pending (Mohamed Ali, from certificates)
+    provenance: ceo_stated
+    decision: D-29
+    open_question: renewal dates x 3
+
+  # B6. Not a filing — a watch. The PDPL executive regulations are still
+  # pending (D-40), and every PDPL answer in the governance pack becomes
+  # reviewable on the day they issue. A quarterly review is the cheapest
+  # way to not miss that.
+  - id: STAT-PDPL-REGS
+    name: PDPL executive regulations — watch for issue
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: quarterly
+    rule: UNVERIFIED — quarterly review date pending
+    provenance: ceo_stated
+    decision: D-40
+    mechanism: watch
+    on_issue: >
+      Every PDPL position recorded under D-52 becomes reviewable. Raise
+      as a CEO decision, not as a configuration change.
+
+  # B7. An obligation that exists without a known way to discharge it.
+  # Recording it as absent would be false; recording it as satisfied
+  # would be worse. It is recorded as owed, with the mechanism unknown.
+  - id: STAT-PDPL-REG
+    name: PDPL controller registration
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: one_off
+    rule: UNVERIFIED — mechanism unknown
+    obligation_exists: true
+    mechanism_available: unknown
+    provenance: ceo_stated
+    decision: D-35, D-39, D-40
+    note: >
+      Registration is required (D-35) with no size exemption (D-39), but
+      the mechanism depends on regulations that have not issued (D-40).
+
+  # Restored: this row was dropped in an earlier rewrite of this file and
+  # recovered by the test that asserts §2.1's list is complete. D-32
+  # makes completeness its own obligation, and a class 1 row that
+  # vanishes is exactly the silence the register exists to prevent.
   - id: STAT-LIC
     name: Licences, permits, client-required certifications
-    rule: UNVERIFIED — CONFIRM WITH ADVISOR
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: annual
+    rule: UNVERIFIED — renewal dates pending (Mohamed Ali, from certificates)
+    provenance: ceo_stated
+    decision: D-29
+    open_question: licence and permit renewal dates

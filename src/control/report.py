@@ -75,18 +75,25 @@ def _horizon_section(horizon: list[HorizonItem], as_of: date) -> list[str]:
               and as_of <= h.due <= as_of + timedelta(days=30)]
     if not window:
         lines.append(
-            "   No class 1 or 2 deadlines on record for the next 30 days. "
-            "If this is unexpected, the register is incomplete — verify the "
-            "statutory calendar (O-03) and the commercial registers before "
-            "trusting the silence."
-        )
-        return lines
-    for h in sorted(window, key=lambda x: x.due):
-        days = (h.due - as_of).days
-        lines.append(
-            f"   [{h.obligation_class}] {h.due:%d-%b-%Y} (T-{days}) {h.name} — "
-            f"owner {h.owner} — {h.status}"
-        )
+            "   No class 1 or 2 deadlines on record for the next 30 days.")
+    else:
+        for h in sorted(window, key=lambda x: x.due):
+            days = (h.due - as_of).days
+            lines.append(
+                f"   [{h.obligation_class}] {h.due:%d-%b-%Y} (T-{days}) "
+                f"{h.name} — owner {h.owner} — {h.status}"
+            )
+    # The caveat runs in BOTH branches. It used to fire only on an empty
+    # horizon, which had it backwards: a horizon showing four dates is
+    # more likely to be read as coverage than one showing none, so the
+    # populated case is where the reminder is worth most. This shows
+    # what is on record; section 6 shows what is not.
+    lines.append(
+        "   This horizon is only as complete as the register behind it — "
+        "the register is incomplete until the statutory calendar is "
+        "advisor-verified (O-03) and the commercial registers are built. "
+        "Gaps are itemised below; do not read this list as coverage."
+    )
     return lines
 
 
