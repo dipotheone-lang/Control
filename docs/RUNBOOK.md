@@ -56,6 +56,21 @@ If `doctor` then reports missing config files, run
 `python -m control init` — the config set grows as decisions are taken,
 and startup halts on a missing file rather than assuming a default.
 
+`doctor` also reports when your config is **behind the templates**. Your
+files are never overwritten, because they carry decisions — but that
+means a decision taken after this machine was set up would otherwise
+never arrive. To pull in the entries you are missing:
+
+```powershell
+python -m control init --adopt
+```
+
+Additive only: it appends list entries the templates have and yours does
+not, and never removes, reorders or changes anything already there. A
+whole config *key* that is absent is reported rather than added — an
+absent key may be absent on purpose, and filling it silently would be
+the system deciding something that is yours.
+
 ---
 
 ## 2. Turn on the backup — before anything writes

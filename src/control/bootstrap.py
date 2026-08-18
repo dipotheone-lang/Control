@@ -106,3 +106,147 @@ def render_result(result: BootstrapResult) -> str:
         "Back it up per §5.2 — the whole of CONTROL_ROOT, encrypted, daily.",
     ]
     return "\n".join(lines)
+
+
+# ---- config drift -----------------------------------------------------
+
+# Named-list keys whose entries are governance content: a client added
+# by CEO decision, a mailbox brought into scope, a prohibition. An entry
+# present in the template and absent locally means a decision has not
+# reached this machine.
+_NAMED_LISTS = {
+    "confidential_clients": "name",
+    "confidential_projects": "name",
+    "people": "email",
+    "vacancies": "email",
+    "special_addresses": "address",
+    "mailboxes": None,          # bare strings
+    "preconditions": "id",
+}
+
+
+def _entry_key(entry, field_name: str | None) -> str:
+    if field_name and isinstance(entry, dict):
+        return str(entry.get(field_name) or entry)
+    return str(entry)
+
+
+def config_drift(control_root: Path, template_config: Path) -> list[str]:
+    """What the template has that this machine's config does not.
+
+    Config is never overwritten, and that is right — a live file carries
+    decisions someone made, and a template would discard them. But
+    silence about the difference has its own failure: a machine set up
+    before a decision runs on the configuration from before it, forever,
+    with nothing saying so. That is how five clients added by CEO
+    decision can end up with less protection than was decided.
+
+    Deliberately one-directional. A local file holding MORE than the
+    template is the normal case — that is where decisions live — and is
+    never reported. Only what the template gained is.
+    """
+    import yaml
+
+    control_root = Path(control_root)
+    template_config = Path(template_config)
+    drift: list[str] = []
+
+    for name in CONFIG_FILES:
+        source, target = template_config / name, control_root / "config" / name
+        if not source.is_file() or not target.is_file():
+            continue
+        try:
+            template = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+            live = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            drift.append(f"{name}: could not be compared ({str(e)[:60]})")
+            continue
+        if not isinstance(template, dict) or not isinstance(live, dict):
+            continue
+
+        for key in template:
+            if key not in live:
+                drift.append(f"{name}: key {key!r} is in the template and not "
+                             "in your copy")
+                continue
+            if key in _NAMED_LISTS and isinstance(template[key], list) \
+                    and isinstance(live.get(key), list):
+                field_name = _NAMED_LISTS[key]
+                have = {_entry_key(e, field_name) for e in live[key]}
+                missing = [_entry_key(e, field_name) for e in template[key]
+                           if _entry_key(e, field_name) not in have]
+                if missing:
+                    drift.append(
+                        f"{name}: {key} is missing {len(missing)} entry(ies) "
+                        f"the template has — {', '.join(sorted(missing))}")
+    return drift
+
+
+def render_drift(drift: list[str]) -> list[str]:
+    if not drift:
+        return ["config matches the templates — no decisions left behind."]
+    lines = [
+        f"CONFIG BEHIND THE TEMPLATES — {len(drift)} difference(s).",
+        "Your files are never overwritten, because they carry decisions.",
+        "These are things the templates gained that your copy has not:",
+        "",
+    ]
+    lines += [f"  - {item}" for item in drift]
+    lines += [
+        "",
+        "Copy across what applies. A confidentiality list missing a client "
+        "gives that client less protection than was decided (§12.1.1).",
+    ]
+    return lines
+
+
+def adopt_drift(control_root: Path, template_config: Path,
+                only: str = "") -> list[str]:
+    """Add template entries the live config lacks. Never removes.
+
+    Detection alone leaves the work as hand-editing YAML, which is the
+    friction that let the decision go missing in the first place. So the
+    additive half is offered as a step — but only the additive half.
+
+    Strictly one-directional: entries the template has and the live file
+    does not are appended; nothing local is changed, reordered or
+    removed, because that is where decisions live. Whole new config
+    KEYS are not touched either — a key absent locally may be absent
+    deliberately, and adding it silently would be the system deciding
+    something for a human. Those stay reported by `config_drift`.
+    """
+    import yaml
+
+    control_root = Path(control_root)
+    template_config = Path(template_config)
+    added: list[str] = []
+
+    for name in CONFIG_FILES:
+        if only and name != only:
+            continue
+        source, target = template_config / name, control_root / "config" / name
+        if not source.is_file() or not target.is_file():
+            continue
+        template = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+        live = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        if not isinstance(template, dict) or not isinstance(live, dict):
+            continue
+
+        changed = False
+        for key, field_name in _NAMED_LISTS.items():
+            if not isinstance(template.get(key), list) \
+                    or not isinstance(live.get(key), list):
+                continue
+            have = {_entry_key(e, field_name) for e in live[key]}
+            for entry in template[key]:
+                if _entry_key(entry, field_name) not in have:
+                    live[key].append(entry)
+                    added.append(f"{name}: {key} += "
+                                 f"{_entry_key(entry, field_name)}")
+                    changed = True
+
+        if changed:
+            target.write_text(
+                yaml.safe_dump(live, allow_unicode=True, sort_keys=False),
+                encoding="utf-8")
+    return added
