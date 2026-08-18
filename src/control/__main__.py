@@ -67,6 +67,13 @@ def _startup(args):
           f"RUN_MODE={report.state.run_mode}, LEARNING_MODE={report.state.learning_mode}")
     print(f"open disputes: {report.open_disputes} | open threads: {report.open_threads} | "
           f"active absences: {report.active_absences}")
+    if report.schema_added:
+        # A schema change applied to a database already in the field is
+        # not a routine event, and it is not something to discover from
+        # a crash three commands later.
+        print(f"schema: created {', '.join(report.schema_added)} — the code "
+              "was newer than this database. Existing rows are untouched "
+              "(§5.2); the addition is in the audit log.")
     return report
 
 
@@ -964,7 +971,8 @@ def cmd_cycle(args) -> int:
 
     conn = connect(report.db_path)
     try:
-        loaded = load_for_cycle(report.config, conn, today)
+        loaded = load_for_cycle(report.config, conn, today,
+                                logs_dir=control_root / "logs")
         class2 = load_class2(conn)
         tracked = loaded.tracked + class2
 
@@ -1116,7 +1124,8 @@ def cmd_report(args) -> int:
 
     conn = connect(report.db_path)
     try:
-        loaded = load_for_cycle(report.config, conn, as_of)
+        loaded = load_for_cycle(report.config, conn, as_of,
+                                logs_dir=control_root / "logs")
         tracked = loaded.tracked + load_class2(conn)
 
         horizon = [
@@ -1368,6 +1377,128 @@ def cmd_disputes(args) -> int:
 
         for line in dsp.rejection_pattern(conn):
             print(f"\n§8.6: {line}")
+        return 0
+    finally:
+        conn.close()
+
+
+def cmd_event(args) -> int:
+    """Event-driven statutory windows — §2.1, execution order B1 and B4.
+
+    Two class 1 obligations have no cadence: the ETA rejection clearance
+    window starts when ETA rejects an invoice, and the social insurance
+    headcount declaration starts when someone joins or leaves. There is
+    no date to compute until the event exists.
+
+    This command is how the event gets in. It exists as a human-driven
+    command rather than a detector because M1 keeps Control on
+    `control@` only, and ETA rejections arrive in `accounts@` — so for
+    now a person enters them, and every row says so.
+    """
+    from . import events as ev
+    from .config import load_config
+    from .db import connect, ensure_schema
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    conn = connect(control_root / "data" / "control.db")
+    try:
+        # This command does not go through startup, and the event tables
+        # postdate every database created before them.
+        added = ensure_schema(conn)
+        if added:
+            print(f"schema: created {', '.join(added)}")
+        statutory = load_config(control_root / "config")["statutory-calendar"]
+
+        # §5.2 requires `submitted_by` on every row, and this register is
+        # the one place where a human's memory is the only evidence
+        # there is. An unattributable row here could not be checked with
+        # anyone later.
+        if (args.discharge or args.obligation) and not args.by:
+            print("--by is required: every row records who entered it "
+                  "(§5.2), and for a manually detected event that is the "
+                  "only evidence of where the date came from.")
+            return 1
+
+        if args.discharge:
+            event_id = int(args.discharge)
+            if event_id not in {e.row_id for e in ev.open_events(conn)}:
+                print(f"No open event {event_id}. Nothing recorded.")
+                return 1
+            on = date.fromisoformat(args.on) if args.on else today
+            ev.discharge_event(conn, event_id, on, args.by,
+                               reference=args.reference or None)
+            print(f"event {event_id}: discharged on {on:%d-%b-%Y} by "
+                  f"{args.by}")
+            print("  the event row is unchanged — closure is its own row "
+                  "(§5.2)")
+            return 0
+
+        if args.obligation:
+            if not args.date:
+                print("--date is required: the deadline counts from the day "
+                      "the event happened, not from today (B4).")
+                return 1
+            event_date = date.fromisoformat(args.date)
+            if event_date > today:
+                print(f"Not recorded: {event_date:%d-%b-%Y} is in the future. "
+                      "An event that has not happened starts no clock.")
+                return 1
+            event_id = ev.record_event(
+                conn, args.obligation, args.type or "UNSPECIFIED", event_date,
+                args.reference or None, "MANUAL", args.by,
+                registered_at=today)
+            print(f"event {event_id}: {args.obligation} on "
+                  f"{event_date:%d-%b-%Y}, entered by {args.by}")
+            lag = (today - event_date).days
+            if lag:
+                print(f"  registered {lag} day(s) after the event — that "
+                      "much of the window was already spent before Control "
+                      "could start counting (B4)")
+            tracked, _ = ev.build_event_items(conn, statutory, today)
+            mine = next((t for t in tracked
+                         if t.item_id.endswith(f"#{event_id}")), None)
+            if mine:
+                print(f"  due {mine.due:%d-%b-%Y} "
+                      f"(T-{(mine.due - today).days}), owner {mine.owner}")
+            else:
+                print("  no deadline computed — see the gaps in the next "
+                      "report; the clock is running and Control is not "
+                      "counting it")
+            return 0
+
+        # No arguments: show what is running.
+        tracked, gaps = ev.build_event_items(conn, statutory, today)
+        rows = ev.open_events(conn)
+        if not rows:
+            print("No statutory events on record — nothing is being counted.")
+        else:
+            print(f"{len(rows)} open statutory event(s):\n")
+            due_by_id = {t.item_id: t for t in tracked}
+            for event in rows:
+                item = due_by_id.get(
+                    f"{event.obligation_id}#{event.row_id}")
+                when = (f"due {item.due:%d-%b-%Y} "
+                        f"(T-{(item.due - today).days})" if item
+                        else "NO DEADLINE COMPUTED")
+                print(f"  [{event.row_id}] {event.obligation_id} — "
+                      f"{event.event_type} on {event.event_date:%d-%b-%Y} — "
+                      f"{when}")
+                if event.reference:
+                    print(f"       ref {event.reference}")
+                if event.registration_lag_days:
+                    print(f"       registered {event.registration_lag_days} "
+                          "day(s) late — that much of the window was gone "
+                          "before Control saw it")
+                print(f"       detection: {event.detection}")
+        for line in gaps:
+            print(f"\n  {line}")
+        print("\nTo record:   python -m control event --obligation "
+              "STAT-ETA-REJ --type ETA_REJECTION \\\n"
+              "               --date YYYY-MM-DD --reference INV-1234 "
+              "--by you@ubcsis.com")
+        print("To discharge: python -m control event --discharge <id> "
+              "--by you@ubcsis.com")
         return 0
     finally:
         conn.close()
@@ -1855,6 +1986,28 @@ def main(argv: list[str] | None = None) -> int:
                                "CEO absence (§3.3)")
     disputes.add_argument("--today", default="", help="ISO date, for testing")
     disputes.set_defaults(fn=cmd_disputes)
+
+    event = sub.add_parser(
+        "event",
+        help="event-driven class 1 windows: record an event, discharge one, "
+             "or list what is running (B1, B4)")
+    event.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    event.add_argument("--obligation", default="",
+                       help="e.g. STAT-ETA-REJ, STAT-SI-HEADCOUNT")
+    event.add_argument("--type", default="",
+                       help="e.g. ETA_REJECTION, JOINER, LEAVER")
+    event.add_argument("--date", default="",
+                       help="ISO date the event HAPPENED — the deadline "
+                            "counts from this, not from today (B4)")
+    event.add_argument("--reference", default="",
+                       help="invoice number, employee reference")
+    event.add_argument("--discharge", default="",
+                       help="event id to close")
+    event.add_argument("--on", default="",
+                       help="ISO date the obligation was discharged")
+    event.add_argument("--by", default="", help="who is entering this")
+    event.add_argument("--today", default="", help="ISO date, for testing")
+    event.set_defaults(fn=cmd_event)
 
     golden = sub.add_parser(
         "golden",

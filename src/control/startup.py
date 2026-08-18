@@ -19,7 +19,7 @@ from pathlib import Path
 from . import HaltError
 from .audit import AuditLog
 from .config import Config, load_config
-from .db import connect, init_db, integrity_check
+from .db import connect, ensure_schema, integrity_check
 from .states import State, validate_state
 from .transport import assert_route_permitted
 
@@ -33,6 +33,10 @@ class StartupReport:
     open_disputes: int
     open_threads: int
     active_absences: int
+    # Tables this startup had to create on an existing database. Empty
+    # on a normal run; non-empty means the code was newer than the
+    # database and the difference has just been applied (§5.2).
+    schema_added: tuple = ()
 
 
 def run_startup(
@@ -70,9 +74,16 @@ def run_startup(
 
     # 2
     db_path = control_root / "data" / "control.db"
-    conn = init_db(db_path) if not db_path.exists() else connect(db_path)
+    conn = connect(db_path)
     try:
         integrity_check(conn)
+        # Before the state is read, not after. `ensure_schema` used to
+        # run only when the file was absent, so a table added after a
+        # deployment never reached a database already in the field —
+        # the code expected it and the first query failed at the point
+        # of use. Every statement is IF NOT EXISTS, so this is a no-op
+        # on a current database and is reported when it is not.
+        schema_added = tuple(ensure_schema(conn))
         # 3 — load open state
         open_disputes = conn.execute(
             "SELECT COUNT(*) FROM disputes WHERE state = 'PENDING'"
@@ -100,6 +111,7 @@ def run_startup(
             "level": maturity_level,
             "date": today,
             "chain": detail,
+            **({"schema_added": list(schema_added)} if schema_added else {}),
         },
     )
     return StartupReport(
@@ -110,4 +122,5 @@ def run_startup(
         open_disputes=open_disputes,
         open_threads=open_threads,
         active_absences=active_absences,
+        schema_added=schema_added,
     )

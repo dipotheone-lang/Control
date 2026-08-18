@@ -148,8 +148,18 @@ obligations:
     escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
     cadence: event
     rule: 30 days from event
+    window_days: 30                     # counted from the event (B4)
+    trigger: joiner or leaver
+    # No check_frequency. B1 specifies a daily check for the ETA
+    # rejection window and says nothing about this one, and a 30-day
+    # window is served by the §2.1 ladder (T-7, T-3, T-1, on the day).
+    # Adding one here would be Control inventing a rule (§1.3).
+    # 25 is what is LEFT if HR registers within its 5-working-day
+    # target. It is an expectation, not the rule — the deadline is
+    # always 30 days from the event, and the actual erosion is computed
+    # from the actual registration lag rather than from this number.
     hr_registration_target_working_days: 5
-    effective_window_days: 25
+    effective_window_days_if_target_met: 25
     provenance: ceo_stated
     decision: D-20, D-21
     mechanism: event_window

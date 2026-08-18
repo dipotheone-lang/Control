@@ -555,7 +555,7 @@ def build_class3_state(conn, tracked: list, today: date,
 
 # ---- the whole thing --------------------------------------------------
 
-def load_for_cycle(config, conn, today: date) -> LoadResult:
+def load_for_cycle(config, conn, today: date, logs_dir=None) -> LoadResult:
     result = LoadResult()
     calendar, calendar_gaps = build_calendar(config["sla"])
     result.calendar = calendar
@@ -571,7 +571,25 @@ def load_for_cycle(config, conn, today: date) -> LoadResult:
         config["statutory-calendar"], today)
     result.gaps += statutory_gaps
 
-    result.tracked = class3 + statutory
+    # Event-driven class 1 windows. `build_statutory` refuses these on
+    # purpose — their clock starts on an event, so there is no cadence
+    # to compute from — and this is where the recorded events become
+    # deadlines (execution order B1, B4).
+    from .events import build_event_items, observed_cadence_gaps
+
+    events, event_gaps = build_event_items(
+        conn, config["statutory-calendar"], today)
+    result.gaps += event_gaps
+
+    # B1: Control cannot schedule itself, so the only enforcement of
+    # "checked daily" available to it is to observe the cadence it
+    # actually ran at and report the misses. The evidence is its own
+    # audit log, so this needs the log directory.
+    if logs_dir is not None:
+        result.gaps += observed_cadence_gaps(
+            logs_dir, config["statutory-calendar"], conn, today)
+
+    result.tracked = class3 + statutory + events
     result.class3_state = build_class3_state(
         conn, class3, today,
         {oid: s.period for oid, s in specs.items()})
