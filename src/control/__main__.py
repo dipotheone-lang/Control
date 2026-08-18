@@ -882,6 +882,153 @@ def cmd_terms(args) -> int:
     return 0
 
 
+def cmd_golden(args) -> int:
+    """§13.1 golden set — issue a batch, apply it, or run the gate.
+
+    Three modes, in the order the charter runs them:
+
+      --issue   write the next batch of 10 for the CEO to judge (D-03:
+                Control's own verdict never appears on the sheet)
+      --apply   read a filled sheet back in as permanent test cases
+      (none)    run the engine against the set and report the gate
+
+    The gate is what stands between here and Phase 2: zero false
+    RETURNED_FOR_REVISION or NOT_ACCEPTED verdicts, counted per check
+    rather than per document.
+    """
+    import yaml
+
+    from . import golden_worksheet as gw
+    from .goldenset import load_cases, report, run_golden_set
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    golden_dir = control_root / "tests" / "golden-set"
+    pending_dir = golden_dir / "pending"
+    # Beside the worksheets it tracks, not among the cases: the case
+    # directory is globbed for *.yaml, and a ledger sitting in it would
+    # be loaded as a case with no verdict.
+    ledger_path = golden_dir / "worksheets" / "batches.yaml"
+    batches = gw.load_ledger(ledger_path)
+
+    if args.issue:
+        pending = gw.load_pending(pending_dir)
+        issued = {cid for b in batches for cid in b.case_ids}
+        queue = [p for p in pending if str(p.get("case_id")) not in issued]
+        if not queue:
+            print(f"Nothing pending in {pending_dir}.")
+            print("\nPending cases are real historical submissions with their "
+                  "governing spec: 30-50 spanning every report type and every "
+                  "submitter, with a realistic spread of good and defective "
+                  "work (§13.1) — not a curated sample of clean ones. A set "
+                  "drawn only from what is easy to parse would certify the "
+                  "engine against the work it already handles.")
+            print("\nThat needs the mailbox scan and its attachments, so the "
+                  "cases are built on the machine holding the archive, not "
+                  "here. Each is one YAML file carrying spec + doc and no "
+                  "expected verdict — the verdict is what this worksheet is "
+                  "for.")
+            return 1
+
+        chunk = queue[:gw.BATCH_SIZE]
+        number = max((b.number for b in batches), default=0) + 1
+        # The subsample accumulates across batches: ten items total, not
+        # ten per week (§13.1).
+        already_withheld = {cid for b in batches for cid in b.clause_withheld}
+        clause_blank = gw.choose_clause_subsample(
+            chunk, already=already_withheld)
+        path, case_ids = gw.write_batch(
+            chunk, golden_dir / "worksheets" / f"batch-{number:02d}.csv",
+            clause_blank=clause_blank)
+
+        batches.append(gw.Batch(number=number, case_ids=case_ids, issued=today,
+                                path=str(path),
+                                clause_withheld=sorted(clause_blank)))
+        gw.save_ledger(batches, ledger_path)
+
+        print(f"batch {number}: {len(case_ids)} item(s) -> {path}")
+        print(f"  {len(clause_blank)} with the clause withheld, so your own "
+              "clause choice can be compared against Control's (§13.1)")
+        print(f"  {len(queue) - len(chunk)} still pending after this batch")
+        print("\nFill VERDICT and, where not accepted, FAILED_CHECKS. Control's "
+              "own verdict is deliberately not on the sheet: judging against it "
+              "would produce a test it cannot fail (D-03).")
+        print(f"Then: python -m control golden --apply \"{path}\"")
+        return 0
+
+    if args.apply:
+        worksheet = Path(args.apply)
+        if not worksheet.is_file():
+            print(f"worksheet not found: {worksheet}")
+            return 1
+        answers, problems = gw.read_batch(worksheet)
+        if problems:
+            print("The worksheet has entries Control will not interpret:\n")
+            for problem in problems:
+                print(f"  {problem}")
+            print("\nNothing applied. A guessed verdict here becomes a "
+                  "permanent expected answer in the gate that decides whether "
+                  "Control may send anything (§1.1).")
+            return 1
+        if not answers:
+            print("No verdicts entered. Nothing applied.")
+            return 1
+
+        applied, problems, clause_results = gw.apply_batch(
+            answers, pending_dir, golden_dir)
+        for problem in problems:
+            print(f"  {problem}")
+        print(f"applied {len(applied)} verdict(s) to the golden set")
+
+        for batch in batches:
+            if batch.path and Path(batch.path).name == worksheet.name:
+                if not set(batch.case_ids) - set(applied):
+                    batch.returned = today
+        gw.save_ledger(batches, ledger_path)
+
+        for line in gw.clause_mapping_report(clause_results):
+            print(line)
+        print("\nRun the gate:  python -m control golden")
+        return 1 if problems else 0
+
+    cases = load_cases(golden_dir)
+    if not cases:
+        print(f"The golden set is empty ({golden_dir}).")
+        print("Nothing has been tested, so nothing is certified — and §16 "
+              "gates Phase 2 on this set passing. An empty set is not a pass.")
+        print("\nStart with:  python -m control golden --issue")
+        for line in gw.ledger_lines(batches, today):
+            print(f"  {line}")
+        return 1
+
+    result = run_golden_set(cases)
+    print(report(result))
+
+    clause_results = []
+    for case in cases:
+        raw = yaml.safe_load(case.path.read_text(encoding="utf-8")) or {}
+        mapping = raw.get("clause_mapping")
+        if mapping:
+            clause_results.append({
+                "case_id": case.case_id, "ceo": mapping.get("ceo", ""),
+                "control": mapping.get("control", ""),
+                "agrees": gw.clause_matches(mapping.get("ceo", ""),
+                                            mapping.get("control", "")),
+            })
+    print("")
+    for line in gw.clause_mapping_report(clause_results):
+        print(line)
+
+    for line in gw.ledger_lines(batches, today):
+        print(f"\n{line}")
+
+    if len(cases) < 30:
+        print(f"\n{len(cases)} cases. §13.1 asks for 30–50 spanning every "
+              "report type and submitter — the gate is not yet a test of the "
+              "whole engine.")
+    return 0 if result.gate_passed else 1
+
+
 def cmd_manuals(args) -> int:
     """Stage C — find the governing manuals, for CEO confirmation."""
     import yaml
@@ -1180,6 +1327,17 @@ def main(argv: list[str] | None = None) -> int:
     _common(report_cmd)
     report_cmd.add_argument("--as-of", default="", help="ISO date, for testing")
     report_cmd.set_defaults(fn=cmd_report)
+
+    golden = sub.add_parser(
+        "golden",
+        help="§13.1 golden set: issue a batch, apply it, or run the gate")
+    golden.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    golden.add_argument("--issue", action="store_true",
+                        help="write the next batch of 10 for the CEO to judge")
+    golden.add_argument("--apply", default="",
+                        help="path to a filled-in worksheet CSV")
+    golden.add_argument("--today", default="", help="ISO date, for testing")
+    golden.set_defaults(fn=cmd_golden)
 
     terms = sub.add_parser(
         "terms",

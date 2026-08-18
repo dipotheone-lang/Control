@@ -210,6 +210,26 @@ def interim_reviews_due(config_dir: Path, as_of: date) -> list[str]:
     return due
 
 
+def _golden_set_notes(control_root: Path, as_of: date) -> list[str]:
+    """Golden-set batches still with the CEO (§13.1).
+
+    §13.1 states the dependency plainly: with CEO-only assignment,
+    Phase 1 cannot complete without Ahmed's time, and a batch stalled
+    beyond two weeks is to be raised as a deployment blocker rather than
+    quietly waited out. Raising it is this line.
+    """
+    from .golden_worksheet import ledger_lines, load_ledger
+
+    ledger = Path(control_root) / "tests" / "golden-set" / "worksheets" / \
+        "batches.yaml"
+    try:
+        return ledger_lines(load_ledger(ledger), as_of)
+    except Exception:
+        # A malformed ledger must not take down the weekly report; it
+        # surfaces on the `golden` command, which is where it is fixed.
+        return []
+
+
 def _transport_note(config_dir: Path) -> list[str]:
     """The interim transport route, while one is in force (D-08)."""
     import yaml
@@ -471,6 +491,7 @@ def weekly_report(
         extra += _holiday_notes(config_dir, as_of)
         extra += _vacancy_notes(conn, config_dir, since)
         extra += _distribution_note(config_dir)
+    extra += _golden_set_notes(control_root, as_of)
     sections += _decisions_section(conn, as_of, open_decisions + extra)
     shared_en, shared_ar = limitation_lines(scope)
 

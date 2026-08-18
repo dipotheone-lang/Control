@@ -20,7 +20,7 @@ The harness:
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -117,6 +117,20 @@ class GoldenSetResult:
 # -- case loading -----------------------------------------------------------
 
 def _spec_from(raw: dict) -> ObligationSpec:
+    # C6 rules are compiled by the same code the live cycle uses
+    # (`loader._compile_manual_rule`), not re-implemented here. A golden
+    # set that exercised a different rule compiler would certify an
+    # engine the company does not run. Uncompilable rules are dropped
+    # rather than guessed at — the case then fails C6 loudly instead of
+    # passing it silently.
+    from .loader import _compile_manual_rule
+
+    rules = []
+    for entry in raw.get("manual_rules", []) or []:
+        rule, _problem = _compile_manual_rule(entry)
+        if rule is not None:
+            rules.append(rule)
+
     return ObligationSpec(
         obligation_id=raw["obligation_id"],
         name=raw["name"],
@@ -128,6 +142,7 @@ def _spec_from(raw: dict) -> ObligationSpec:
                 for t in raw.get("totals", [])],
         openings=[OpeningRule(o["opening_field"], o["prior_closing_field"])
                   for o in raw.get("openings", [])],
+        manual_rules=rules,
     )
 
 
@@ -147,6 +162,15 @@ def load_cases(directory: Path) -> list[GoldenCase]:
     cases = []
     for path in sorted(Path(directory).glob("*.yaml")):
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # This directory is hand-maintained and the set is a go-live
+        # gate, so a malformed file names itself rather than surfacing
+        # as a KeyError three frames down.
+        missing = [k for k in ("case_id", "spec", "doc", "expected")
+                   if k not in (raw or {})]
+        if missing:
+            raise ValueError(
+                f"{path.name} is not a golden case: missing "
+                f"{', '.join(missing)}")
         mat = raw.get("materiality")
         cases.append(GoldenCase(
             case_id=raw["case_id"],
