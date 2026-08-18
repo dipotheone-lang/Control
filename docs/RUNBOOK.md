@@ -214,6 +214,20 @@ python -m control phase0 --folders "Inbox,Sent Items" --recurse
 Metadata only. No message body is read. HR subject lines are redacted
 at capture.
 
+The scan now runs the §5.6 startup first — state, database integrity,
+hash chain, then `UB_ROOT` — and only then opens Outlook. If the drive
+is not mounted it halts rather than scanning against a partial view.
+Nothing changes in what you type; the defaults `setup-laptop.ps1` set
+are the Phase 0 row of the state table.
+
+Every mailbox is checked against the §3.1a scope before it is opened.
+In `DISCOVERY` a mailbox outside the scope is read as a historical
+archive and the run says so — that is what the charter permits for
+Phase 0, and the line is there because the read is recorded, not
+waved through. In any other mode it is refused: Outlook sees whatever
+the Windows profile holds, and that is not the set decision D-07
+authorises.
+
 **Sent Items matters.** Three earlier runs silently found none — Gmail
 nests it under `[Gmail]/Sent Mail` and the exact string never matched.
 Folder matching now reports **NOT FOUND** with the folders it actually
