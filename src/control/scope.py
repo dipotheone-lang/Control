@@ -113,15 +113,43 @@ def load_scope_file(config_dir: Path) -> MailboxScope:
     return load_scope(data)
 
 
-def assert_readable(mailbox: str, scope: MailboxScope) -> None:
-    """Guard a live read. Discovery is not routed through here."""
-    if mailbox.lower() not in scope.effective:
-        raise HaltError(
-            f"{mailbox} is not in the operative mailbox scope "
-            f"({', '.join(scope.effective)}). Decision D-07 chose Option C, "
-            "but it does not take effect until its preconditions close "
-            "(§3.1a)."
+def assert_readable(mailbox: str, scope: MailboxScope,
+                    run_mode: str = "LIVE") -> str:
+    """Guard a mailbox read. Returns a note when one must be recorded.
+
+    Two different things are being protected, and conflating them would
+    either block Phase 0 or wave through live processing:
+
+    **A Phase 0 archive read is permitted in DISCOVERY.** §3.1a says so
+    directly of the two excluded addresses — they "were read during
+    Phase 0 as historical archives under RUN_MODE=DISCOVERY" — and adds
+    the limit in the same breath: "a one-time read-only metadata scan is
+    not authority for live processing." So DISCOVERY passes, and returns
+    a note so the read is recorded rather than silent.
+
+    **Every other mode is refused.** D-08 is explicit that Outlook COM
+    "sees whatever the Windows profile sees, which is not the set D-07
+    authorises", and that a permission the system grants itself is not a
+    control. This is the check that makes that more than a sentence.
+    """
+    if mailbox.lower() in scope.effective:
+        return ""
+
+    if run_mode == "DISCOVERY":
+        return (
+            f"{mailbox} is outside the operative scope "
+            f"({', '.join(scope.effective)}) and is being read as a Phase 0 "
+            "historical archive, metadata only (§3.1a). This is not authority "
+            "for live processing."
         )
+
+    raise HaltError(
+        f"{mailbox} is not in the operative mailbox scope "
+        f"({', '.join(scope.effective)}), and RUN_MODE={run_mode} is not "
+        "DISCOVERY. Decision D-07 chose Option C, but it does not take effect "
+        "until its preconditions close (§3.1a). Outlook sees whatever the "
+        "Windows profile sees; that is not authority (D-08)."
+    )
 
 
 # ---- what the reports must say ---------------------------------------

@@ -86,14 +86,43 @@ def cmd_discovery(args) -> int:
     return 0
 
 
+def _check_mailbox_scope(mailbox_arg: str, report) -> list[str]:
+    """§3.1a — gate every mailbox before anything opens it.
+
+    Returns the notes that must be recorded for reads permitted only
+    because this is Phase 0. Raises if a mailbox is out of scope in any
+    other mode.
+    """
+    from .scope import assert_readable, load_scope_file
+
+    scope = load_scope_file(Path(report.config.root))
+    notes = []
+    for mailbox in (m.strip() for m in mailbox_arg.split(",") if m.strip()):
+        note = assert_readable(mailbox, scope, report.state.run_mode)
+        if note:
+            notes.append(note)
+            report.audit.append("mailbox.out_of_scope_read", {
+                "mailbox": mailbox, "run_mode": report.state.run_mode,
+                "effective_scope": scope.effective})
+    return notes
+
+
 def cmd_outlook_scan(args) -> int:
     from . import HaltError
     from .discovery.outlook_scan import run_outlook_scan, write_overview
     from .outlook import _dispatch_namespace
 
+    # §5.6 runs before the mailbox is touched — state, integrity, roots,
+    # then mail. This command used to go straight to the namespace,
+    # which is the one order the charter rules out.
+    report = _startup(args)
+    scope_notes = _check_mailbox_scope(args.mailbox, report)
+
     out_dir = Path(args.control_root) / "discovery"
     folders = [f.strip() for f in args.folders.split(",") if f.strip()]
     mailboxes = [m.strip() for m in args.mailbox.split(",") if m.strip()]
+    for note in scope_notes:
+        print(f"SCOPE: {note}")
     namespace = _dispatch_namespace()
 
     def progress(done, total):
@@ -450,6 +479,9 @@ def cmd_phase0(args) -> int:
     from .discovery.outlook_scan import run_outlook_scan, write_overview
     from .outlook import _dispatch_namespace, safe_get
 
+    # §5.6: state, integrity, roots — then the mailbox, not before.
+    report = _startup(args)
+
     discovery = Path(args.control_root) / "discovery"
     discovery.mkdir(parents=True, exist_ok=True)
     namespace = _dispatch_namespace()
@@ -466,6 +498,12 @@ def cmd_phase0(args) -> int:
     if not mailboxes:
         print("No mailboxes with an email address found in this Outlook profile.")
         return 1
+
+    # The profile is not the authority on what may be read — every
+    # enumerated mailbox goes through the §3.1a gate, which permits a
+    # Phase 0 archive read in DISCOVERY and refuses it in any other mode.
+    for note in _check_mailbox_scope(",".join(mailboxes), report):
+        print(f"SCOPE: {note}")
 
     print(f"Phase 0 — {len(mailboxes)} mailbox(es): {', '.join(mailboxes)}")
     print("Metadata only; no message body is read. This may take a while.\n")
@@ -1408,7 +1446,7 @@ def main(argv: list[str] | None = None) -> int:
 
     scan = sub.add_parser("outlook-scan",
                           help="historical mailbox scan via Outlook (metadata only)")
-    scan.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    _common(scan)
     scan.add_argument("--mailbox", required=True,
                       help="one address, or several separated by commas")
     scan.add_argument("--folders", default="Inbox",
@@ -1431,7 +1469,7 @@ def main(argv: list[str] | None = None) -> int:
     phase0 = sub.add_parser(
         "phase0",
         help="one command: scan every mailbox, analyse, write the deliverables")
-    phase0.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    _common(phase0)
     phase0.add_argument("--mailbox", default="",
                         help="restrict to these addresses (default: all in profile)")
     phase0.add_argument("--folders", default="Inbox,Sent Items")
