@@ -197,25 +197,74 @@ def test_partial_statutory_coverage_never_reads_as_coverage():
     assert tracked, "four CEO-stated dates should now alert"
     assert any("highest-priority gap in the system" in g for g in gaps)
     assert any("only class carrying fines" in g for g in gaps)
-    # Every silent obligation reports its own silence, not just the header.
-    silent = [g for g in gaps if "no class 1 alert" in g]
-    assert len(silent) == len(data["obligations"]) - len(tracked)
-    # And the header states it as a share, so it cannot be skimmed past.
+    # The header states it as a share, so it cannot be skimmed past.
     assert any(f"{len(tracked)} of {len(data['obligations'])}" in g
                for g in gaps)
+    # Every silent obligation names itself somewhere — either here, or
+    # in the event register, which owns the reporting for its two.
+    silent = {r["id"] for r in data["obligations"]} - {t.item_id for t in tracked}
+    event_driven = {r["id"] for r in data["obligations"]
+                    if r.get("mechanism") == "event_window"}
+    joined = " ".join(gaps)
+    for obligation_id in silent - event_driven:
+        assert obligation_id in joined, obligation_id
 
 
-def test_an_event_window_is_counted_apart_from_a_missing_date():
-    """Both are silence; the remedies differ. A missing date is chased
-    from the advisor or HR, an event window needs the event register
-    built — merging the counts would send the CEO to the wrong person.
+def test_the_four_kinds_of_silence_are_counted_apart():
+    """All four are "no countdown"; the remedies are four different
+    people. A missing date is chased from the advisor or from HR, an
+    event window waits for an event, an exception-detected obligation
+    waits for a detector to be built, and a registration nobody can
+    perform waits for regulations. One merged count would send the CEO
+    to the wrong one.
     """
     data = yaml.safe_load(
         (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
     _, gaps = build_statutory(data, SUNDAY)
     coverage = next(g for g in gaps if "have a usable date" in g)
-    assert "await a date" in coverage
-    assert "event-driven and await the event register" in coverage
+    for phrase in ("awaiting a date", "event-driven",
+                   "monitored by exception", "no mechanism exists"):
+        assert phrase in coverage
+
+
+def test_a_real_time_obligation_is_not_reported_as_a_missing_date():
+    """B2. ETA submission has no deadline by design. Listing it beside
+    the rules Hadeer still owes would send someone to ask her for a date
+    that does not exist — and would hide the real gap, which is that the
+    detector is not built."""
+    data = yaml.safe_load(
+        (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
+    _, gaps = build_statutory(data, SUNDAY)
+    line = next(g for g in gaps if g.startswith("STAT-ETA-SUB"))
+    assert "no deadline by design (B2)" in line
+    assert "that detector is not built" in line
+    assert "O-03" not in line
+
+
+def test_an_obligation_with_no_way_to_discharge_it_says_exactly_that():
+    """B7. Recording it as absent would be false; recording it as met
+    would be worse. It is owed, and the mechanism does not exist."""
+    data = yaml.safe_load(
+        (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
+    _, gaps = build_statutory(data, SUNDAY)
+    line = next(g for g in gaps if g.startswith("STAT-PDPL-REG:"))
+    assert "no known way to discharge it yet" in line
+    assert "rather than as absent or as met" in line
+    assert "D-40" in line
+
+
+def test_the_event_windows_are_left_to_the_event_register():
+    """Two modules reporting the same obligation would say "no alert can
+    fire" about one that is working as designed."""
+    data = yaml.safe_load(
+        (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
+    _, gaps = build_statutory(data, SUNDAY)
+    per_row = [g for g in gaps if not g.startswith("statutory-calendar.yaml")]
+    assert not [g for g in per_row
+                if g.startswith(("STAT-ETA-REJ", "STAT-SI-HEADCOUNT"))]
+    # But they are still counted in the coverage share.
+    coverage = next(g for g in gaps if "have a usable date" in g)
+    assert "2 event-driven" in coverage
 
 
 def test_a_verified_statutory_rule_with_a_date_is_tracked():
@@ -490,7 +539,9 @@ def test_the_shipped_calendar_alerts_on_the_recurring_obligations():
     vat = next(t for t in tracked if t.item_id == "STAT-VAT")
     assert vat.due == date(2026, 9, 23)
 
-    # The event windows are gaps, not invented dates.
+    # The event windows produce no invented date and no line here —
+    # they are counted in the coverage share and reported by the event
+    # register, which knows whether any events are on record.
     joined = " ".join(gaps)
-    assert "STAT-ETA-REJ" in joined and "event-driven window" in joined
-    assert "STAT-SI-HEADCOUNT" in joined
+    assert "2 event-driven" in joined
+    assert not [g for g in gaps if g.startswith("STAT-ETA-REJ")]

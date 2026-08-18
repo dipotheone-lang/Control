@@ -430,6 +430,60 @@ def build_obligations(obligations_config: dict | None, people_config: dict | Non
 
 # ---- class 1 ----------------------------------------------------------
 
+# Why a class 1 obligation has no countdown. These are not degrees of
+# the same problem — they are four different facts with four different
+# people to chase, and reporting them in one sentence shape sent the
+# reader to the wrong one. Only AWAITING_DATE is an O-03 answer that is
+# missing; the rest are correctly configured and either handled
+# elsewhere or not yet built.
+SILENCE_AWAITING_DATE = "awaiting a date"
+SILENCE_BY_EVENT = "event-driven"
+SILENCE_BY_EXCEPTION = "monitored by exception"
+SILENCE_NO_MECHANISM = "no mechanism exists"
+
+
+def _no_countdown(row: dict, problem: str) -> tuple[str, str | None]:
+    """Classify a class 1 row that produced no date, and say what it is.
+
+    Returns (category, message). A `None` message means another module
+    owns the reporting for this row and a line here would duplicate it.
+    """
+    obligation_id = str(row.get("id") or "")
+    name = str(row.get("name") or obligation_id)
+    mechanism = str(row.get("mechanism") or "")
+
+    if mechanism == "event_window":
+        # Tracked from the event register (§2.1, B1/B4). `events.py`
+        # reports whether any events are on record; a second line here
+        # would say "no alert can fire" about an obligation that is
+        # working exactly as designed.
+        return SILENCE_BY_EVENT, None
+
+    if mechanism == "exception_detection":
+        # B2. Real-time submission has no deadline, so a countdown here
+        # would alert every day on a thing with no due date. What it
+        # needs is detection of a submission that did not happen.
+        return SILENCE_BY_EXCEPTION, (
+            f"{obligation_id}: {name} is real-time and has no deadline by "
+            "design (B2). It is monitored by detecting a submission that "
+            "did not happen, not by a countdown — and that detector is not "
+            "built, so nothing is watching it today.")
+
+    if row.get("obligation_exists") and row.get("mechanism_available") == "unknown":
+        # B7. Owed, with no known way to discharge it. Recording it as
+        # absent would be false; recording it as satisfied would be
+        # worse.
+        return SILENCE_NO_MECHANISM, (
+            f"{obligation_id}: {name} is owed and there is no known way to "
+            "discharge it yet"
+            + (f" ({row['note'].strip()})" if row.get("note") else "")
+            + ". It is recorded as outstanding rather than as absent or as "
+              "met (§1.1).")
+
+    return SILENCE_AWAITING_DATE, (
+        f"{obligation_id}: {problem} — no class 1 alert can fire (O-03)")
+
+
 def build_statutory(statutory_config: dict | None, today: date
                     ) -> tuple[list, list[str]]:
     """Class 1 tracked items, and the reason most of them are missing.
@@ -443,19 +497,16 @@ def build_statutory(statutory_config: dict | None, today: date
     tracked: list[TrackedItem] = []
     gaps: list[str] = []
     config = statutory_config or {}
-    awaiting_date = 0
-    awaiting_event = 0
+    silence: dict[str, int] = {}
 
     for row in config.get("obligations") or []:
         obligation_id = str(row.get("id") or "")
         due, problem = parse_due(row.get("rule", ""), "", today)
         if due is None:
-            if EVENT_WINDOW_MARKER in problem:
-                awaiting_event += 1
-            else:
-                awaiting_date += 1
-            gaps.append(f"{obligation_id}: {problem} — no class 1 alert "
-                        "can fire (O-03)")
+            category, message = _no_countdown(row, problem)
+            silence[category] = silence.get(category, 0) + 1
+            if message:
+                gaps.append(message)
             continue
         tracked.append(TrackedItem(
             item_id=obligation_id, obligation_class=1,
@@ -469,16 +520,18 @@ def build_statutory(statutory_config: dict | None, today: date
     # that is dark is stated as a share, not left implicit in a list of
     # per-row lines. Two-thirds silent is a different fact from a rule
     # nobody has verified, and the report has to carry both.
-    silent = awaiting_date + awaiting_event
+    silent = sum(silence.values())
     if silent and tracked:
-        detail = f"{awaiting_date} await a date"
-        if awaiting_event:
-            detail += (f", {awaiting_event} are event-driven and await the "
-                       "event register")
+        # Ordered by how many people it takes to fix, most first.
+        detail = ", ".join(
+            f"{silence[c]} {c}" for c in (
+                SILENCE_AWAITING_DATE, SILENCE_BY_EVENT,
+                SILENCE_BY_EXCEPTION, SILENCE_NO_MECHANISM)
+            if silence.get(c))
         gaps.append(
             f"statutory-calendar.yaml: {len(tracked)} of {len(tracked) + silent}"
             f" class 1 obligations have a usable date. The other {silent} fire "
-            f"no alert at all ({detail}) — and class 1 is the only class "
+            f"no countdown ({detail}) — and class 1 is the only class "
             "carrying fines, so that share is the highest-priority gap in the "
             "system (O-03).")
 
@@ -588,6 +641,22 @@ def load_for_cycle(config, conn, today: date, logs_dir=None) -> LoadResult:
     if logs_dir is not None:
         result.gaps += observed_cadence_gaps(
             logs_dir, config["statutory-calendar"], conn, today)
+
+    # B5: the HSE split, and the one tightening Control applied without
+    # a decision to point at. A control applied quietly is
+    # indistinguishable from one nobody decided on, so it is disclosed
+    # rather than left in the config for someone to find.
+    from .hse import HseScope, cc_exclusion_note
+
+    hse = HseScope.from_config(config.get("hse"))
+    result.gaps += cc_exclusion_note(hse)
+    if not hse.configured:
+        result.gaps.append(
+            "hse.yaml is missing, so HSE reporting cannot be split into "
+            "aggregate statistics and individual incident records (B5). "
+            "Every HSE item is read metadata-only under D-18 — the "
+            "conservative direction, but it means the monthly statistics "
+            "return is not being checked either.")
 
     result.tracked = class3 + statutory + events
     result.class3_state = build_class3_state(

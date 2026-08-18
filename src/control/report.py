@@ -47,6 +47,26 @@ LIMITATION_CONFIDENTIAL_AR = (
     "ومطابقة الدليل لهذه البنود على الإدارة المختصة وليس على النظام."
 )
 
+# D-17, D-18, execution order B5. Not a charter-mandated verbatim line
+# like the one above — it is the same kind of scope boundary for a
+# different reason, and a reader looking for what is not covered has to
+# find both in the same place. Aggregate HSE statistics are evaluated
+# in full; only the individual records are restricted.
+LIMITATION_HSE_EN = (
+    "Individual HSE incident records are tracked for receipt and timeliness "
+    "only. They are special-category health data (D-17) and their contents "
+    "are never read (D-18), so accuracy and completeness for these items "
+    "rest with the responsible department. Aggregate HSE statistics are "
+    "assessed in full."
+)
+LIMITATION_HSE_AR = (
+    "يتم متابعة تقارير الحوادث الفردية الخاصة بالسلامة والصحة المهنية من حيث "
+    "الاستلام والالتزام بالمواعيد فقط. وهي بيانات صحية ذات طبيعة خاصة "
+    "(القرار D-17) ولا تتم قراءة محتواها إطلاقاً (القرار D-18)، ومن ثم تظل "
+    "مسؤولية الدقة والاكتمال لهذه البنود على الإدارة المختصة. أما الإحصاءات "
+    "المجمعة للسلامة والصحة المهنية فيتم تقييمها بالكامل."
+)
+
 
 @dataclass
 class HorizonItem:
@@ -570,7 +590,8 @@ def weekly_report(
         + sections
         + ["", "STANDING LIMITATIONS",
            f"   {shared_en}",
-           f"   {LIMITATION_CONFIDENTIAL_EN}"]
+           f"   {LIMITATION_CONFIDENTIAL_EN}",
+           f"   {LIMITATION_HSE_EN}"]
     )
     ar = "\n".join([
         f"تقرير كنترول الأسبوعي — {as_of:%d-%b-%Y}",
@@ -582,6 +603,7 @@ def weekly_report(
         "القيود الدائمة:",
         f"   {shared_ar}",
         f"   {LIMITATION_CONFIDENTIAL_AR}",
+        f"   {LIMITATION_HSE_AR}",
     ])
 
     return {

@@ -25,6 +25,7 @@ from .discovery.classify_worksheet import (
 from .discovery.classify_worksheet import known_domains as _known_domains
 from .enforce import Absence, Action, Enforcer, TrackedItem
 from .evaluate import ObligationSpec, evaluate
+from .hse import HseScope
 from .outbox import Disposition, OutboundMessage, Outbox
 from .render import correction_due, render_verdict_reply
 from .startup import StartupReport
@@ -170,6 +171,9 @@ def run_cycle(
         roster_emails=roster_emails,
         obligation_forms=obligation_forms,
         confidential_domains=confidential_domains,
+        # B5: the HSE split, applied only to HSE traffic (D-17, D-18).
+        hse_scope=HseScope.from_config(startup.config.get("hse")),
+        hse_senders={"hse@ubcsis.com"},
         # Wider than the confidential set on purpose: a spoofed supplier
         # is the §7.3 S1 vector, and suppliers are not under NDA.
         known_domains=_known_domains(startup.config["confidential"]),
@@ -273,6 +277,7 @@ def run_cycle(
                         form_code=sub.spec.form_code,
                         revision=sub.spec.current_revision,
                         confidential=classification.confidential,
+                        restricted_basis=classification.restricted_basis,
                     )
 
                 evaluation = evaluate(sub.spec, doc, enforcer.cal if enforcer
@@ -340,7 +345,8 @@ def run_cycle(
                     recipients=[fetched.sender.split("<")[-1].rstrip(">")],
                     dedupe_key=f"{obligation_id}:VERDICT:{sub.period}:{fetched.message_id}",
                     rationale=f"Verdict {evaluation.verdict} on {obligation_id} {sub.period}",
-                    content_classes={"CONFIDENTIAL_CLIENT"} if doc.confidential else set(),
+                    content_classes=({doc.restricted_basis}
+                                     if doc.restricted_basis else set()),
                 ), known, report, audit)
                 continue
 

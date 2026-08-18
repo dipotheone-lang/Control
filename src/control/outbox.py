@@ -37,6 +37,13 @@ CC_EXCLUDED_CLASSES = {
     "S1", "S2", "S3", "S4",
     "SOD_ITEMISATION",
     "CONFIDENTIAL_CLIENT",
+    # Not in D-04's list, which was written before D-17. Special-category
+    # health data is the thing that list exists to keep out of a consumer
+    # mailbox outside company control, arriving by a door the list did
+    # not anticipate. §14.1 permits a tightening without approval and
+    # requires approval only to loosen, so it is applied and disclosed
+    # (`hse.py: cc_exclusion_note`) rather than waited on.
+    "HSE_INCIDENT",
 }
 
 # §10 gate table (v4.3). Rows: action kind -> {run_mode: disposition}.
