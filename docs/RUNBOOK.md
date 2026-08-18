@@ -344,6 +344,57 @@ been hiding.
 
 ---
 
+## 7b. The golden set — the gate you cannot delegate
+
+This is the Phase 2 gate, and D-03 puts the verdicts with you alone: no
+delegation, no pre-filled suggestions.
+
+```powershell
+python -m control golden --issue
+```
+
+Writes the next batch of 10 to
+`%CONTROL_ROOT%\tests\golden-set\worksheets\batch-01.csv`. Each row
+carries the document, when it arrived, the obligation, the due date and
+the governing form. **Control's own verdict is deliberately not on the
+sheet.** Judging against it would produce a test the engine cannot fail,
+which is not a test.
+
+Fill `VERDICT`, and where not accepted, `FAILED_CHECKS` (C1–C7). About
+5–8 minutes an item, so a batch is a short sitting rather than an
+afternoon.
+
+On some rows the `governing_clause` column says *withheld*. Those are
+the clause-mapping subsample: name the clause you used in
+`CLAUSE_YOU_USED`, and Control reports how often its clause choice
+matched yours as a separate error rate. Control picking the clause
+frames the judgement, so that framing gets measured rather than assumed
+away.
+
+```powershell
+python -m control golden --apply "%CONTROL_ROOT%\tests\golden-set\worksheets\batch-01.csv"
+python -m control golden
+```
+
+The second command runs the engine against everything judged so far and
+prints the gate: **zero false `RETURNED_FOR_REVISION` or `NOT_ACCEPTED`
+verdicts**, counted per check rather than per document. Disagreements
+are listed item by item with Control's own diagnosis of each.
+
+A half-filled sheet is fine — the finished rows apply, the rest stay
+pending. Nothing is applied if any row is unreadable, and a case already
+in the set is never overwritten: it is the record of what you ruled.
+
+**A batch out beyond two weeks appears in the weekly report as a
+deployment blocker.** That is deliberate. Phase 1 cannot complete
+without your time, and the charter asks for that to be said rather than
+waited out.
+
+The pending cases themselves are built from real submissions on the
+laptop — that work is not done yet, and `--issue` will tell you so.
+
+---
+
 ## 8. Checking the system itself
 
 ```powershell
@@ -428,6 +479,7 @@ that cannot, and Phase 2 cannot start without it.
 | `cycle` | One sweep: fetch, classify, evaluate, enforce, gate |
 | `report` | The §11 weekly pack; always drafts, never sends |
 | `terms` | Manual entry for documents no engine could read |
+| `golden` | §13.1 golden set: `--issue` a batch, `--apply` it, or run the gate |
 | `startup` | The §5.6 sequence alone, to check state |
 | `discovery` | Stages A–B against `UB_ROOT` |
 

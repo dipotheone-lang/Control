@@ -132,6 +132,25 @@ def test_a_duplicate_run_leaves_the_pending_version_standing(root, capsys):
     assert "left as it was" in capsys.readouterr().out
 
 
+def test_a_stalled_golden_set_batch_reaches_the_report(root, capsys):
+    """§13.1: Phase 1 cannot complete without the CEO's time, and a
+    batch out beyond two weeks is raised rather than waited out."""
+    import yaml
+
+    _, control_root = root
+    ledger = control_root / "tests" / "golden-set" / "worksheets" / "batches.yaml"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(yaml.safe_dump({"batches": [
+        {"number": 1, "issued": "2026-07-20", "case_ids": ["GS-001"]}]}),
+        encoding="utf-8")
+
+    run(root)
+    out = capsys.readouterr().out
+    assert "Golden-set batch 1" in out
+    assert "DEPLOYMENT BLOCKER" in out
+    assert "cannot be delegated" in out
+
+
 def test_an_illegal_state_halts_before_any_report(root):
     """§5.6: the state check comes first, and a report from an illegal
     state would be a record of something that should not have run."""
