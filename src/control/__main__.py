@@ -449,9 +449,33 @@ def cmd_contracts(args) -> int:
     from .discovery.stage_c import StageCResult
 
     result = StageCResult()
+    def scan_progress(stage, done, total, current, _last=[0.0]):
+        """Say enough to tell working from hung, without flooding.
+
+        A run over a real document store takes hours. Printing every
+        document would bury the summary; printing nothing — which is
+        what this did — leaves the operator choosing between waiting on
+        faith and killing work that was fine.
+        """
+        import time
+
+        if stage == "enumerating":
+            print("    walking the folder tree — no documents opened yet, "
+                  "this alone takes minutes on a full drive", flush=True)
+        elif stage == "enumerated":
+            print(f"    {total} document(s) to consider", flush=True)
+        elif stage == "processing":
+            now = time.monotonic()
+            if done == 1 or now - _last[0] >= 15:
+                _last[0] = now
+                print(f"    {done}/{total}  {current[:70]}", flush=True)
+        elif stage == "done":
+            print(f"    {total}/{total} complete", flush=True)
+
     for source in sources:
         print(f"  {source}")
         part = run_stage_c(source, clients, folders, exclude=[control_root],
+                           progress=scan_progress,
                            permit_confidential_dates=args.confidential_dates,
                            confidential_projects=projects, ocr=ocr,
                            cache_dir=cache_dir,

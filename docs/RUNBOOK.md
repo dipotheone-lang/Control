@@ -124,7 +124,18 @@ accreditation date found, sorted by urgency.
 system is built. A guarantee expiring in three weeks is worth more than
 everything else here put together.
 
-Expect it to take a while on a full drive.
+Expect it to take a while on a full drive — hours, with OCR on. The run
+reports as it goes: first the folder walk (which is minutes of its own
+before any document is opened), then the document count, then a line
+every fifteen seconds naming where it has got to. If those lines are
+advancing, it is working; leave it.
+
+Independent check, any time: the cache gets one file per document
+processed.
+
+```powershell
+(Get-ChildItem "$env:CONTROL_ROOT\data\stage-c-cache").Count
+```
 
 **Confidential contracts.** Control does not open them by default —
 decision D-01. To extract dates and term durations only, under the D-05

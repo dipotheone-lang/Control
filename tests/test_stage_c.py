@@ -176,3 +176,45 @@ def test_report_scopes_itself_to_d05(tmp_path):
     # Still honest about what remains invisible
     assert "claim not noticed within its window is generally forfeited" in text
     assert "need OCR above the §5.5 confidence floor" in text
+
+
+def test_the_scan_reports_progress_so_a_long_run_is_not_silence(tmp_path):
+    """A run over a real document store takes hours. One that prints
+    nothing for hours is indistinguishable from one that has hung, and
+    the operator's only choices are waiting on faith or killing work
+    that was fine.
+
+    Enumeration is reported separately because walking a full drive is
+    minutes of its own before the first document is opened — which is
+    exactly where a silent run looks most like a hang.
+    """
+    from control.discovery.stage_c import run_stage_c
+
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (tmp_path / name).write_text("Bond valid until 30/11/2026.",
+                                     encoding="utf-8")
+
+    seen = []
+    run_stage_c(tmp_path, [], [],
+                progress=lambda *args: seen.append(args))
+
+    stages = [s for s, *_ in seen]
+    assert stages[0] == "enumerating", "the walk must announce itself"
+    assert "enumerated" in stages
+    assert stages[-1] == "done"
+
+    enumerated = next(a for a in seen if a[0] == "enumerated")
+    assert enumerated[2] == 3, "the total is known before processing starts"
+
+    processing = [a for a in seen if a[0] == "processing"]
+    assert processing, "every document reports, throttling is the caller's job"
+    assert processing[0][1] == 1 and processing[-1][1] == 3
+    assert all(a[3] for a in processing), "the current document is named"
+
+
+def test_a_scan_without_a_progress_callback_still_runs(tmp_path):
+    from control.discovery.stage_c import run_stage_c
+
+    (tmp_path / "a.txt").write_text("Bond valid until 30/11/2026.",
+                                    encoding="utf-8")
+    assert run_stage_c(tmp_path, [], []).terms
