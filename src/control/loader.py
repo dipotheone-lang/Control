@@ -26,7 +26,6 @@ what the engine checks.
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
-from pathlib import Path
 
 from .calendar import WorkingCalendar
 from .cycle import Class3State, SubmissionSpec

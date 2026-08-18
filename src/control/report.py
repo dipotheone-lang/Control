@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import HaltError
+from .anomaly import SUPPRESSED
 from .scope import (
     MailboxScope, limitation_lines, load_scope_file, open_precondition_lines,
 )
@@ -141,14 +142,58 @@ def _register_deltas_section(conn, since: datetime) -> list[str]:
 def _flags_section(conn, since: datetime) -> list[str]:
     lines = ["5. ANOMALY FLAGS — S1–S4, FACTUAL, FOR CEO JUDGEMENT"]
     rows = conn.execute(
-        "SELECT signal, detail FROM anomalies WHERE posted_at >= ? ORDER BY id",
-        (since.isoformat(sep=" "),),
+        "SELECT signal, detail, flagged_to FROM anomalies WHERE posted_at >= ?"
+        " ORDER BY id", (since.isoformat(sep=" "),),
     ).fetchall()
     if not rows:
         lines.append("   None recorded this period.")
-        return lines
-    for signal, detail in rows:
-        lines.append(f"   [{signal}] {detail}")
+    else:
+        raised = [r for r in rows if r[2] != SUPPRESSED]
+        held = [r for r in rows if r[2] == SUPPRESSED]
+        for signal, detail, _ in raised:
+            lines.append(f"   [{signal}] {detail}")
+        if held:
+            # D-10: over-budget flags are reported as suppressed, never
+            # silently dropped. A budget whose cost is invisible cannot
+            # be reviewed against what it hid.
+            lines.append(
+                f"   {len(held)} flag(s) held back over the D-10 budget of "
+                "10 a week — recorded, not dropped:")
+            for signal, detail, _ in held:
+                lines.append(f"     [{signal}] {detail}")
+    lines += _signals_not_running()
+    return lines
+
+
+# §7.3 lists twelve S1 signals plus S2–S4. Most need a source the
+# database does not yet hold, and a flags section that only showed what
+# ran would read as "nothing found" rather than "most of this is not
+# looking" (§1.1).
+_SIGNAL_SOURCES = (
+    ("S1 bank-detail change — the highest-priority signal in the system",
+     "a supplier bank register to compare against"),
+    ("S1 duplicate invoice, round-number clustering, PR/PO sequence gaps",
+     "an invoice and purchase-order register"),
+    ("S1 award concentration without competing quotations",
+     "supplier award records with quotations attached"),
+    ("S1 statistical outliers against learned baselines",
+     "Stage F baselines with enough sample to be used (§7.2)"),
+    ("S2 authority — approver ≠ originator, delegated limit covers value",
+     "approval records, and the O-02 thresholds"),
+    ("S3 implausible perfection", "several periods of the same metric"),
+    ("S4 cross-source reconciliation",
+     "two independent sources for the same figure"),
+)
+
+
+def _signals_not_running() -> list[str]:
+    lines = ["", "   SIGNALS NOT RUNNING, AND WHAT EACH NEEDS:"]
+    for signal, needs in _SIGNAL_SOURCES:
+        lines.append(f"     {signal} — needs {needs}")
+    lines.append(
+        "   Out-of-hours timestamps and near-miss sender domains are the "
+        "signals running today. Both work on metadata alone, so they run on "
+        "confidential items too (§12.1.3).")
     return lines
 
 

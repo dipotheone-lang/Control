@@ -14,7 +14,6 @@ Signals stay honest about their preconditions:
   limit itself (O-02) instead of pretending to verify
 """
 
-import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -29,13 +28,46 @@ class Flag:
     refs: list[str] = field(default_factory=list)
 
 
-def record_flag(conn, flag: Flag) -> None:
+SUPPRESSED = "SUPPRESSED_OVER_BUDGET"
+
+
+def weekly_flag_count(conn, since: datetime) -> int:
+    """Flags actually put in front of the CEO since `since`."""
+    return conn.execute(
+        "SELECT COUNT(*) FROM anomalies WHERE flagged_to = 'CEO'"
+        " AND posted_at >= ?", (since.isoformat(sep=" "),),
+    ).fetchone()[0]
+
+
+def record_flag(conn, flag: Flag, *, budget: int | None = None,
+                since: datetime | None = None) -> str:
+    """Record a flag. Returns 'CEO' or SUPPRESSED.
+
+    Decision D-10 sets a CEO flag budget of 10 a week — chosen as the
+    number the CEO will still open on the eleventh, because a channel
+    that gets skimmed is a failed control whatever its thresholds say
+    (§13.3). Over-budget flags are **reported as suppressed, never
+    silently dropped**: the row is written either way, so the weekly
+    pack can say how many were held back and the budget can be judged
+    against what it actually cost.
+
+    A HIGHEST-priority flag never suppresses. That is the supplier
+    bank-detail change, and rationing the highest-priority signal in the
+    system for volume would defeat the reason the budget exists.
+    """
+    over = (budget is not None and since is not None
+            and flag.priority != "HIGHEST"
+            and weekly_flag_count(conn, since) >= budget)
+    destination = SUPPRESSED if over else "CEO"
+
     conn.execute(
         "INSERT INTO anomalies (signal, detail, subject_ref, flagged_to, source)"
-        " VALUES (?, ?, ?, 'CEO', 'LIVE')",
-        (flag.signal, f"[{flag.code}] {flag.detail}", flag.subject_ref),
+        " VALUES (?, ?, ?, ?, 'LIVE')",
+        (flag.signal, f"[{flag.code}] {flag.detail}", flag.subject_ref,
+         destination),
     )
     conn.commit()
+    return destination
 
 
 # ---------------------------------------------------------------------------

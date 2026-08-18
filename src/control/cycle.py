@@ -10,9 +10,10 @@ DRY_RUN rehearsal and against Graph later without change.
 """
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from .anomaly import SUPPRESSED, Flag, record_flag, s1_out_of_hours
 from .attachments import build_submission_doc, quarantine, validate_attachment
 from .classify import Classifier, InboundMessage
 from .config import known_addresses
@@ -84,6 +85,27 @@ class CycleReport:
     threads_closed_declared: int = 0
     threads_without_id: int = 0
     cc_compliance: dict = field(default_factory=dict)
+    # §7.3 substantive signals, under the D-10 CEO flag budget
+    flags_raised: int = 0
+    flags_suppressed: int = 0
+
+
+def _raise_flag(conn, flag: Flag, report: CycleReport, budget: int | None,
+                since: datetime | None, audit) -> None:
+    """Record a §7.3 flag under the D-10 budget.
+
+    Written either way. Over budget it is marked suppressed rather than
+    dropped, so the weekly pack can say what was held back — a budget
+    whose cost is invisible cannot be reviewed.
+    """
+    destination = record_flag(conn, flag, budget=budget, since=since)
+    if destination == SUPPRESSED:
+        report.flags_suppressed += 1
+    else:
+        report.flags_raised += 1
+    audit.append("anomaly.flag", {"signal": flag.signal, "code": flag.code,
+                                  "priority": flag.priority,
+                                  "destination": destination})
 
 
 def _dispatch(outbox: Outbox, transport: MailTransport, msg: OutboundMessage,
@@ -160,6 +182,15 @@ def run_cycle(
     outbox = Outbox(control_root, startup.state.run_mode, ceo=ceo,
                     coo=coo, ceo_absent=ceo_absent)
     known = outbox.known_dedupe_keys()
+
+    # §7.3 S1 and the D-10 budget. Working hours stay unset unless the
+    # CEO confirmed them (§8.3, O-11) — the detector checks that itself,
+    # so an unconfirmed config edit cannot switch the signal on.
+    sla = startup.config["sla"] or {}
+    working_hours = (sla.get("working_calendar") or sla).get("working_hours")
+    flag_budget = (startup.config["materiality"] or {}).get(
+        "ceo_flag_budget_per_week")
+    week_start = datetime.combine(today, datetime.min.time()) - timedelta(days=7)
 
     try:
         # ---- inbound ----------------------------------------------------
@@ -243,6 +274,16 @@ def run_cycle(
                 evaluation = evaluate(sub.spec, doc, enforcer.cal if enforcer
                                       else _default_cal())
                 report.verdicts[fetched.message_id] = evaluation.verdict
+
+                # §7.3 S1: substantive signals. These never change the
+                # verdict and never appear in the submitter's reply —
+                # they are recorded for the CEO alone. Metadata-only, so
+                # they run on confidential items too (§12.1.3).
+                flag = s1_out_of_hours(fetched.received_at, working_hours)
+                if flag:
+                    flag.subject_ref = f"{obligation_id} / {fetched.sender}"
+                    _raise_flag(conn, flag, report, flag_budget, week_start,
+                                audit)
 
                 conn.execute(
                     "INSERT INTO submissions (obligation_id, verdict, timeliness,"
