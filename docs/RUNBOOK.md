@@ -71,6 +71,15 @@ whole config *key* that is absent is reported rather than added — an
 absent key may be absent on purpose, and filling it silently would be
 the system deciding something that is yours.
 
+When you have read a reported key and want it, name it:
+
+```powershell
+python -m control init --adopt-key authority.yaml:interim
+```
+
+Naming it is you deciding. It refuses to replace a key you already
+have — this adds what is missing, never overwrites what is there.
+
 ---
 
 ## 2. Turn on the backup — before anything writes

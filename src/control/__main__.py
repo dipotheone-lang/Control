@@ -533,13 +533,21 @@ def cmd_contracts(args) -> int:
 def cmd_init(args) -> int:
     """Create CONTROL_ROOT from the repository's config templates."""
     from .bootstrap import (
-        adopt_drift, bootstrap, config_drift, render_drift, render_result,
+        adopt_drift, adopt_key, bootstrap, config_drift, render_drift,
+        render_result,
     )
 
     repo_config = Path(__file__).resolve().parent.parent.parent / "config"
     template = Path(args.templates) if args.templates else repo_config
     result = bootstrap(Path(args.control_root), template)
     print(render_result(result))
+
+    for spec in args.adopt_key:
+        try:
+            print(f"\n{adopt_key(Path(args.control_root), template, spec)}")
+        except HaltError as e:
+            print(f"\nnot adopted: {e}")
+            return 1
 
     # Kept files are never overwritten, so a decision taken after this
     # machine was set up would otherwise never arrive.
@@ -1732,6 +1740,11 @@ def main(argv: list[str] | None = None) -> int:
     init = sub.add_parser("init",
                           help="create CONTROL_ROOT from the config templates")
     init.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    init.add_argument("--adopt-key", action="append", default=[],
+                      metavar="FILE:KEY",
+                      help="copy one named config key from the template, "
+                           "e.g. authority.yaml:interim. Naming it is you "
+                           "deciding; it never replaces a key you already have")
     init.add_argument("--adopt", action="store_true",
                       help="add template list entries your config lacks; "
                            "never removes or changes what is already there")
