@@ -183,3 +183,46 @@ def test_available_reports_unusable_without_arabic(monkeypatch):
     usable, reason = ocr_module.available()
     assert usable is False
     assert "Arabic" in reason
+
+
+def test_the_run_banner_matches_what_the_code_actually_does(tmp_path, capsys,
+                                                            monkeypatch):
+    """A false statement about a confidentiality control is the failure
+    this guards.
+
+    The integration of the laptop branch carried over a banner saying
+    "OCR is NOT applied to confidential documents" while the merged code,
+    under D-14, applied it. The behaviour was the decided one; the
+    sentence was the stale one. Either would have been a defect — a
+    control that says the wrong thing about itself is not a control.
+    """
+    import control.ocr as ocr_module
+    from control.__main__ import main
+
+    monkeypatch.setattr(ocr_module, "available",
+                        lambda: (True, "tesseract with ara, eng"))
+    monkeypatch.setattr(ocr_module, "ocr_document",
+                        lambda path, **kw: OcrResult(source=str(path),
+                                                     error="stub"))
+    source = tmp_path / "src" / "KNAUF"
+    source.mkdir(parents=True)
+    (source / "c.txt").write_text("Bond valid until 30/11/2026.\n",
+                                  encoding="utf-8")
+    root = tmp_path / "CONTROL"
+    main(["init", "--control-root", str(root)])
+    capsys.readouterr()
+
+    base = ["contracts", "--control-root", str(root),
+            "--source", str(tmp_path / "src"), "--ocr"]
+
+    main(base)
+    without = capsys.readouterr().out
+    assert "are NOT OCR'd on this run" in without
+    assert "ARE included" not in without
+
+    main(base + ["--confidential-dates"])
+    with_flag = capsys.readouterr().out
+    assert "Confidential contracts ARE included" in with_flag
+    assert "D-14" in with_flag
+    assert "never retained" in with_flag
+    assert "NOT OCR'd" not in with_flag

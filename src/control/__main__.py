@@ -431,11 +431,17 @@ def cmd_contracts(args) -> int:
         print(f"OCR ACTIVE: {reason}")
         print(f"  confidence floor {floor} — below it a document is UNREADABLE, "
               "not evaluated, not posted (§5.5)")
-        print("  OCR is NOT applied to confidential documents: "
-              "confidential.yaml lists OCR")
-        print("  under metadata_only_mode.prohibited, and D-05 as recorded "
-              "covers dates, not OCR.")
-        print("  Extending it requires a CEO decision, not a flag.")
+        if args.confidential_dates:
+            print("  Confidential contracts ARE included, under decision D-14 "
+                  "(17-Aug-2026):")
+            print("  dates and term durations only, and the OCR text is never "
+                  "retained — it is")
+            print("  dropped at capture, so no clause text reaches a register "
+                  "or a report.")
+        else:
+            print("  Confidential documents are NOT OCR'd on this run. D-14 "
+                  "permits it for")
+            print("  dates only, and only with --confidential-dates.")
 
         def ocr(path, _floor=floor):
             return ocr_document(path, floor=_floor)
