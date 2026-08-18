@@ -142,6 +142,17 @@ reports the engine, PDF rendering and Arabic data all present, set
 python -m control contracts --ocr --confidential-dates
 ```
 
+Results are cached per document under `%CONTROL_ROOT%\data\stage-c-cache`,
+so a second run reuses what it already read instead of OCR'ing the drive
+again. It reports how many it reused. `--no-cache` forces a full re-read.
+
+The run prints the **confidence distribution** across every reading —
+min, median, max. Use it. The floor defaults to 60, and that number was
+chosen from a handful of measurements on your documents, not from
+principle. It is a governance number: set it from what you see, and
+note that lowering it is never something the learning engine may do
+(§14.4).
+
 **Readings below the confidence floor are discarded, not used.** §5.5:
 a wrong number in a register is worse than no number, and on a scanned
 Arabic contract a permissive floor produces plausible dates that are

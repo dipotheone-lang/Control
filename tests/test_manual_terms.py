@@ -45,10 +45,10 @@ def sheet(tmp_path, rows):
 # ---- building the queue -----------------------------------------------
 
 class FakeResult:
-    def __init__(self, unreadable=(), blocked=(), ocr_results=()):
+    def __init__(self, unreadable=(), blocked=(), ocr_below_floor=()):
         self.unreadable = list(unreadable)
         self.blocked = list(blocked)
-        self.ocr_results = list(ocr_results)
+        self.ocr_below_floor = list(ocr_below_floor)
 
 
 class FakeRecord:
@@ -62,14 +62,14 @@ def test_the_queue_carries_why_not_just_which():
     """A below-floor scan is legible to a human, a sealed document may
     need permission, an engine failure may just need the engine. Those
     are different next actions."""
-    from control.ocr import OcrResult
-
     pending = pending_from_result(FakeResult(
         unreadable=[FakeRecord("Legal/g.png", "OCR: mean confidence 42.0 "
                                "is below the §5.5 floor")],
         blocked=[FakeRecord("Enova/nda.pdf",
                             "not opened — D-01 metadata-only scope", True)],
-        ocr_results=[OcrResult(path="/abs/Legal/g.png", confidence=42.0)]))
+        # Stage C records this as a note, not an object, so a cached
+        # document replays without holding an OCR result in memory.
+        ocr_below_floor=["g.png (mean confidence 42.0)"]))
 
     assert len(pending) == 2
     assert "below the §5.5 floor" in pending[0].why

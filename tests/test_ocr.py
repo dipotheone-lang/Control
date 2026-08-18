@@ -1,416 +1,185 @@
-"""OCR and its confidence floor — charter §5.5.
-
-The Phase 0 scan is why this module exists. 362 legal documents
-produced ZERO guarantee expiries, LD rates, notice periods or
-defects-liability dates — not because there are none, but because 47%
-of them are photographs of text, 81% for supplier legal documents. §2.2
-calls a forfeited claim window the most expensive failure in this
-charter, and the windows were in files nothing could read.
-
-Almost every test here is about the floor, because the floor is what
-makes OCR safe to use at all:
-
-    "Never post an OCR figure below the floor. A wrong number in a
-     register is worse than no number."
-
-A permissive floor on a scanned Arabic contract produces plausible
-dates that are wrong, and a wrong date in a class 2 register alerts
-confidently on the wrong day.
-
-The engine is injected throughout, so these run on a machine with no
-Tesseract — which is also the machine most of this was written on.
-"""
+"""§5.5 OCR — the floor, and the confidentiality gate in front of it."""
 
 from pathlib import Path
 
-import pytest
-import yaml
+from control.discovery.stage_c import run_stage_c
+from control.ocr import DEFAULT_CONFIDENCE_FLOOR, OcrResult
 
-from control.ocr import (
-    DEFAULT_FLOOR, OcrSettings, engine_status, ocr_image, ocr_pdf,
-    read_scanned, summarise,
-)
-
-REPO_CONFIG = Path(__file__).resolve().parent.parent / "config"
+CLIENTS = ["Siemens Energy", "KNAUF"]
 
 
-def words(pairs):
-    """A tesseract-shaped dict: (text, confidence) pairs."""
-    return {"text": [t for t, _ in pairs], "conf": [c for _, c in pairs]}
+def _contract_text():
+    return (
+        "The performance bond shall remain valid until 30/11/2026.\n"
+        "The Contractor shall give notice of any claim within 28 days.\n"
+    )
 
 
-def reader_for(pairs):
-    def reader(_path, _languages):
-        return words(pairs)
-    return reader
+def _fake_ocr(text, *, confidence=90.0, below=False, error=""):
+    """An OCR callable with a known verdict, so the gate and the floor
+    can be tested without an engine installed."""
+    calls: list[Path] = []
+
+    def run(path):
+        calls.append(Path(path))
+        return OcrResult(
+            source=str(path),
+            text=None if (below or error) else text,
+            mean_confidence=confidence,
+            words=0 if error else 40,
+            pages_read=1, pages_total=1,
+            below_floor=below, error=error,
+        )
+
+    run.calls = calls
+    return run
 
 
-ON = OcrSettings(enabled=True, floor=80.0)
+def test_ocr_reads_a_scan_that_would_otherwise_be_a_gap(tmp_path):
+    (tmp_path / "scan.jpg").write_bytes(b"\xff\xd8\xff not really an image")
+    ocr = _fake_ocr(_contract_text())
 
+    result = run_stage_c(tmp_path, CLIENTS, [], ocr=ocr)
 
-# ---- the floor --------------------------------------------------------
-
-def test_a_confident_reading_is_returned(tmp_path):
-    result = ocr_image(tmp_path / "scan.png", ON, reader=reader_for(
-        [("Guarantee", 95), ("expires", 92), ("31/12/2026", 90)]))
-    assert result.accepted is True
-    assert "31/12/2026" in result.text
-    assert result.verdict == "OCR_ACCEPTED"
-
-
-def test_a_reading_below_the_floor_returns_no_text_at_all(tmp_path):
-    """The load-bearing test. Below-floor text is never handed back, so
-    a caller cannot accidentally treat a guess as a reading."""
-    result = ocr_image(tmp_path / "scan.png", ON, reader=reader_for(
-        [("Guarantee", 40), ("expires", 35), ("31/12/2026", 30)]))
-    assert result.accepted is False
-    assert result.text == ""
-    assert result.confidence == pytest.approx(35.0)
-    assert "below the §5.5 floor" in result.reason
-    assert result.verdict == "UNREADABLE — MANUAL REVIEW REQUIRED"
-
-
-def test_the_boundary_is_inclusive_upward(tmp_path):
-    exactly = ocr_image(tmp_path / "s.png", ON,
-                        reader=reader_for([("x", 80)]))
-    just_under = ocr_image(tmp_path / "s.png", ON,
-                           reader=reader_for([("x", 79.9)]))
-    assert exactly.accepted is True
-    assert just_under.accepted is False
-
-
-def test_unattempted_boxes_do_not_drag_the_average(tmp_path):
-    """Tesseract emits -1 for boxes it did not attempt and empty strings
-    for whitespace. Averaging those in would make confidence depend on
-    layout rather than on legibility."""
-    result = ocr_image(tmp_path / "s.png", ON, reader=lambda p, l: {
-        "text": ["Guarantee", "", "expires", " "],
-        "conf": [95, -1, 91, -1]})
-    assert result.confidence == pytest.approx(93.0)
-    assert result.accepted is True
-
-
-def test_nothing_recognised_is_reported_as_such(tmp_path):
-    result = ocr_image(tmp_path / "s.png", ON, reader=lambda p, l: {
-        "text": ["", " "], "conf": [-1, -1]})
-    assert result.accepted is False
-    assert result.confidence is None
-    assert result.reason == "no words recognised"
-    assert result.verdict == "NOT ATTEMPTED"
-
-
-def test_a_stricter_floor_rejects_what_a_looser_one_accepts(tmp_path):
-    pairs = [("Guarantee", 85), ("expires", 85)]
-    assert ocr_image(tmp_path / "s.png", OcrSettings(enabled=True, floor=80),
-                     reader=reader_for(pairs)).accepted is True
-    assert ocr_image(tmp_path / "s.png", OcrSettings(enabled=True, floor=90),
-                     reader=reader_for(pairs)).accepted is False
-
-
-# ---- refusals ---------------------------------------------------------
-
-def test_ocr_disabled_reads_nothing_and_says_so(tmp_path):
-    result = read_scanned(tmp_path / "s.png", OcrSettings(enabled=False))
-    assert result.accepted is False
-    assert "not enabled" in result.reason
-
-
-def test_a_missing_engine_is_reported_not_worked_around(tmp_path):
-    """No silent fallback, and no pretending the document had no terms
-    when the truth is that nothing looked at it."""
-    def explode(_path, _languages):
-        raise RuntimeError("tesseract is not installed")
-
-    result = ocr_image(tmp_path / "s.png", ON, reader=explode)
-    assert result.accepted is False
-    assert "tesseract is not installed" in result.reason
-
-
-def test_engine_status_never_raises():
-    status = engine_status()
-    assert set(status) == {"ocr", "pdf_render", "languages", "notes"}
-    assert isinstance(status["notes"], list)
-
-
-def test_engine_status_names_what_is_missing():
-    """A machine without OCR should learn which piece to install, not
-    that 'OCR is unavailable'."""
-    status = engine_status()
-    if not status["ocr"]:
-        assert any("pytesseract" in note for note in status["notes"])
-    if not status["pdf_render"]:
-        assert any("pymupdf" in note.lower() for note in status["notes"])
-
-
-# ---- scanned PDFs -----------------------------------------------------
-
-def two_pages(_path, _dpi, _max):
-    return [b"page-1", b"page-2"]
-
-
-def test_a_scanned_pdf_is_rendered_then_read(tmp_path):
-    result = ocr_pdf(tmp_path / "contract.pdf", ON, renderer=two_pages,
-                     reader=lambda image, l: words(
-                         [("Guarantee", 93), ("31/12/2026", 91)]))
-    assert result.accepted is True
-    assert result.pages == 2
-    assert result.text.count("Guarantee") == 2
-
-
-def test_page_confidence_is_weighted_by_words_recognised(tmp_path):
-    """One near-blank page must not sink a readable contract, and one
-    clean cover page must not lift a bad scan over the floor."""
-    pages = iter([
-        words([("x", 30)]),                                  # 1 word, poor
-        words([("a", 95), ("b", 95), ("c", 95), ("d", 95)]),  # 4 words, good
-    ])
-    result = ocr_pdf(tmp_path / "c.pdf", ON, renderer=two_pages,
-                     reader=lambda image, l: next(pages))
-    # (30*1 + 95*4) / 5 = 82 — above the floor, where a flat mean of
-    # 62.5 would have wrongly rejected it.
-    assert result.confidence == pytest.approx(82.0)
-    assert result.accepted is True
-
-
-def test_a_cover_page_cannot_lift_a_bad_scan(tmp_path):
-    pages = iter([
-        words([("CONTRACT", 99)]),                       # 1 clean word
-        words([(f"w{i}", 40) for i in range(20)]),        # 20 poor words
-    ])
-    result = ocr_pdf(tmp_path / "c.pdf", ON, renderer=two_pages,
-                     reader=lambda image, l: next(pages))
-    assert result.accepted is False
-    assert result.confidence < 80
-
-
-def test_an_unrenderable_pdf_is_a_gap(tmp_path):
-    def explode(_path, _dpi, _max):
-        raise RuntimeError("PyMuPDF missing")
-
-    result = ocr_pdf(tmp_path / "c.pdf", ON, renderer=explode)
-    assert result.accepted is False
-    assert "PyMuPDF missing" in result.reason
-
-
-def test_read_scanned_routes_pdfs_to_the_renderer(tmp_path):
-    result = read_scanned(tmp_path / "c.pdf", ON, renderer=two_pages,
-                          reader=lambda image, l: words([("x", 95)]))
-    assert result.pages == 2
-
-
-# ---- reporting --------------------------------------------------------
-
-def test_below_floor_is_counted_apart_from_engine_failure(tmp_path):
-    """Different problems. One means the engine read it and the reading
-    was not trustworthy; the other means nothing looked at it. Collapsing
-    them would hide which the company actually has."""
-    results = [
-        ocr_image(tmp_path / "a.png", ON, reader=reader_for([("x", 95)])),
-        ocr_image(tmp_path / "b.png", ON, reader=reader_for([("x", 40)])),
-        ocr_image(tmp_path / "c.png", ON,
-                  reader=lambda p, l: (_ for _ in ()).throw(RuntimeError("no engine"))),
-    ]
-    counts = summarise(results)
-    assert counts == {
-        "total": 3, "accepted": 1, "below_floor": 1,
-        "not_attempted_or_failed": 1, "mean_confidence_accepted": 95.0}
-
-
-# ---- Stage C integration ---------------------------------------------
-
-def test_stage_c_reads_a_scan_when_ocr_clears_the_floor(tmp_path, monkeypatch):
-    from control.discovery import stage_c
-
-    (tmp_path / "Contracts").mkdir()
-    (tmp_path / "Contracts" / "guarantee.png").write_bytes(b"not really a png")
-
-    monkeypatch.setattr(stage_c, "read_scanned", None, raising=False)
-    import control.ocr as ocr_module
-
-    monkeypatch.setattr(
-        ocr_module, "ocr_image",
-        lambda path, settings, **kw: ocr_module.OcrResult(
-            path=str(path), text="Letter of guarantee valid until 31/12/2026",
-            confidence=94.0, floor=settings.floor, accepted=True))
-
-    result = stage_c.run_stage_c(
-        tmp_path, [], [], ocr_settings=OcrSettings(enabled=True))
-    assert result.ocr_results and result.ocr_results[0].accepted
-    assert any(t.kind == "GUARANTEE_EXPIRY" for t in result.terms)
     assert result.unreadable == []
+    assert result.ocr_read == ["scan.jpg"]
+    kinds = {t.kind for t in result.terms}
+    assert "GUARANTEE_EXPIRY" in kinds and "NOTICE_PERIOD" in kinds
 
 
-def test_stage_c_leaves_a_below_floor_scan_unreadable(tmp_path, monkeypatch):
-    from control.discovery import stage_c
+def test_without_ocr_a_scan_stays_a_declared_gap(tmp_path):
+    (tmp_path / "scan.jpg").write_bytes(b"\xff\xd8\xff nope")
 
-    (tmp_path / "scan.png").write_bytes(b"x")
-    import control.ocr as ocr_module
+    result = run_stage_c(tmp_path, CLIENTS, [])
 
-    monkeypatch.setattr(
-        ocr_module, "ocr_image",
-        lambda path, settings, **kw: ocr_module.OcrResult(
-            path=str(path), confidence=42.0, floor=settings.floor,
-            accepted=False, reason="mean confidence 42.0 is below the §5.5 floor"))
+    assert len(result.unreadable) == 1
+    assert "not enabled on this run" in result.unreadable[0].note
+    assert result.terms == []
 
-    result = stage_c.run_stage_c(
-        tmp_path, [], [], ocr_settings=OcrSettings(enabled=True))
+
+def test_below_the_floor_nothing_is_posted(tmp_path):
+    """§5.5: a wrong number in a register is worse than no number. The
+    text must not reach find_terms at all."""
+    (tmp_path / "faint.jpg").write_bytes(b"\xff\xd8\xff faint")
+    ocr = _fake_ocr(_contract_text(), confidence=31.0, below=True)
+
+    result = run_stage_c(tmp_path, CLIENTS, [], ocr=ocr)
+
     assert result.terms == []
     assert len(result.unreadable) == 1
-    assert "below the §5.5 floor" in result.unreadable[0].note
+    assert "below the §5.5 confidence floor" in result.unreadable[0].note
+    assert result.ocr_read == []
+    assert result.ocr_below_floor and "31.0" in result.ocr_below_floor[0]
 
 
-def test_stage_c_without_ocr_behaves_exactly_as_before(tmp_path):
-    from control.discovery import stage_c
+def test_ocr_failure_is_recorded_not_fatal(tmp_path):
+    (tmp_path / "a.jpg").write_bytes(b"\xff\xd8\xff one")
+    (tmp_path / "b.txt").write_text(_contract_text(), encoding="utf-8")
+    ocr = _fake_ocr("", error="PdfError: broken xref")
 
-    (tmp_path / "scan.png").write_bytes(b"x")
-    result = stage_c.run_stage_c(tmp_path, [], [])
-    assert result.ocr_results == []
-    assert len(result.unreadable) == 1
-    assert "OCR required" in result.unreadable[0].note
+    result = run_stage_c(tmp_path, CLIENTS, [], ocr=ocr)
 
-
-# ---- the shipped config ----------------------------------------------
-
-def test_the_repo_config_ships_with_ocr_off():
-    """Absent an engine, nothing should change silently."""
-    data = yaml.safe_load((REPO_CONFIG / "ocr.yaml").read_text(encoding="utf-8"))
-    assert data["enabled"] is False
-    settings = OcrSettings.from_config(data)
-    assert settings.enabled is False
+    # The good document still made it through.
+    assert any(t.found_date == "2026-11-30" for t in result.terms)
+    assert result.ocr_failed and "broken xref" in result.ocr_failed[0]
+    assert any("OCR failed" in r.note for r in result.unreadable)
 
 
-def test_arabic_is_listed_first():
-    """Most of this document estate is Arabic; language order matters to
-    tesseract's segmentation."""
-    data = yaml.safe_load((REPO_CONFIG / "ocr.yaml").read_text(encoding="utf-8"))
-    assert data["languages"][0] == "ara"
+def test_a_confidential_scan_is_ocrd_for_dates_under_d14(tmp_path):
+    """Decision D-14 (17-Aug-2026) extended D-05 to permit OCR here.
+
+    This test previously asserted the opposite, and was right to: until
+    the CEO decided, widening an NDA exception by inference was the
+    direction §12.1.1 forbids. The decision was taken because the first
+    live Stage C run found 47% of legal documents are photographs — so
+    the guarantee expiries D-05 exists to catch were exactly the ones
+    unreachable.
+    """
+    (tmp_path / "KNAUF").mkdir()
+    (tmp_path / "KNAUF" / "contract.jpg").write_bytes(b"\xff\xd8\xff secret")
+    ocr = _fake_ocr(_contract_text())
+
+    result = run_stage_c(tmp_path, CLIENTS, [], ocr=ocr,
+                         permit_confidential_dates=True)
+
+    assert ocr.calls, "D-14 permits OCR on a confidential contract for dates"
+    assert [t.found_date for t in result.terms], "the dates are the whole point"
 
 
-def test_the_shipped_floor_is_the_conservative_default():
-    data = yaml.safe_load((REPO_CONFIG / "ocr.yaml").read_text(encoding="utf-8"))
-    assert data["confidence_floor"] == DEFAULT_FLOOR
-    assert data["dpi"] >= 300
+def test_a_confidential_scan_keeps_the_date_and_never_the_clause(tmp_path):
+    """D-14's added condition: the OCR text buffer is never retained.
+
+    Redaction happens at capture, so no later template change can leak
+    what was never stored.
+    """
+    (tmp_path / "KNAUF").mkdir()
+    (tmp_path / "KNAUF" / "contract.jpg").write_bytes(b"\xff\xd8\xff secret")
+
+    result = run_stage_c(tmp_path, CLIENTS, [], ocr=_fake_ocr(_contract_text()),
+                         permit_confidential_dates=True)
+
+    body = _contract_text()
+    for term in result.terms:
+        assert "REDACTED" in term.context
+        assert term.context not in body
+        assert term.found_date, "a term with no date has nothing to justify it"
+
+    # And nothing anywhere in the rendered output carries the body.
+    from control.discovery.stage_c import render_commercial_exposure
+    rendered = render_commercial_exposure(result)
+    for fragment in body.split():
+        if len(fragment) > 8 and fragment.isalpha():
+            assert fragment not in rendered
 
 
-def test_missing_config_yields_ocr_off_not_ocr_on():
-    assert OcrSettings.from_config(None).enabled is False
-    assert OcrSettings.from_config({}).enabled is False
-    assert OcrSettings.from_config({}).floor == DEFAULT_FLOOR
+def test_confidential_scan_blocked_without_d05_too(tmp_path):
+    (tmp_path / "KNAUF").mkdir()
+    (tmp_path / "KNAUF" / "contract.jpg").write_bytes(b"\xff\xd8\xff secret")
+    ocr = _fake_ocr(_contract_text())
 
+    result = run_stage_c(tmp_path, CLIENTS, [], ocr=ocr)
 
-# ---- D-14: OCR on confidential contracts, text never retained --------
-
-def _confidential_run(tmp_path, monkeypatch, *, permit, accepted=True):
-    from control.discovery import stage_c
-    import control.ocr as ocr_module
-
-    (tmp_path / "Enova").mkdir()
-    (tmp_path / "Enova" / "contract.png").write_bytes(b"x")
-    monkeypatch.setattr(
-        ocr_module, "ocr_image",
-        lambda path, settings, **kw: ocr_module.OcrResult(
-            path=str(path),
-            text="Letter of guarantee valid until 31/12/2026. "
-                 "Clause 14: the Contractor shall indemnify...",
-            confidence=94.0, floor=settings.floor, accepted=accepted))
-    return stage_c.run_stage_c(
-        tmp_path, ["Enova"], [], permit_confidential_dates=permit,
-        ocr_settings=OcrSettings(enabled=True))
-
-
-def test_a_confidential_scan_is_not_ocrd_without_d05(tmp_path, monkeypatch):
-    """D-01 governs until the exception is switched on deliberately."""
-    result = _confidential_run(tmp_path, monkeypatch, permit=False)
-    assert result.ocr_results == []
+    assert ocr.calls == []
     assert len(result.blocked) == 1
     assert result.terms == []
 
 
-def test_d14_permits_ocr_on_a_confidential_contract(tmp_path, monkeypatch):
-    result = _confidential_run(tmp_path, monkeypatch, permit=True)
-    assert len(result.ocr_results) == 1
-    assert result.ocr_results[0].accepted is True
-    assert any(t.kind == "GUARANTEE_EXPIRY" for t in result.terms)
-    assert any(t.found_date == "2026-12-31" for t in result.terms)
+def test_textless_pdf_falls_through_to_ocr(tmp_path):
+    """A PDF with no text layer is a scan in a PDF wrapper. Before this,
+    it was filed unreadable without OCR ever being offered it."""
+    (tmp_path / "wrapped.txt").write_text("   \n  ", encoding="utf-8")
+    ocr = _fake_ocr(_contract_text())
+
+    result = run_stage_c(tmp_path, CLIENTS, [], ocr=ocr)
+
+    assert ocr.calls, "empty extractable text should have been offered to OCR"
+    assert any(t.found_date == "2026-11-30" for t in result.terms)
 
 
-def test_the_ocr_text_of_a_confidential_document_is_never_retained(
-        tmp_path, monkeypatch):
-    """The condition that makes D-14 safe. Retaining the buffer would put
-    the full body of an NDA contract somewhere the report layer can
-    reach — the leak D-05's redaction-at-capture rule exists to prevent,
-    arriving through a different door."""
-    result = _confidential_run(tmp_path, monkeypatch, permit=True)
-    stored = result.ocr_results[0]
-    assert stored.text == ""
-    assert stored.text_redacted is True
-    assert stored.confidence == 94.0          # the measurement survives
-
-    # And no clause text reached the register either (D-05).
-    blob = " ".join(t.context for t in result.terms)
-    assert "indemnify" not in blob
-    assert "REDACTED" in blob
+def test_floor_default_is_not_zero():
+    """A floor of 0 would admit anything, which is the failure mode §5.5
+    exists to prevent."""
+    assert DEFAULT_CONFIDENCE_FLOOR >= 50
 
 
-def test_a_non_confidential_ocr_result_keeps_its_text(tmp_path, monkeypatch):
-    from control.discovery import stage_c
+def test_available_reports_unusable_without_arabic(monkeypatch):
+    """§5.5 requires Arabic. English-only must read as unusable, not as
+    a working engine that quietly fabricates Arabic text."""
+    import sys
+    import types
+
     import control.ocr as ocr_module
 
-    (tmp_path / "public.png").write_bytes(b"x")
-    monkeypatch.setattr(
-        ocr_module, "ocr_image",
-        lambda path, settings, **kw: ocr_module.OcrResult(
-            path=str(path), text="valid until 31/12/2026",
-            confidence=94.0, floor=settings.floor, accepted=True))
-    result = stage_c.run_stage_c(
-        tmp_path, [], [], ocr_settings=OcrSettings(enabled=True))
-    assert result.ocr_results[0].text
-    assert result.ocr_results[0].text_redacted is False
+    # Stand in for the optional engine bindings. Without this the test
+    # passes or fails according to what happens to be pip-installed,
+    # which measures the machine rather than the rule.
+    for name in ("pytesseract", "pymupdf"):
+        monkeypatch.setitem(sys.modules, name,
+                            sys.modules.get(name) or types.ModuleType(name))
+    monkeypatch.setattr(ocr_module, "resolve_binary", lambda: "tesseract")
+    monkeypatch.setattr(ocr_module, "resolve_tessdata", lambda: "/tessdata")
+    monkeypatch.setattr(ocr_module, "_languages", lambda b, t: {"eng", "osd"})
 
-
-# ---- the accounting appears on the page ------------------------------
-
-def test_the_report_carries_the_ocr_numbers(tmp_path, monkeypatch):
-    from control.discovery.stage_c import render_commercial_exposure
-
-    result = _confidential_run(tmp_path, monkeypatch, permit=True)
-    page = render_commercial_exposure(result)
-    assert "## OCR (§5.5)" in page
-    assert "**1 document(s)** were put through OCR" in page
-    assert "cleared the confidence floor" in page
-    assert "D-14" in page and "never clause text" in page
-
-
-def test_zero_trusted_readings_are_called_out(tmp_path, monkeypatch):
-    """'23 attempted, 0 trusted' is the number §1.1 wants on the page.
-    Without it, a register thinned by unreadable scans looks identical
-    to one thinned by there being nothing to find."""
-    from control.discovery.stage_c import render_commercial_exposure
-
-    result = _confidential_run(tmp_path, monkeypatch, permit=True,
-                               accepted=False)
-    page = render_commercial_exposure(result)
-    assert "Nothing was trusted" in page
-    assert "covering only the documents that were machine-readable" in page
-
-
-def test_no_ocr_section_when_ocr_never_ran(tmp_path):
-    from control.discovery.stage_c import render_commercial_exposure, run_stage_c
-
-    (tmp_path / "scan.png").write_bytes(b"x")
-    page = render_commercial_exposure(run_stage_c(tmp_path, [], []))
-    assert "## OCR (§5.5)" not in page
-
-
-def test_the_prohibited_list_is_eight_items_not_ten():
-    """A YAML flow list splits on commas inside an unquoted scalar, which
-    silently turned one carve-out into three phantom prohibitions."""
-    data = yaml.safe_load((REPO_CONFIG / "confidential.yaml").read_text(encoding="utf-8"))
-    prohibited = data["metadata_only_mode"]["prohibited"]
-    assert len(prohibited) == 8
-    ocr_entry = next(x for x in prohibited if x.startswith("OCR"))
-    assert "D-14" in ocr_entry
-    assert "never retained" in ocr_entry
-    # D-01's core prohibitions are untouched by the carve-out.
-    assert "opening body" in prohibited
-    assert "passing contents to any model or external service" in prohibited
+    usable, reason = ocr_module.available()
+    assert usable is False
+    assert "Arabic" in reason

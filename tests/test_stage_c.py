@@ -59,6 +59,26 @@ def test_confidential_classification_is_conservative():
                                  CLIENTS, FOLDERS)[0] is False
 
 
+def test_multi_segment_confidential_folder_matches_on_any_platform():
+    """A config folder is written with forward slashes; str(Path) yields
+    backslashes on Windows. If the two are compared raw, the folder the
+    CEO classified confidential does not match and the document gets
+    opened — D-01 breached on one platform only (§12.1.2)."""
+    from pathlib import Path
+    folders = ["clients/NDA-clients"]
+    for candidate in (
+        Path("clients/NDA-clients/x.pdf"),
+        Path("clients") / "NDA-clients" / "x.pdf",
+        Path(r"clients\NDA-clients\x.pdf"),
+    ):
+        confidential, reason = classify_confidential(candidate, [], folders)
+        assert confidential is True, candidate
+        assert "classified confidential" in reason
+    # Separator style in the config entry must not decide it either.
+    assert classify_confidential(
+        Path("clients/NDA-clients/x.pdf"), [], [r"clients\NDA-clients"])[0] is True
+
+
 def test_confidential_documents_are_never_opened(tmp_path):
     (tmp_path / "Siemens Energy").mkdir()
     secret = tmp_path / "Siemens Energy" / "contract.txt"
