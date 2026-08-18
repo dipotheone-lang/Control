@@ -882,6 +882,94 @@ def cmd_terms(args) -> int:
     return 0
 
 
+def cmd_disputes(args) -> int:
+    """§8.4 — list disputes awaiting a ruling, or record one.
+
+    A dispute suspends the escalation clock on its item. Without a way
+    to rule, the suspension has no end and the appeal path doubles as a
+    way to stop enforcement indefinitely (finding V4).
+    """
+    from . import disputes as dsp
+    from .config import load_config
+    from .db import connect
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    conn = connect(control_root / "data" / "control.db")
+    try:
+        people = load_config(control_root / "config")["people"]
+        ceo = _role(people, 4) or "ahmed@ubcsis.com"
+        coo = _role(people, 3, "COO")
+
+        if not (args.uphold or args.reject):
+            open_disputes = dsp.pending(conn, today)
+            if not open_disputes:
+                print("No disputes pending adjudication.")
+                return 0
+
+            print(f"{len(open_disputes)} dispute(s) awaiting a ruling (§8.4). "
+                  "The escalation clock on each item is suspended until one "
+                  "is recorded.\n")
+            for item in open_disputes:
+                marker = " — PAST THE §8.4 VISIBILITY LINE" if \
+                    item.days_open >= dsp.VISIBILITY_DAYS else ""
+                print(f"  [{item.dispute_id}] raised by {item.raised_by} on "
+                      f"{item.raised_at:%d-%b-%Y}, {item.days_open} days "
+                      f"open{marker}")
+                if item.linked:
+                    print(f"       contests {item.verdict} on "
+                          f"{item.obligation_id} (submission "
+                          f"{item.submission_id})")
+                else:
+                    print("       not linked to a submission — the reply "
+                          "could not be matched to what it contests")
+            print("\nTo rule:")
+            print("  python -m control disputes --uphold <id> "
+                  "--reason \"...\"")
+            print("  python -m control disputes --reject <id> "
+                  "--reason \"...\"")
+            print("\nAn upheld dispute becomes a permanent golden case, with "
+                  "your ruling as the expected answer (§13.1).")
+            return 0
+
+        dispute_id = int(args.uphold or args.reject)
+        outcome = "UPHELD" if args.uphold else "REJECTED"
+        target = next((d for d in dsp.pending(conn, today)
+                       if d.dispute_id == dispute_id), None)
+
+        try:
+            ruling = dsp.adjudicate(
+                conn, dispute_id, outcome=outcome, by=args.by,
+                reason=args.reason, ceo=ceo, coo=coo, on=today)
+        except (dsp.AuthorityError, ValueError) as e:
+            print(f"Not recorded: {e}")
+            return 1
+
+        print(f"dispute {dispute_id}: {outcome}")
+        print(f"  recorded as dispute row {ruling['ruling_id']}, appended — "
+              "the original row is unchanged (§5.2)")
+        if ruling["deputised"]:
+            print(f"  logged as deputised for {ceo} during registered absence "
+                  "(§3.3, D-12)")
+        print("  the escalation clock on this item resumes")
+
+        if outcome == "UPHELD":
+            path = dsp.record_golden_requirement(
+                control_root, ruling, reason=args.reason,
+                obligation_id=target.obligation_id if target else None,
+                verdict=target.verdict if target else None, on=today)
+            print(f"\n§13.1: this must become a permanent test case.\n"
+                  f"  queued in {path}\n"
+                  "  Control cannot write the case itself — it holds the "
+                  "verdict, not the document.")
+
+        for line in dsp.rejection_pattern(conn):
+            print(f"\n§8.6: {line}")
+        return 0
+    finally:
+        conn.close()
+
+
 def cmd_golden(args) -> int:
     """§13.1 golden set — issue a batch, apply it, or run the gate.
 
@@ -1327,6 +1415,19 @@ def main(argv: list[str] | None = None) -> int:
     _common(report_cmd)
     report_cmd.add_argument("--as-of", default="", help="ISO date, for testing")
     report_cmd.set_defaults(fn=cmd_report)
+
+    disputes = sub.add_parser(
+        "disputes", help="§8.4: list disputes awaiting a ruling, or record one")
+    disputes.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    disputes.add_argument("--uphold", default="", help="dispute id to uphold")
+    disputes.add_argument("--reject", default="", help="dispute id to reject")
+    disputes.add_argument("--reason", default="",
+                          help="the ruling — kept as the expected answer (§13.1)")
+    disputes.add_argument("--by", default="ahmed@ubcsis.com",
+                          help="who is ruling; the COO only during registered "
+                               "CEO absence (§3.3)")
+    disputes.add_argument("--today", default="", help="ISO date, for testing")
+    disputes.set_defaults(fn=cmd_disputes)
 
     golden = sub.add_parser(
         "golden",

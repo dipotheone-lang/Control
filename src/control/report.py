@@ -425,8 +425,17 @@ def _decisions_section(conn, as_of: date, open_decisions: list[str]) -> list[str
         lines.append(
             f"   {len(pending)} disputes pending adjudication, oldest {age} days (§8.4)."
         )
+        lines.append(
+            "   Each suspends the escalation clock on its item until ruled: "
+            "python -m control disputes")
     else:
         lines.append("   No disputes pending.")
+
+    # §8.6: a repeatedly-rejected disputant is a systemic finding, raised
+    # as a pattern and never re-argued item by item (§8.4).
+    from .disputes import rejection_pattern
+    for line in rejection_pattern(conn):
+        lines.append(f"   {line}")
     for decision in open_decisions:
         lines.append(f"   OPEN: {decision}")
     return lines
