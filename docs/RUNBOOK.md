@@ -344,7 +344,57 @@ been hiding.
 
 ---
 
-## 7b. The golden set — the gate you cannot delegate
+## 7b. Disputes — the appeal path, and closing it
+
+Anyone can contest a finding by replying `DISPUTE` (or `اعتراض`) on the
+first line. That suspends the escalation clock on that item and lists it
+for you.
+
+**Suspension with no way to rule is a way to stop enforcement
+indefinitely.** So:
+
+```powershell
+python -m control disputes
+```
+
+Lists everything awaiting a ruling: who raised it, when, how many days
+open, and which verdict on which obligation it contests. Anything past
+five working days is marked — §8.4 keeps it as a standing line in the
+weekly report until it is adjudicated.
+
+```powershell
+python -m control disputes --uphold 3 --reason "Revision 3 was current on the submission date."
+python -m control disputes --reject 3 --reason "The form used was superseded in June."
+```
+
+The reason is not paperwork. §8.6 reads it to raise systemic findings,
+and §13.1 keeps it as the expected answer if the dispute is upheld — so
+a ruling without one is refused.
+
+**Nothing is overwritten.** A ruling is appended as a new row pointing
+at the one it resolves, so the history stays complete and the current
+state stays unambiguous. Rule once; to contest a ruling, raise a new
+dispute.
+
+**Who may rule.** You. The COO deputises only while your absence is
+registered (§3.3, D-12) — read from the absence register, never from a
+flag the deputy can set — and every deputised ruling is logged as such.
+
+**An upheld dispute owes a test case.** §13.1 makes it permanent, with
+your ruling as the expected answer, so the same error cannot recur
+silently. Control queues the requirement in
+`tests\golden-set\FROM-DISPUTES.md` and says plainly that it cannot
+write the case itself: it holds the verdict, not the document. Building
+it needs the original submission from the archive.
+
+**A repeatedly-rejected disputant is a systemic finding**, raised as a
+pattern in the weekly report and never argued item by item. Control
+states the count and stops — why somebody disputes repeatedly is a
+conclusion about a person, and those are yours.
+
+---
+
+## 7c. The golden set — the gate you cannot delegate
 
 This is the Phase 2 gate, and D-03 puts the verdicts with you alone: no
 delegation, no pre-filled suggestions.
@@ -479,6 +529,7 @@ that cannot, and Phase 2 cannot start without it.
 | `cycle` | One sweep: fetch, classify, evaluate, enforce, gate |
 | `report` | The §11 weekly pack; always drafts, never sends |
 | `terms` | Manual entry for documents no engine could read |
+| `disputes` | §8.4: list disputes awaiting a ruling, or record one |
 | `golden` | §13.1 golden set: `--issue` a batch, `--apply` it, or run the gate |
 | `startup` | The §5.6 sequence alone, to check state |
 | `discovery` | Stages A–B against `UB_ROOT` |
