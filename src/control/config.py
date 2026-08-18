@@ -44,6 +44,11 @@ REQUIRED_FILES = (
 # default for no system at all.
 OPTIONAL_FILES = (
     "hse.yaml",
+    # What counts as evidence of a statutory filing (execution order
+    # step 2). Its absence stops the extraction brief and nothing else,
+    # and the brief refuses to run rather than guessing which documents
+    # are returns.
+    "filing-evidence.yaml",
 )
 
 

@@ -1382,6 +1382,84 @@ def cmd_disputes(args) -> int:
         conn.close()
 
 
+def cmd_extract_brief(args) -> int:
+    """The extraction brief — execution order step 2.
+
+    Read-only against the filing archive. Reports disagreements first
+    and resolves none of them: §14.2 puts statutory deadlines in Tier C,
+    raised with evidence for a human decision and never changed by the
+    system.
+    """
+    from . import extraction as ex
+    from .config import load_config
+
+    control_root = Path(args.control_root)
+    ub_root = Path(args.ub_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    config = load_config(control_root / "config")
+
+    evidence_rules = config.get("filing-evidence")
+    if not evidence_rules:
+        print("filing-evidence.yaml is missing from config. Without it "
+              "nothing identifies a filing, and guessing which documents "
+              "are returns is exactly what this brief must not do (§1.1).")
+        return 1
+
+    inventory = control_root / "discovery" / "file-inventory.csv"
+    if inventory.is_file() and not args.rescan:
+        paths = ex.paths_from_inventory(inventory)
+        source = f"Stage B inventory ({inventory.name})"
+    else:
+        if not ub_root.is_dir():
+            print(f"UB_ROOT not reachable: {ub_root} — halting rather than "
+                  "reporting on a partial view (§13.2).")
+            return 1
+        print(f"No inventory at {inventory} — walking {ub_root}. "
+              "This is the slow path.")
+        paths = ex.walk_paths(ub_root)
+        source = f"direct walk of {ub_root}"
+
+    found = ex.scan_paths(paths, evidence_rules)
+    observed = ex.observe(found)
+    statutory = config["statutory-calendar"]
+    disagreeing = ex.disagreements(statutory, observed)
+    candidates = ex.upgrade_candidates(statutory, observed, disagreeing)
+
+    brief = ex.render_brief(statutory, observed, disagreeing, candidates,
+                            source, len(paths), today)
+    out_dir = control_root / "discovery"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = out_dir / "EXTRACTION-BRIEF.md"
+    written.write_text(brief, encoding="utf-8")
+
+    print(f"{len(paths)} path(s) considered, {len(found)} matched as filing "
+          f"evidence across {len(observed)} obligation(s).")
+    if disagreeing:
+        print(f"\n{len(disagreeing)} DISAGREEMENT(S) — the archive "
+              "contradicts a CEO-stated rule:")
+        for item in disagreeing:
+            print(f"  {item.obligation_id}: stated {item.stated}; "
+                  f"observed {item.observed}")
+        print("\nNone of these is resolved here. §14.2 puts statutory "
+              "deadlines in Tier C — raised for a human decision, never "
+              "changed by the system.")
+    else:
+        print("\nNo disagreement between the archive and the stated rules. "
+              "That is not a clean bill — see section 3 for what the "
+              "archive held too little to say anything about.")
+
+    if candidates:
+        print(f"\n{len(candidates)} rule(s) corroborated by the filings, "
+              "proposed for ceo_stated → document_evidenced:")
+        for candidate in candidates:
+            print(f"  {candidate['id']}: {candidate['evidence']}")
+        print("\nO-03 stays open regardless — the archive shows what the "
+              "company did, not what the law requires.")
+
+    print(f"\nwritten: {written}")
+    return 0
+
+
 def cmd_event(args) -> int:
     """Event-driven statutory windows — §2.1, execution order B1 and B4.
 
@@ -1986,6 +2064,18 @@ def main(argv: list[str] | None = None) -> int:
                                "CEO absence (§3.3)")
     disputes.add_argument("--today", default="", help="ISO date, for testing")
     disputes.set_defaults(fn=cmd_disputes)
+
+    extract = sub.add_parser(
+        "extract-brief",
+        help="execution order step 2: what the filing archive says about "
+             "the CEO-stated statutory rules")
+    extract.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    extract.add_argument("--ub-root", default=os.environ.get("UB_ROOT"))
+    extract.add_argument("--rescan", action="store_true",
+                         help="walk UB_ROOT instead of reusing the Stage B "
+                              "inventory")
+    extract.add_argument("--today", default="", help="ISO date, for testing")
+    extract.set_defaults(fn=cmd_extract_brief)
 
     event = sub.add_parser(
         "event",

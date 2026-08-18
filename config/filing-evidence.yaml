@@ -1,0 +1,158 @@
+# Filing evidence — execution order 18-Aug-2026, step 2 (extraction brief)
+#
+# WHAT THIS IS FOR
+#
+# Four class 1 deadlines currently alert on dates the CEO stated from
+# memory (`ceo_stated`). The company's own filing archive is evidence
+# about those same rules, and it is evidence nobody has looked at.
+#
+# This file says which documents count as evidence of which statutory
+# filing. It does NOT say what the deadline is — the archive shows when
+# filings actually happened, which is a different fact from when they
+# were due, and conflating the two would turn a habit into a rule.
+#
+# THE TEST THE ORDER CARES ABOUT
+#
+# Payroll tax is recorded as quarterly (D-23, D-24). If the archive
+# holds twelve remittances in a year rather than four, that rule is
+# wrong and eleven obligations are missing from the register. Counting
+# them is the single highest-value thing this file makes possible.
+#
+# MATCHING IS ON PATH AND FILENAME ONLY
+#
+# Metadata, not content. Three reasons: it runs over 13,000 documents
+# in seconds rather than hours; it cannot leak anything it never opens;
+# and a filing whose name does not identify it is a document-control
+# finding in its own right, not something to go hunting inside for.
+#
+# A document matches an obligation when ANY of its `markers` appears in
+# the path AND a period can be read from the path. Both are required —
+# a match with no period cannot be counted, and counting is the point.
+#
+# LATIN MARKERS MATCH ON WORD BOUNDARIES, AND THAT IS LOAD-BEARING
+#
+# `vat` is a substring of "excavation". `eta` is a substring of "metal"
+# and "detail". In a contracting company's archive those two markers
+# alone would have matched thousands of drawings, taken a month from
+# each filename, and reported a confident monthly VAT cadence built
+# entirely out of excavation drawings.
+#
+# Arabic markers keep substring matching, because Arabic attaches its
+# article and prepositions directly to the word — `تأمينات` has to
+# match `والتأمينات` — and the Latin failure mode does not arise.
+#
+# So a short Latin marker is safe here, but a short ARABIC one is not.
+# `ق.م` was removed for that reason: it abbreviates value-added tax and
+# also reads as "BC".
+#
+# The boundary matches a word and not its inflections, so the variants
+# that occur are listed out — "licence" and "licences", "e-invoice" and
+# "e-invoicing". Deliberately dull: a wildcard syntax here would be a
+# small language, and §13.2's rule that config is data rather than code
+# applies to the matcher as much as to the checks.
+
+obligations:
+  - id: STAT-VAT
+    markers:
+      - vat
+      - value added
+      - قيمة مضافة
+    exclude:                      # supplier VAT invoices are not our return
+      - invoice
+      - invoices
+      - فاتورة
+
+  - id: STAT-WHT
+    markers:
+      - withholding
+      - wht
+      - خصم وتحصيل
+      - خصم و تحصيل
+      - استقطاع
+
+  - id: STAT-PAYROLL
+    markers:
+      - payroll tax
+      - salary tax
+      - ضريبة كسب العمل
+      - كسب العمل
+      - ضريبة المرتبات
+      - المرتبات والاجور
+      - المرتبات والأجور
+
+  - id: STAT-SOCINS
+    markers:
+      - social insurance
+      - socins
+      - تأمينات
+      - تامينات
+      - التأمينات الاجتماعية
+
+  - id: STAT-CIT
+    markers:
+      - corporate tax
+      - income tax return
+      - annual tax
+      - ضريبة الأرباح
+      - ضريبة ارباح
+      - الإقرار الضريبي
+      - الاقرار الضريبي
+
+  - id: STAT-ETA-SUB
+    markers:
+      - eta
+      - e-invoice
+      - e-invoices
+      - e-invoicing
+      - einvoice
+      - einvoicing
+      - electronic invoice
+      - electronic invoices
+      - electronic invoicing
+      - الفاتورة الإلكترونية
+      - الفاتوره الالكترونيه
+      - منظومة الفاتورة
+
+  - id: STAT-REG
+    markers:
+      - commercial register
+      - commercial registration
+      - tax card
+      - industrial register
+      - industrial registration
+      - سجل تجاري
+      - السجل التجاري
+      - بطاقة ضريبية
+      - البطاقة الضريبية
+      - سجل صناعي
+      - السجل الصناعي
+
+  - id: STAT-LIC
+    markers:
+      - licence
+      - licences
+      - license
+      - licenses
+      - permit
+      - permits
+      - certificate
+      - certificates
+      - certification
+      - certifications
+      - ترخيص
+      - تراخيص
+      - تصريح
+
+# ---- Directory names that are not filing evidence --------------------
+#
+# A template is not a filing and a draft folder is not a submission.
+# Counting either would inflate the observed cadence, which is the one
+# number this brief exists to get right.
+exclude_path_markers:
+  - template
+  - نموذج فارغ
+  - blank
+  - sample
+  - example
+  - archive of drafts
+  - old versions
