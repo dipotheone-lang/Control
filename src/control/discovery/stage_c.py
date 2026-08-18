@@ -307,11 +307,20 @@ def run_stage_c(root: Path, confidential_clients: list[str],
                 permit_confidential_dates: bool = False,
                 confidential_projects: list[str] | None = None,
                 ocr=None, cache_dir: Path | None = None,
-                ocr_floor: float | None = None) -> StageCResult:
+                ocr_floor: float | None = None,
+                progress=None) -> StageCResult:
     """`ocr` is an optional callable Path -> OcrResult. Injected rather
     than imported so the confidentiality gate and the §5.5 floor are
     both testable without an engine installed, and so a caller must opt
-    in deliberately — OCR is never on by default."""
+    in deliberately — OCR is never on by default.
+
+    `progress` is called as progress(stage, done, total, current). A run
+    over a real document store takes hours, and a run that prints
+    nothing for hours is indistinguishable from one that has hung — the
+    operator's only options being to wait on faith or kill work that was
+    fine. Enumeration is reported separately because on a full drive it
+    is minutes of its own before the first document is even opened.
+    """
     root = Path(root)
     excluded = [Path(e).resolve() for e in (exclude or [])]
     result = StageCResult()
@@ -320,20 +329,30 @@ def run_stage_c(root: Path, confidential_clients: list[str],
         confidential_clients, confidential_folders, confidential_projects,
         permit_confidential_dates, ocr is not None, ocr_floor)
 
+    def report(stage, done=0, total=0, current=""):
+        if progress:
+            progress(stage, done, total, current)
+
+    report("enumerating")
+    candidates = []
     for path in sorted(root.rglob("*")):
         if not path.is_file():
-            continue
-        if any(path.resolve().is_relative_to(e) for e in excluded):
             continue
         suffix = path.suffix.lower()
         if suffix not in READABLE_SUFFIXES and suffix not in SCANNED_SUFFIXES:
             continue
+        if any(path.resolve().is_relative_to(e) for e in excluded):
+            continue
+        candidates.append(path)
+    report("enumerated", 0, len(candidates))
 
+    for index, path in enumerate(candidates, 1):
         # POSIX form always. This string is the citation on every term
         # (§1.2) and the D-05 audit list of which confidential contracts
         # were opened for dates — a reference that changes shape with the
         # operating system is a weak reference.
         relative = path.relative_to(root).as_posix()
+        report("processing", index, len(candidates), relative)
 
         # A scan of a real document store runs for hours, and OCR is most
         # of that. Caching each document's outcome makes the work durable:
@@ -350,6 +369,7 @@ def run_stage_c(root: Path, confidential_clients: list[str],
             result.from_cache += 1
         _replay(result, payload)
 
+    report("done", len(candidates), len(candidates))
     return result
 
 
