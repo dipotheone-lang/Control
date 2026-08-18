@@ -246,6 +246,11 @@ class OutlookTransport(MailTransport):
                     self.expected_mailbox in str(getattr(item, "To", "") or "").lower()
                     and str(getattr(item, "Subject", "") or "").upper().startswith("RE:")
                 ),
+                # Outlook exposes the conversation directly. Older items
+                # and some non-Exchange stores leave it empty, so it is
+                # read defensively and the watchdog falls back rather
+                # than failing the sweep.
+                thread_id=str(getattr(item, "ConversationID", "") or ""),
             ))
             self._entry_ids[message_id] = entry_id
         return messages

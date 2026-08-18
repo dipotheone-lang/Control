@@ -675,6 +675,7 @@ def cmd_cycle(args) -> int:
             class3_state=loaded.class3_state,
             enforcer=Enforcer(loaded.calendar, loaded.roster,
                               ceo=ceo, coo=coo, cfo=cfo),
+            watchdog=_watchdog_for(report, conn, loaded),
             today=today, ceo=ceo, cfo=cfo, coo=coo,
         )
     finally:
@@ -689,6 +690,28 @@ def cmd_cycle(args) -> int:
         print(f"quarantined:      {len(result.quarantined)} — reported, never opened")
     if result.security_events:
         print(f"SECURITY EVENTS:  {len(result.security_events)} — see the audit log")
+
+    if result.threads_opened or result.cc_compliance:
+        metric = result.cc_compliance or {}
+        print("\nEXTERNAL WATCHDOG (§8.5)")
+        print(f"  threads opened this sweep: {result.threads_opened}")
+        print(f"  closed by declaration:     {result.threads_closed_declared}")
+        print(f"  open / breached:           "
+              f"{metric.get('OPEN', 0)} / {metric.get('BREACHED', 0)}")
+        share = metric.get("observed_share")
+        if share is not None:
+            print(f"  closed by a reply Control could see: {share:.0%} — the "
+                  "rest were declared")
+            print("  This is the CC-compliance metric, and live evidence for "
+                  "the §3.1a scope question.")
+        if result.threads_without_id:
+            print(f"  {result.threads_without_id} message(s) carried no "
+                  "conversation id — each is tracked as its own thread and "
+                  "can only close by an explicit CLOSED reply")
+        print("  Every thread is registered as 'unclassified' until a "
+              "category can be assigned: §8.5's own catch-all row, owner COO, "
+              "backup CEO. Categorising needs either a domain map or reading "
+              "bodies, and neither is decided.")
     pending = len(list((control_root / "outbox" / "pending-approval").glob("*.json")))
     if pending:
         print(f"\n{pending} draft(s) awaiting release in "
@@ -775,11 +798,18 @@ def cmd_report(args) -> int:
             and not getattr(loaded.class3_state.get(item.item_id), "submitted", False)
         ]
 
+        # §8.5's standing CC-compliance metric: threads closed by a reply
+        # Control could see, versus by declaration. Live evidence for the
+        # §3.1a scope question, so it belongs in the pack rather than
+        # only in a cycle's console output.
+        watchdog = _watchdog_for(report, conn, loaded)
+        cc_metric = watchdog.cc_compliance() if watchdog else None
+
         # The gaps the loader found are decisions the report must carry:
         # each one is something Control is not doing (§1.1).
         rendered = weekly_report(
             conn, as_of=as_of, config_dir=control_root / "config",
-            horizon=horizon, open_items=open_items,
+            horizon=horizon, open_items=open_items, cc_metric=cc_metric,
             open_decisions=loaded.gaps, control_root=control_root)
     finally:
         conn.close()
@@ -880,6 +910,23 @@ def cmd_terms(args) -> int:
           "hand-read value stays distinguishable from a machine-read one.")
     print("Check the horizon:  python -m control registers")
     return 0
+
+
+def _watchdog_for(report, conn, loaded):
+    """The §8.5 watchdog, or None when no external SLA is configured.
+
+    Absence of `external_sla` means the SLAs have not been set, and a
+    watchdog with no rules would breach nothing while looking like a
+    running control.
+    """
+    from .watchdog import Watchdog, parse_sla_config
+
+    rules = parse_sla_config((report.config["sla"] or {}).get("external_sla"))
+    if not rules:
+        return None
+    managers = {email: person.manager
+                for email, person in loaded.roster.items() if person.manager}
+    return Watchdog(conn, rules, loaded.calendar, managers)
 
 
 def cmd_disputes(args) -> int:

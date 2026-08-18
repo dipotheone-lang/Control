@@ -93,6 +93,13 @@ class FetchedMessage:
     first_line: str = ""
     attachments: list[tuple[str, bytes]] = field(default_factory=list)
     in_reply_to_control: bool = False
+    # The conversation this message belongs to. §8.5 closes an external
+    # thread on an observed reply, which means matching a reply back to
+    # the message it answers — a message id alone cannot do that. Empty
+    # when the transport cannot supply one; the watchdog then tracks the
+    # message as its own thread and the limitation is reported rather
+    # than papered over.
+    thread_id: str = ""
 
 
 class MailTransport:
@@ -275,6 +282,8 @@ class GraphTransport(MailTransport):
                     first_line=(item.get("bodyPreview", "").splitlines() or [""])[0],
                     attachments=attachments,
                     in_reply_to_control=bool(item.get("inReplyTo")),
+                    # Already selected above and, until now, discarded.
+                    thread_id=item.get("conversationId") or "",
                 ))
                 # Graph id needed for mark_processed: remember the mapping.
                 self._graph_ids[messages[-1].message_id] = item["id"]

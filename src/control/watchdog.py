@@ -37,9 +37,9 @@ class SlaRule:
     backup: str
 
 
-def parse_sla_config(external_sla: dict) -> dict[str, SlaRule]:
+def parse_sla_config(external_sla: dict | None) -> dict[str, SlaRule]:
     rules = {}
-    for category, entry in external_sla.items():
+    for category, entry in (external_sla or {}).items():
         rules[category] = SlaRule(
             category=category,
             first=str(entry["first"]),
