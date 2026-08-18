@@ -226,3 +226,60 @@ def test_the_run_banner_matches_what_the_code_actually_does(tmp_path, capsys,
     assert "D-14" in with_flag
     assert "never retained" in with_flag
     assert "NOT OCR'd" not in with_flag
+
+
+def test_adding_a_client_invalidates_the_cache(tmp_path):
+    """The cached answer is not a property of the document alone.
+
+    A payload carries the document's confidentiality verdict and its
+    extracted context. Replaying it after the confidential client list
+    has grown would serve the OLD verdict — so a contract belonging to a
+    client added by CEO decision would come back non-confidential, with
+    its clause text unredacted, straight into the report (§12.1).
+    """
+    source = tmp_path / "src" / "Enova"
+    source.mkdir(parents=True)
+    (source / "contract.txt").write_text(_contract_text(), encoding="utf-8")
+    cache = tmp_path / "cache"
+
+    # First run: Enova is not yet on the list, so the terms carry context.
+    before = run_stage_c(tmp_path / "src", CLIENTS, [], cache_dir=cache,
+                         permit_confidential_dates=True)
+    assert before.terms and all("REDACTED" not in t.context
+                                for t in before.terms)
+
+    # The CEO adds Enova. Same file, same mtime — only the rules moved.
+    after = run_stage_c(tmp_path / "src", CLIENTS + ["Enova"], [],
+                        cache_dir=cache, permit_confidential_dates=True)
+
+    assert after.from_cache == 0, "a stale verdict was served"
+    assert after.terms, "the dates still come through under D-05"
+    assert all("REDACTED" in t.context for t in after.terms), \
+        "clause text from a now-confidential client reached the output"
+
+
+def test_an_unchanged_ruleset_still_uses_the_cache(tmp_path):
+    """Invalidation must be precise, or the cache is worthless."""
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "c.txt").write_text(_contract_text(), encoding="utf-8")
+    cache = tmp_path / "cache"
+
+    run_stage_c(source, CLIENTS, [], cache_dir=cache)
+    again = run_stage_c(source, CLIENTS, [], cache_dir=cache)
+    assert again.from_cache == 1
+
+
+def test_changing_the_floor_invalidates_too(tmp_path):
+    """A below-floor verdict is only meaningful against the floor that
+    produced it (§5.5)."""
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "c.txt").write_text(_contract_text(), encoding="utf-8")
+    cache = tmp_path / "cache"
+
+    run_stage_c(source, CLIENTS, [], cache_dir=cache,
+                ocr=_fake_ocr(_contract_text()), ocr_floor=60.0)
+    strict = run_stage_c(source, CLIENTS, [], cache_dir=cache,
+                         ocr=_fake_ocr(_contract_text()), ocr_floor=85.0)
+    assert strict.from_cache == 0

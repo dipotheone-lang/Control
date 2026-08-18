@@ -306,7 +306,8 @@ def run_stage_c(root: Path, confidential_clients: list[str],
                 exclude: list[Path] | None = None,
                 permit_confidential_dates: bool = False,
                 confidential_projects: list[str] | None = None,
-                ocr=None, cache_dir: Path | None = None) -> StageCResult:
+                ocr=None, cache_dir: Path | None = None,
+                ocr_floor: float | None = None) -> StageCResult:
     """`ocr` is an optional callable Path -> OcrResult. Injected rather
     than imported so the confidentiality gate and the §5.5 floor are
     both testable without an engine installed, and so a caller must opt
@@ -315,6 +316,9 @@ def run_stage_c(root: Path, confidential_clients: list[str],
     excluded = [Path(e).resolve() for e in (exclude or [])]
     result = StageCResult()
     cache = Path(cache_dir) if cache_dir else None
+    ruleset = ruleset_fingerprint(
+        confidential_clients, confidential_folders, confidential_projects,
+        permit_confidential_dates, ocr is not None, ocr_floor)
 
     for path in sorted(root.rglob("*")):
         if not path.is_file():
@@ -335,7 +339,7 @@ def run_stage_c(root: Path, confidential_clients: list[str],
         # of that. Caching each document's outcome makes the work durable:
         # an interrupted run loses only the document in flight, and the
         # next invocation converges instead of starting over.
-        key = _cache_key(path, relative)
+        key = _cache_key(path, relative, ruleset)
         payload = _cache_read(cache, key)
         if payload is None:
             payload = _process_one(
@@ -349,20 +353,56 @@ def run_stage_c(root: Path, confidential_clients: list[str],
     return result
 
 
-def _cache_key(path: Path, relative: str) -> str:
-    """Identity of a document's *content* for caching purposes.
+def ruleset_fingerprint(confidential_clients: list[str],
+                        confidential_folders: list[str],
+                        confidential_projects: list[str] | None,
+                        permit_confidential_dates: bool,
+                        ocr_on: bool, floor: float | None = None) -> str:
+    """Identity of the RULES a cached outcome was produced under.
+
+    Without this the cache is unsound in the one direction that matters.
+    A cached payload carries the document's confidentiality verdict and
+    its extracted context; replaying it after the confidential client
+    list has grown would serve the OLD verdict — so a contract belonging
+    to a client added by CEO decision would replay as non-confidential,
+    with its clause text unredacted, straight into the report (§12.1).
+
+    Keyed on the classification inputs, so adding a client, a folder or
+    a project invalidates exactly the documents whose answer could
+    change, and nothing else. The OCR floor is included for the same
+    reason: a below-floor verdict is only meaningful against the floor
+    that produced it (§5.5).
+    """
+    material = "|".join([
+        ";".join(sorted(str(c) for c in confidential_clients)),
+        ";".join(sorted(str(f) for f in confidential_folders)),
+        ";".join(sorted(str(p) for p in (confidential_projects or []))),
+        f"d05={int(bool(permit_confidential_dates))}",
+        f"ocr={int(bool(ocr_on))}",
+        f"floor={floor if floor is not None else ''}",
+    ])
+    return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
+def _cache_key(path: Path, relative: str, ruleset: str = "") -> str:
+    """Identity of a document's content AND the rules it was judged under.
 
     Size and mtime alongside the path: cheap, and a document that is
     edited gets re-read rather than served stale. Hashing the bytes would
     be more precise and would also mean reading every file on a run whose
     whole purpose is to avoid that.
+
+    The ruleset fingerprint is part of the identity because the cached
+    answer is not a property of the document alone — see
+    `ruleset_fingerprint`.
     """
     try:
         stat = path.stat()
         stamp = f"{stat.st_size}:{int(stat.st_mtime)}"
     except OSError:
         stamp = "nostat"
-    return hashlib.sha256(f"{relative}|{stamp}".encode()).hexdigest()[:32]
+    return hashlib.sha256(
+        f"{relative}|{stamp}|{ruleset}".encode()).hexdigest()[:32]
 
 
 def _cache_read(cache_dir: Path | None, key: str) -> dict | None:
