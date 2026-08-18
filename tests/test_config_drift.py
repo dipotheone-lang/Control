@@ -195,3 +195,94 @@ def test_init_adopt_applies_it(machine, capsys):
 
     assert not any("confidential_clients" in line
                    for line in config_drift(machine, REPO_CONFIG))
+
+
+# ---- adopting one named key -------------------------------------------
+
+def test_a_named_key_is_copied_because_a_human_named_it(machine):
+    from control.bootstrap import adopt_key
+
+    path = machine / "config" / "authority.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data.pop("interim", None)
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
+
+    adopt_key(machine, REPO_CONFIG, "authority.yaml:interim")
+
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert after["interim"]["decision"] == "D-06"
+    assert str(after["interim"]["review_due"]) == "2026-09-16"
+
+
+def test_an_existing_key_is_never_replaced(machine):
+    """This adds what is missing. Replacing what is there would discard
+    a decision, which is the thing the no-overwrite rule protects."""
+    from control import HaltError
+    from control.bootstrap import adopt_key
+
+    path = machine / "config" / "authority.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["interim"] = {"active": False, "note": "our own wording"}
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
+
+    with pytest.raises(HaltError) as e:
+        adopt_key(machine, REPO_CONFIG, "authority.yaml:interim")
+    assert "already has" in str(e.value)
+
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert after["interim"]["note"] == "our own wording"
+
+
+def test_a_malformed_or_unknown_spec_is_refused(machine):
+    from control import HaltError
+    from control.bootstrap import adopt_key
+
+    for spec, expect in (("authority.yaml", "file.yaml:key"),
+                         ("nope.yaml:x", "not one of the config files"),
+                         ("authority.yaml:nosuchkey", "no key")):
+        with pytest.raises(HaltError) as e:
+            adopt_key(machine, REPO_CONFIG, spec)
+        assert expect in str(e.value)
+
+
+def test_the_cli_adopts_named_keys_and_says_so(machine, capsys):
+    from control.__main__ import main
+
+    for name, key in (("authority.yaml", "interim"),
+                      ("materiality.yaml", "ceo_flag_budget")):
+        path = machine / "config" / name
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data.pop(key, None)
+        path.write_text(
+            yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+            encoding="utf-8")
+
+    code = main(["init", "--control-root", str(machine),
+                 "--adopt-key", "authority.yaml:interim",
+                 "--adopt-key", "materiality.yaml:ceo_flag_budget"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "authority.yaml: interim added" in out
+    assert "materiality.yaml: ceo_flag_budget added" in out
+
+
+def test_the_d06_review_is_chased_once_the_key_is_there(machine):
+    """The point of the key: without it the 16-Sep review never fires."""
+    from datetime import date
+
+    from control.bootstrap import adopt_key
+    from control.report import interim_reviews_due
+
+    path = machine / "config" / "authority.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data.pop("interim", None)
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
+    assert interim_reviews_due(machine / "config", date(2026, 9, 20)) == []
+
+    adopt_key(machine, REPO_CONFIG, "authority.yaml:interim")
+
+    due = interim_reviews_due(machine / "config", date(2026, 9, 20))
+    assert due and "O-02" in due[0]

@@ -250,3 +250,56 @@ def adopt_drift(control_root: Path, template_config: Path,
                 yaml.safe_dump(live, allow_unicode=True, sort_keys=False),
                 encoding="utf-8")
     return added
+
+
+def adopt_key(control_root: Path, template_config: Path, spec: str) -> str:
+    """Copy ONE named config key across, because a human named it.
+
+    `adopt_drift` deliberately refuses to add whole keys: an absent key
+    may be absent on purpose, and filling it silently would be the
+    system deciding something that belongs to a human.
+
+    Naming the key IS the human deciding. What this removes is only the
+    friction of hand-editing YAML on a machine where that is awkward
+    enough to not happen — which is the same friction that let the
+    decision go missing in the first place.
+
+    `spec` is "file.yaml:key". Refuses to overwrite a key that is
+    already present: this adds what is missing, it never replaces what
+    is there.
+    """
+    import yaml
+
+    if ":" not in spec:
+        raise HaltError(
+            f"--adopt-key wants file.yaml:key, not {spec!r} "
+            "(for example: authority.yaml:interim)")
+    name, _, key = spec.partition(":")
+    name, key = name.strip(), key.strip()
+
+    if name not in CONFIG_FILES:
+        raise HaltError(f"{name} is not one of the config files "
+                        f"({', '.join(CONFIG_FILES)})")
+
+    source = Path(template_config) / name
+    target = Path(control_root) / "config" / name
+    if not source.is_file():
+        raise HaltError(f"no template for {name}")
+    if not target.is_file():
+        raise HaltError(f"{name} is not in this CONTROL_ROOT — run init first")
+
+    template = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+    live = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+    if key not in template:
+        raise HaltError(f"the template for {name} has no key {key!r}")
+    if key in live:
+        raise HaltError(
+            f"{name} already has {key!r}. This adds what is missing; it "
+            "never replaces what is there — edit the file directly if you "
+            "mean to change it.")
+
+    live[key] = template[key]
+    target.write_text(
+        yaml.safe_dump(live, allow_unicode=True, sort_keys=False),
+        encoding="utf-8")
+    return f"{name}: {key} added from the template"
