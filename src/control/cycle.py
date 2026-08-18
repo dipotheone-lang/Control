@@ -16,7 +16,7 @@ from pathlib import Path
 from .attachments import build_submission_doc, quarantine, validate_attachment
 from .classify import Classifier, InboundMessage
 from .config import known_addresses
-from .db import connect, insert_submission
+from .db import connect
 from .discovery.classify_worksheet import (
     confidential_domains as _confidential_domains,
 )
@@ -26,7 +26,8 @@ from .evaluate import ObligationSpec, evaluate
 from .outbox import Disposition, Outbox, OutboundMessage
 from .render import correction_due, render_verdict_reply
 from .startup import StartupReport
-from .transport import FetchedMessage, MailTransport
+from .transport import MailTransport
+from .watchdog import Watchdog
 
 # §8 action kinds -> §10 gate kinds.
 _ACTION_TO_GATE = {
@@ -37,7 +38,19 @@ _ACTION_TO_GATE = {
     "L2": "ESCALATION_L1_L2",
     "L3": "CEO_ESCALATION_L3",
     "PROCESS_FINDING": "CLASS3_REMINDER",
+    "WATCHDOG_NOTICE": "WATCHDOG_NOTICE",
 }
+
+INTERNAL_DOMAIN = "ubcsis.com"
+
+
+def _address(sender: str) -> str:
+    """The bare address out of a `Display Name <addr>` header."""
+    return sender.split("<")[-1].rstrip(">").strip().lower()
+
+
+def _is_internal(sender: str) -> bool:
+    return _address(sender).endswith("@" + INTERNAL_DOMAIN)
 
 
 @dataclass
@@ -66,6 +79,11 @@ class CycleReport:
     sent: list[str] = field(default_factory=list)          # dedupe keys sent
     drafted: list[str] = field(default_factory=list)       # draft ids written
     skipped_duplicates: int = 0
+    # §8.5 external watchdog
+    threads_opened: int = 0
+    threads_closed_declared: int = 0
+    threads_without_id: int = 0
+    cc_compliance: dict = field(default_factory=dict)
 
 
 def _dispatch(outbox: Outbox, transport: MailTransport, msg: OutboundMessage,
@@ -102,6 +120,7 @@ def run_cycle(
     tracked_items: list[TrackedItem] | None = None,
     class3_state: dict[str, Class3State] | None = None,
     enforcer: Enforcer | None = None,
+    watchdog: Watchdog | None = None,
     today: date | None = None,
     ceo: str,
     cfo: str,
@@ -261,6 +280,38 @@ def run_cycle(
                 ), known, report, audit)
                 continue
 
+            if watchdog is not None:
+                # §8.5. A thread id is what lets a reply close the thing
+                # it answers; without one from the transport, the message
+                # is its own thread and can only ever close by an
+                # explicit CLOSED declaration.
+                thread = fetched.thread_id or fetched.message_id
+                if not fetched.thread_id:
+                    report.threads_without_id += 1
+
+                if classification.category == "EXTERNAL_INBOUND":
+                    # Which of the §8.5 categories this belongs to is not
+                    # decidable from metadata, and deciding it from the
+                    # body is not permitted here. "unclassified" is the
+                    # charter's own catch-all row — owner COO, backup CEO
+                    # — so nothing is dropped while it stays uncategorised.
+                    watchdog.register_inbound(
+                        thread, "unclassified", fetched.received_at)
+                    report.threads_opened += 1
+                elif _is_internal(fetched.sender):
+                    first = fetched.first_line.strip().upper()
+                    if first.startswith("CLOSED"):
+                        # §8.5: the owner declaring it handled. Logged
+                        # with the declarant, because a declared close and
+                        # an observed reply are different evidence.
+                        watchdog.declare_closed(
+                            thread, _address(fetched.sender), fetched.received_at)
+                        report.threads_closed_declared += 1
+                    else:
+                        # A colleague's reply, visible only because
+                        # control@ was copied (§3.1a Option A).
+                        watchdog.observe_reply(thread, fetched.received_at)
+
             # Everything else is logged, not acted on, in this version.
             audit.append("inbound.logged", {"message_id": fetched.message_id,
                                             "category": classification.category})
@@ -291,6 +342,18 @@ def run_cycle(
                 for action in actions:
                     _dispatch(outbox, transport, _action_to_message(action), known,
                               report, audit)
+
+        # ---- external watchdog (§8.5) ----------------------------------
+        # After enforcement, so a breach notice reflects the replies this
+        # same sweep observed. Notices go only to the internal owner and,
+        # after the final SLA, their manager — never to the external
+        # party (§8.5).
+        if watchdog is not None:
+            for action in watchdog.check(datetime.combine(
+                    today, datetime.min.time().replace(hour=23, minute=59))):
+                _dispatch(outbox, transport, _action_to_message(action), known,
+                          report, audit)
+            report.cc_compliance = watchdog.cc_compliance()
     finally:
         conn.close()
 

@@ -305,6 +305,28 @@ Seeing that once is worth more than any description of it. The list
 shrinks as answers arrive, and it is what stops a green dashboard from
 lying to you.
 
+The same sweep runs the **external watchdog** (§8.5). Every external
+message opens a thread with an SLA clock; a reply Control can see closes
+it, and so does the owner replying `CLOSED` on the first line — recorded
+separately, because a reply you saw and a reply you were told about are
+different evidence. Past SLA, a notice goes to the internal owner, and
+their manager after the final deadline. **Never to the external party.**
+
+The notices say *no reply visible to Control*, never *no reply sent*.
+Under Option A that is the only claim the system can honestly make.
+
+The cycle prints the CC-compliance split — how many threads closed by a
+reply Control could see versus by declaration. That number is live
+evidence for the §3.1a scope question: it measures how much of the
+company's external correspondence Control is actually seeing.
+
+Two limitations it will state rather than hide. Every thread opens as
+`unclassified` — §8.5's own catch-all row, owner COO, backup CEO —
+because deciding which SLA category an email belongs to needs either a
+domain map or reading bodies, and neither is decided. And a message with
+no conversation id is tracked as its own thread, so it can only close by
+an explicit `CLOSED` reply.
+
 Reset to Phase 0 defaults afterwards:
 
 ```powershell
