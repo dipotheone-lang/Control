@@ -454,7 +454,8 @@ def cmd_contracts(args) -> int:
         part = run_stage_c(source, clients, folders, exclude=[control_root],
                            permit_confidential_dates=args.confidential_dates,
                            confidential_projects=projects, ocr=ocr,
-                           cache_dir=cache_dir)
+                           cache_dir=cache_dir,
+                           ocr_floor=args.ocr_floor if args.ocr else None)
 
         # Paths inside each part are relative to that part's own root, so
         # merging them raw would produce citations that no longer say
