@@ -129,7 +129,15 @@ def test_a_pending_decision_is_disclosed_not_hidden():
     en, ar = limitation_lines(load_scope(scope_data()))
     assert "not visible to this system" in en      # still true
     assert "D-07" in en and "not yet in effect" in en
+    assert "1 precondition(s) remain open" in en
     assert "D-07" not in ar or "الخيار" in ar      # Arabic says the same
+
+
+def test_the_pending_line_counts_the_real_preconditions():
+    """The number is read from config, not written into the sentence —
+    so it stays true as preconditions close one at a time."""
+    en, _ = limitation_lines(load_scope_file(REPO_CONFIG))
+    assert "3 precondition(s) remain open" in en
 
 
 def test_live_scope_stops_claiming_a_blind_spot_it_no_longer_has():

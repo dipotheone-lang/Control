@@ -145,8 +145,9 @@ def limitation_lines(scope: MailboxScope) -> tuple[str, str]:
         )
         if scope.pending:
             en += (
-                f" Option {scope.option} was decided on {scope.state.lower()} "
-                "terms (D-07) and is not yet in effect."
+                f" Option {scope.option} was decided (D-07) but is not yet in "
+                f"effect: {len(scope.open_preconditions)} precondition(s) "
+                "remain open."
             )
             ar += (
                 f" تم اتخاذ القرار بتوسيع النطاق (الخيار {scope.option}) "

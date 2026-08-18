@@ -313,6 +313,37 @@ Remove-Item Env:RUN_MODE, Env:LEARNING_MODE
 
 ---
 
+## 7a. The weekly report
+
+```powershell
+python -m control report
+```
+
+This is the §11 pack — the thing you actually read. It leads with the
+class 1 & 2 horizon, then open items, external SLA, register deltas,
+anomaly flags and decisions required, and it carries the standing
+limitations in both languages: what Control cannot see, and what it is
+not permitted to read.
+
+It writes `%CONTROL_ROOT%\reports\management\2026\weekly-<date>.md` plus
+the `.xlsx` export, and **always drafts, never sends** — §10 keeps
+management reports at DRAFT in every mode, permanently. Release is you
+replying with the draft ID; nothing releases on silence.
+
+Run it for a past week with `--as-of 2026-08-20`.
+
+Running it twice for the same date does not produce a second draft: the
+first one is the version awaiting your release, and the file on disk is
+left alone so the two cannot drift apart. To reissue after a correction,
+release or discard the pending draft first.
+
+Right now the report is mostly gaps, and that is the correct output —
+the register is empty until you approve it. It is worth reading in that
+state once, because it shows exactly what a green dashboard would have
+been hiding.
+
+---
+
 ## 8. Checking the system itself
 
 ```powershell
@@ -395,6 +426,8 @@ that cannot, and Phase 2 cannot start without it.
 | `classify` | O-04 domain worksheet; `--apply` to read it back |
 | `registers` | Class 2 registers — import rows, show the horizon |
 | `cycle` | One sweep: fetch, classify, evaluate, enforce, gate |
+| `report` | The §11 weekly pack; always drafts, never sends |
+| `terms` | Manual entry for documents no engine could read |
 | `startup` | The §5.6 sequence alone, to check state |
 | `discovery` | Stages A–B against `UB_ROOT` |
 
