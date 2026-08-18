@@ -26,6 +26,10 @@ from pathlib import Path
 from . import HaltError
 from .states import LEGAL_STATES
 
+# The UB-Mannheim installer's default location. It does not add itself to
+# PATH in a silent install, so a bare `tesseract` call finds nothing.
+_TESSERACT_DEFAULT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
 
 def _level_for(run_mode: str, learning_mode: str, explicit: int | None) -> int:
     if explicit is not None:
@@ -343,9 +347,17 @@ def cmd_contracts(args) -> int:
     if not args.source:
         print("no --source and no UB_ROOT set. Nothing scanned.")
         return 1
-    source = Path(args.source)
-    if not source.is_dir():
-        print(f"source folder not found: {source}")
+
+    # Several folders may be given, comma-separated. A full-drive scan of
+    # a real document store runs for hours, and this command writes only
+    # once at the end — an interrupted run loses the whole scan. Naming
+    # the folders that actually hold contracts builds the same register
+    # without the all-or-nothing exposure.
+    sources = [Path(s.strip()) for s in str(args.source).split(",") if s.strip()]
+    missing = [s for s in sources if not s.is_dir()]
+    if missing:
+        for s in missing:
+            print(f"source folder not found: {s}")
         return 1
 
     clients, folders, projects = [], [], []
@@ -361,14 +373,77 @@ def cmd_contracts(args) -> int:
         clients = ["Siemens Energy", "Saint-Gobain", "KNAUF", "Galaxy",
                    "Canal Sugar", "Sukari", "Air Liquide"]
 
-    print(f"scanning {source} for commercial terms")
+    print(f"scanning {len(sources)} folder(s) for commercial terms")
     print(f"confidential clients: {len(clients)} | folders: {len(folders)}")
     if args.confidential_dates:
         print("D-05 ACTIVE: dates and term durations will be extracted from "
               "confidential contracts; no clause text is retained.")
-    result = run_stage_c(source, clients, folders, exclude=[control_root],
-                         permit_confidential_dates=args.confidential_dates,
-                         confidential_projects=projects)
+
+    # Durable per-document outcomes. OCR over a real document store runs
+    # for hours; without this an interrupted scan loses everything and the
+    # next attempt starts from zero (§1.1 — a partial view must not be
+    # thrown away, it must be recorded).
+    cache_dir = None if args.no_cache else control_root / "data" / "stage-c-cache"
+    if cache_dir:
+        print(f"cache: {cache_dir}")
+
+    ocr = None
+    if args.ocr:
+        from .ocr import DEFAULT_CONFIDENCE_FLOOR, available, ocr_document
+
+        usable, reason = available()
+        if not usable:
+            print(f"OCR requested but unusable: {reason}")
+            print("Refusing to scan with a half-configured engine — scanned "
+                  "documents would be silently misread rather than recorded "
+                  "as gaps (§1.1, §5.5).")
+            return 1
+        floor = args.ocr_floor
+        print(f"OCR ACTIVE: {reason}")
+        print(f"  confidence floor {floor} — below it a document is UNREADABLE, "
+              "not evaluated, not posted (§5.5)")
+        print("  OCR is NOT applied to confidential documents: "
+              "confidential.yaml lists OCR")
+        print("  under metadata_only_mode.prohibited, and D-05 as recorded "
+              "covers dates, not OCR.")
+        print("  Extending it requires a CEO decision, not a flag.")
+
+        def ocr(path, _floor=floor):
+            return ocr_document(path, floor=_floor)
+
+    from .discovery.stage_c import StageCResult
+
+    result = StageCResult()
+    for source in sources:
+        print(f"  {source}")
+        part = run_stage_c(source, clients, folders, exclude=[control_root],
+                           permit_confidential_dates=args.confidential_dates,
+                           confidential_projects=projects, ocr=ocr,
+                           cache_dir=cache_dir)
+
+        # Paths inside each part are relative to that part's own root, so
+        # merging them raw would produce citations that no longer say
+        # which folder a document came from. §1.2 wants a reference that
+        # resolves; prefix each with its folder name before merging.
+        prefix = source.name
+        seen: dict[int, object] = {}
+        for record in part.documents + part.blocked + part.unreadable:
+            if id(record) not in seen:
+                seen[id(record)] = record
+                record.path = f"{prefix}/{record.path}"
+        for term in part.terms:
+            term.source = f"{prefix}/{term.source}"
+
+        result.documents.extend(part.documents)
+        result.terms.extend(part.terms)
+        result.blocked.extend(part.blocked)
+        result.unreadable.extend(part.unreadable)
+        result.d05_extracted.extend(f"{prefix}/{p}" for p in part.d05_extracted)
+        for name in ("ocr_attempted", "ocr_read", "ocr_below_floor", "ocr_failed"):
+            getattr(result, name).extend(
+                f"{prefix}/{entry}" for entry in getattr(part, name))
+        print(f"    {len(part.documents)} documents, {len(part.terms)} terms, "
+              f"{len(part.blocked)} confidential, {len(part.unreadable)} unreadable")
 
     out = control_root / "discovery" / "COMMERCIAL-EXPOSURE.md"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -380,6 +455,18 @@ def cmd_contracts(args) -> int:
     if result.d05_extracted:
         print(f"confidential, dates only: {len(result.d05_extracted)}  (D-05)")
     print(f"unreadable/scanned:   {len(result.unreadable)}  (OCR needed)")
+    if result.from_cache:
+        print(f"reused from cache:    {result.from_cache}")
+    if result.ocr_attempted:
+        print(f"\nOCR: {len(result.ocr_attempted)} attempted, "
+              f"{len(result.ocr_read)} trusted, "
+              f"{len(result.ocr_below_floor)} below the §5.5 floor, "
+              f"{len(result.ocr_failed)} failed")
+        if len(result.ocr_read) < len(result.ocr_attempted):
+            print("  Documents not trusted stay UNREADABLE and post nothing. "
+                  "That is the floor")
+            print("  working, not a bug — a wrong date in a register is worse "
+                  "than no date (§5.5).")
     dated = [t for t in result.terms if t.found_date]
     if dated:
         soonest = sorted(dated, key=lambda t: t.found_date)[:5]
@@ -408,6 +495,7 @@ def cmd_doctor(args) -> int:
     """Check that this machine can actually run Control."""
     import importlib
     import platform
+    import shutil
 
     ok = True
     print(f"platform: {platform.system()} {platform.release()}")
@@ -443,6 +531,85 @@ def cmd_doctor(args) -> int:
     else:
         print("\nNo CONTROL_ROOT given (--control-root or $CONTROL_ROOT)")
         ok = False
+
+    # OCR (§5.5). Reported separately and never counted toward READY:
+    # its absence does not stop Control running, it decides whether
+    # scanned documents become records or stay declared gaps. Arabic is
+    # checked explicitly — an English-only engine turned loose on Arabic
+    # contracts returns confident nonsense, which §1.1 rates worse than
+    # the gap it replaces.
+    print("\nOCR (§5.5) — scanned documents:")
+    ocr_ready = True
+    for module, why in (("pytesseract", "Tesseract binding"),
+                        ("PIL", "image handling"),
+                        ("pymupdf", "PDF rasterising")):
+        try:
+            importlib.import_module(module)
+            print(f"  [ok]   {module:20} — {why}")
+        except ImportError:
+            ocr_ready = False
+            print(f"  [warn] {module:20} — {why} (pip install {module})")
+
+    # Resolve the language directory rather than trusting TESSDATA_PREFIX.
+    # Language data installed under LOCALAPPDATA is invisible to any
+    # process that did not inherit that variable — a scheduled run, a
+    # service, a fresh shell — so a check that reads the ambient
+    # environment reports "Arabic missing" on the same machine where it
+    # is present. Look in the known places and say which one answered.
+    tessdata = ""
+    for candidate in (os.environ.get("TESSDATA_PREFIX", ""),
+                      str(Path(os.environ.get("LOCALAPPDATA", "")) / "tessdata"),
+                      str(Path(_TESSERACT_DEFAULT).parent / "tessdata")):
+        if candidate and (Path(candidate) / "eng.traineddata").is_file():
+            tessdata = candidate
+            break
+
+    languages: list[str] = []
+    try:
+        import pytesseract
+
+        binary = shutil.which("tesseract") or _TESSERACT_DEFAULT
+        if binary and Path(binary).is_file():
+            pytesseract.pytesseract.tesseract_cmd = str(binary)
+            print(f"  [ok]   tesseract binary     — {pytesseract.get_tesseract_version()}")
+            if not shutil.which("tesseract"):
+                print(f"         not on PATH; found at {binary}")
+            # Via the environment, not --tessdata-dir: pytesseract splits
+            # its config string on whitespace, so a path with spaces
+            # arrives broken (see ocr._apply_tessdata).
+            if tessdata:
+                os.environ["TESSDATA_PREFIX"] = tessdata
+            languages = sorted(pytesseract.get_languages(config=""))
+            if tessdata:
+                print(f"  tessdata: {tessdata}")
+        else:
+            ocr_ready = False
+            print("  [warn] tesseract binary     — not found "
+                  "(winget install UB-Mannheim.TesseractOCR)")
+    except Exception as e:
+        ocr_ready = False
+        print(f"  [warn] tesseract binary     — {str(e)[:80]}")
+
+    if languages:
+        print(f"  languages: {', '.join(languages)}")
+        if "ara" not in languages:
+            ocr_ready = False
+            print("  [warn] Arabic language data MISSING — §5.5 requires Arabic "
+                  "support.")
+            print("         Fetch ara.traineddata from tessdata_best into the "
+                  "tessdata directory")
+            print("         above. The winget package ships English only. "
+                  "Without ara, scanned Arabic")
+            print("         documents must stay UNREADABLE rather than be run "
+                  "through an engine")
+            print("         that cannot read them (§1.1).")
+    print(f"  OCR usable: {'yes' if ocr_ready else 'no — scanned documents stay UNREADABLE'}")
+    if ocr_ready:
+        print("  NOTE: the engine is present but Stage C does not call it yet; "
+              "scanned files")
+        print("        are still recorded as gaps. Confidential documents must "
+              "never be")
+        print("        OCR'd outside D-05 (§12.1.2).")
 
     try:
         from .outlook import _dispatch_namespace
@@ -986,9 +1153,19 @@ def main(argv: list[str] | None = None) -> int:
         help="Stage C: extract guarantee, LD, notice and accreditation terms")
     contracts.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     contracts.add_argument("--source", default=os.environ.get("UB_ROOT", ""),
-                           help="folder to scan (default: UB_ROOT — the whole "
+                           help="folder(s) to scan, comma-separated (default: "
+                                "UB_ROOT — the whole "
                                 "drive, so a guarantee filed somewhere nobody "
                                 "remembered is still found)")
+    contracts.add_argument("--no-cache", action="store_true",
+                           help="re-read every document instead of reusing "
+                                "cached per-document outcomes")
+    contracts.add_argument("--ocr", action="store_true",
+                           help="§5.5: OCR scanned documents (ara+eng). Never "
+                                "applied to confidential documents")
+    contracts.add_argument("--ocr-floor", type=float, default=60.0,
+                           help="§5.5 confidence floor, 0-100 (default 60). "
+                                "Below it a document is UNREADABLE")
     contracts.add_argument("--confidential-dates", action="store_true",
                            help="D-05: extract dates and term durations from "
                                 "confidential contracts (no clause text kept)")
@@ -1060,6 +1237,17 @@ def main(argv: list[str] | None = None) -> int:
                             help="check this machine can run Control")
     doctor.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     doctor.set_defaults(fn=cmd_doctor)
+
+    # Arabic filenames and citations are normal here (§4), and the Windows
+    # console defaults to cp1252, which cannot encode them: printing a
+    # citation would raise UnicodeEncodeError and take down a scan that
+    # had otherwise succeeded. Replace unencodable characters in console
+    # output only — files are written UTF-8 regardless.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
 
     args = parser.parse_args(argv)
     if args.command in ("startup", "discovery", "cycle") and (

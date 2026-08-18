@@ -34,6 +34,8 @@ floor — are recorded as gaps rather than guessed at, so the register
 stays honest about the shape of its own holes (§1.1).
 """
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -104,6 +106,14 @@ class StageCResult:
     blocked: list = field(default_factory=list)     # confidential, not read
     d05_extracted: list = field(default_factory=list)  # confidential, dates only
     unreadable: list = field(default_factory=list)  # scanned/OCR needed
+    # OCR accounting (§5.5). Attempted and read are not the same number,
+    # and the difference is the honest part: below_floor holds documents
+    # the engine read but was not confident enough to be believed.
+    ocr_attempted: list = field(default_factory=list)
+    ocr_read: list = field(default_factory=list)
+    ocr_below_floor: list = field(default_factory=list)
+    ocr_failed: list = field(default_factory=list)
+    from_cache: int = 0
 
 
 # Words that identify an industry, not a counterparty. A client name
@@ -282,10 +292,16 @@ def run_stage_c(root: Path, confidential_clients: list[str],
                 confidential_folders: list[str],
                 exclude: list[Path] | None = None,
                 permit_confidential_dates: bool = False,
-                confidential_projects: list[str] | None = None) -> StageCResult:
+                confidential_projects: list[str] | None = None,
+                ocr=None, cache_dir: Path | None = None) -> StageCResult:
+    """`ocr` is an optional callable Path -> OcrResult. Injected rather
+    than imported so the confidentiality gate and the §5.5 floor are
+    both testable without an engine installed, and so a caller must opt
+    in deliberately — OCR is never on by default."""
     root = Path(root)
     excluded = [Path(e).resolve() for e in (exclude or [])]
     result = StageCResult()
+    cache = Path(cache_dir) if cache_dir else None
 
     for path in sorted(root.rglob("*")):
         if not path.is_file():
@@ -301,60 +317,199 @@ def run_stage_c(root: Path, confidential_clients: list[str],
         # were opened for dates — a reference that changes shape with the
         # operating system is a weak reference.
         relative = path.relative_to(root).as_posix()
-        confidential, reason = classify_confidential(
-            Path(relative), confidential_clients, confidential_folders,
-            confidential_projects)
 
-        if confidential and not permit_confidential_dates:
-            record = DocumentRecord(path=relative, confidential=True, reason=reason,
-                                    readable=False,
-                                    note="not opened — D-01 metadata-only scope")
-            result.documents.append(record)
-            result.blocked.append(record)
-            continue
-
-        if suffix in SCANNED_SUFFIXES:
-            record = DocumentRecord(path=relative, confidential=False,
-                                    readable=False,
-                                    note="image document — OCR required (§5.5)")
-            result.documents.append(record)
-            result.unreadable.append(record)
-            continue
-
-        text = extract_text(path)
-        if text is None:
-            record = DocumentRecord(path=relative, confidential=False,
-                                    readable=False,
-                                    note="no extractable text — likely scanned; "
-                                         "OCR required (§5.5)")
-            result.documents.append(record)
-            result.unreadable.append(record)
-            continue
-
-        terms = find_terms(text, relative)
-        if confidential:
-            # D-05: the value and its reference may be kept; the clause
-            # text may not. Redact the context rather than trusting the
-            # report layer to omit it — the prohibition belongs at the
-            # point of capture, not at the point of display.
-            terms = [
-                CommercialTerm(
-                    kind=t.kind, source=t.source,
-                    context="[REDACTED — D-05: date extracted, clause text not retained]",
-                    found_date=t.found_date, page_or_para=t.page_or_para,
-                )
-                for t in terms if t.found_date
-            ]
-        result.documents.append(DocumentRecord(
-            path=relative, confidential=confidential, readable=True,
-            reason=reason, terms=terms,
-            note="dates extracted under D-05; clause text not retained"
-            if confidential else ""))
-        result.terms.extend(terms)
-        if confidential:
-            result.d05_extracted.append(relative)
+        # A scan of a real document store runs for hours, and OCR is most
+        # of that. Caching each document's outcome makes the work durable:
+        # an interrupted run loses only the document in flight, and the
+        # next invocation converges instead of starting over.
+        key = _cache_key(path, relative)
+        payload = _cache_read(cache, key)
+        if payload is None:
+            payload = _process_one(
+                path, relative, confidential_clients, confidential_folders,
+                confidential_projects, permit_confidential_dates, ocr)
+            _cache_write(cache, key, payload)
+        else:
+            result.from_cache += 1
+        _replay(result, payload)
 
     return result
+
+
+def _cache_key(path: Path, relative: str) -> str:
+    """Identity of a document's *content* for caching purposes.
+
+    Size and mtime alongside the path: cheap, and a document that is
+    edited gets re-read rather than served stale. Hashing the bytes would
+    be more precise and would also mean reading every file on a run whose
+    whole purpose is to avoid that.
+    """
+    try:
+        stat = path.stat()
+        stamp = f"{stat.st_size}:{int(stat.st_mtime)}"
+    except OSError:
+        stamp = "nostat"
+    return hashlib.sha256(f"{relative}|{stamp}".encode()).hexdigest()[:32]
+
+
+def _cache_read(cache_dir: Path | None, key: str) -> dict | None:
+    if cache_dir is None:
+        return None
+    path = cache_dir / f"{key}.json"
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None                     # a corrupt entry re-reads, never fails
+
+
+def _cache_write(cache_dir: Path | None, key: str, payload: dict) -> None:
+    if cache_dir is None:
+        return
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / f"{key}.json").write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass                            # caching is an optimisation, never a gate
+
+
+def _replay(result: StageCResult, payload: dict) -> None:
+    """Rebuild one document's contribution from a cached entry."""
+    relative = payload["relative"]
+    terms = [
+        CommercialTerm(kind=t["kind"], source=t["source"], context=t["context"],
+                       found_date=t.get("found_date", ""),
+                       page_or_para=t.get("page_or_para", ""))
+        for t in payload.get("terms", [])
+    ]
+    record = DocumentRecord(
+        path=relative, confidential=payload.get("confidential", False),
+        reason=payload.get("reason", ""), readable=payload.get("readable", True),
+        terms=terms, note=payload.get("note", ""))
+    result.documents.append(record)
+    if payload.get("outcome") == "blocked":
+        result.blocked.append(record)
+    elif payload.get("outcome") == "unreadable":
+        result.unreadable.append(record)
+    else:
+        result.terms.extend(terms)
+        if payload.get("d05"):
+            result.d05_extracted.append(relative)
+    ocr_info = payload.get("ocr") or {}
+    if ocr_info.get("attempted"):
+        result.ocr_attempted.append(relative)
+    if ocr_info.get("read"):
+        result.ocr_read.append(relative)
+    if ocr_info.get("below_floor"):
+        result.ocr_below_floor.append(ocr_info["below_floor"])
+    if ocr_info.get("failed"):
+        result.ocr_failed.append(ocr_info["failed"])
+
+
+def _ocr_text(path: Path, ocr) -> tuple[str | None, dict]:
+    """Run OCR and report both the text and what it cost.
+
+    Returns (text, info). `text` is None whenever it must not be used —
+    engine missing, failure, or below the §5.5 floor — so the caller
+    files the document as unreadable, which is the honest outcome (§1.1).
+    Pure: the accounting comes back as data rather than being written
+    into a result object, so one document's outcome can be cached and
+    replayed exactly.
+    """
+    info = {"attempted": True, "read": False, "below_floor": "", "failed": ""}
+    outcome = ocr(path)
+    if outcome.usable:
+        info["read"] = True
+        return outcome.text, info
+    if outcome.below_floor:
+        info["below_floor"] = (
+            f"{path.name} (mean confidence {outcome.mean_confidence})")
+    elif outcome.error:
+        info["failed"] = f"{path.name}: {outcome.error}"
+    return None, info
+
+
+def _unreadable_note(base: str, confidential: bool, ocr_on: bool,
+                     info: dict) -> str:
+    """Say why a document stayed unreadable. The reasons differ, and a
+    single 'OCR required' note would hide which control was operating."""
+    if confidential:
+        return (f"{base} — not OCR'd: confidential (§12.1.2 prohibits OCR; "
+                "D-05 covers dates, not OCR)")
+    if not ocr_on:
+        return f"{base} — OCR required (§5.5); not enabled on this run"
+    if info.get("below_floor"):
+        return (f"{base} — OCR ran but fell below the §5.5 confidence floor: "
+                "UNREADABLE, MANUAL REVIEW REQUIRED")
+    if info.get("failed"):
+        return f"{base} — OCR failed; recorded as a gap"
+    return f"{base} — OCR produced no recognised text"
+
+
+def _process_one(path: Path, relative: str, confidential_clients: list[str],
+                 confidential_folders: list[str],
+                 confidential_projects: list[str] | None,
+                 permit_confidential_dates: bool, ocr) -> dict:
+    """Everything one document contributes, as a serialisable payload."""
+    confidential, reason = classify_confidential(
+        Path(relative), confidential_clients, confidential_folders,
+        confidential_projects)
+    payload: dict = {"relative": relative, "confidential": confidential,
+                     "reason": reason, "terms": [], "ocr": {}}
+
+    if confidential and not permit_confidential_dates:
+        payload.update(outcome="blocked", readable=False,
+                       note="not opened — D-01 metadata-only scope")
+        return payload
+
+    # OCR never touches a confidential document. `confidential.yaml` names
+    # OCR in metadata_only_mode.prohibited, and D-05 as recorded permits
+    # date extraction without naming OCR. Widening an NDA exception by
+    # inference is the one direction §12.1.1's asymmetry forbids, so a
+    # confidential scan stays a declared gap until the CEO extends D-05.
+    may_ocr = ocr is not None and not confidential
+    info: dict = {}
+    suffix = path.suffix.lower()
+
+    if suffix in SCANNED_SUFFIXES:
+        text, info = _ocr_text(path, ocr) if may_ocr else (None, {})
+        base = "image document"
+    else:
+        text = extract_text(path)
+        base = "no extractable text — likely scanned"
+        if text is None or not text.strip():
+            # A PDF with no text layer is a scan in a PDF wrapper.
+            text, info = _ocr_text(path, ocr) if may_ocr else (None, {})
+
+    payload["ocr"] = info
+    if text is None:
+        payload.update(
+            outcome="unreadable", readable=False,
+            note=_unreadable_note(base, confidential, ocr is not None, info))
+        return payload
+
+    terms = find_terms(text, relative)
+    if confidential:
+        # D-05: the value and its reference may be kept; the clause text
+        # may not. Redact at the point of capture, not at the point of
+        # display, so no report template can leak it.
+        terms = [
+            CommercialTerm(
+                kind=t.kind, source=t.source,
+                context="[REDACTED — D-05: date extracted, clause text not retained]",
+                found_date=t.found_date, page_or_para=t.page_or_para)
+            for t in terms if t.found_date
+        ]
+    payload.update(
+        outcome="terms", readable=True, d05=bool(confidential),
+        note="dates extracted under D-05; clause text not retained"
+        if confidential else "",
+        terms=[{"kind": t.kind, "source": t.source, "context": t.context,
+                "found_date": t.found_date, "page_or_para": t.page_or_para}
+               for t in terms])
+    return payload
 
 
 def render_commercial_exposure(result: StageCResult, today: date | None = None) -> str:

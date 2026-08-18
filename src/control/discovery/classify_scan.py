@@ -60,10 +60,9 @@ def build_classifier(config) -> tuple[Classifier, list[str]]:
     silences a whole category, and that has to be said out loud."""
     limitations: list[str] = []
 
-    roster = {
-        p["email"].lower() for p in config["people"].get("people", [])
-        if p.get("email")
-    }
+    from ..config import known_addresses
+
+    roster = known_addresses(config["people"], control_mailbox="control@ubcsis.com")
 
     clients = config["confidential"].get("confidential_clients") or []
     confidential_domains = {

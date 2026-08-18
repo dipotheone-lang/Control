@@ -66,6 +66,38 @@ def load_config(config_dir: Path) -> Config:
     return cfg
 
 
+def known_addresses(people_cfg: dict, control_mailbox: str = "") -> set[str]:
+    """Every address the system should recognise as its own organisation.
+
+    `people.yaml` holds staff under `people:`, but it also holds vacant
+    posts under `vacancies:` and the §3.1 addresses under
+    `special_addresses:`. Those mailboxes send real mail — a vacant post
+    is covered by an interim holder, not switched off — so a roster
+    built from `people:` alone reports them as unknown senders.
+
+    That matters because §13.2 treats an unknown internal sender as
+    "new joiner or impersonation" and refuses to evaluate. Reading one
+    key instead of three turns two working mailboxes into a standing
+    security flag, and buries the handful of genuinely unrecognised
+    senders underneath the noise.
+    """
+    addresses = {
+        str(p["email"]).lower()
+        for p in (people_cfg.get("people") or []) if p.get("email")
+    }
+    addresses |= {
+        str(v["email"]).lower()
+        for v in (people_cfg.get("vacancies") or []) if v.get("email")
+    }
+    addresses |= {
+        str(s["address"]).lower()
+        for s in (people_cfg.get("special_addresses") or []) if s.get("address")
+    }
+    if control_mailbox:
+        addresses.add(control_mailbox.lower())
+    return addresses
+
+
 def _validate(cfg: Config) -> None:
     people = cfg["people"].get("people", [])
     if not people:
