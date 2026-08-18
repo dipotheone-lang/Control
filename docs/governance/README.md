@@ -41,6 +41,17 @@ established, these documents say `TO BE CONFIRMED` rather than
 supplying a plausible figure. A filled gap in a legal document is worse
 than a visible one, for the same reason it is worse in a register.
 
+## Sending it
+
+`COUNSEL-COVERING-LETTER.md` is the instruction to go with the pack —
+bilingual, with the Arabic authoritative, and naming the two live
+uncertainties so counsel does not have to find them. Send all four
+documents together: they interlock, and one at a time turns one review
+into four rounds.
+
+It goes out from the CEO. Control cannot send it: §10 closes the
+external gate permanently, with no override for seniority or urgency.
+
 ## Order of work
 
 `PDPL-BASIS.md` first — it defines the processing, and the other three
