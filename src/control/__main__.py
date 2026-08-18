@@ -531,12 +531,40 @@ def cmd_contracts(args) -> int:
 
 def cmd_init(args) -> int:
     """Create CONTROL_ROOT from the repository's config templates."""
-    from .bootstrap import bootstrap, render_result
+    from .bootstrap import (
+        adopt_drift, bootstrap, config_drift, render_drift, render_result,
+    )
 
     repo_config = Path(__file__).resolve().parent.parent.parent / "config"
     template = Path(args.templates) if args.templates else repo_config
     result = bootstrap(Path(args.control_root), template)
     print(render_result(result))
+
+    # Kept files are never overwritten, so a decision taken after this
+    # machine was set up would otherwise never arrive.
+    drift = config_drift(Path(args.control_root), template)
+    if drift and args.adopt:
+        added = adopt_drift(Path(args.control_root), template)
+        print(f"\nadopted {len(added)} missing entry(ies):")
+        for line in added:
+            print(f"  + {line}")
+        remaining = config_drift(Path(args.control_root), template)
+        if remaining:
+            print("\nStill differing, and left for you — a whole config key "
+                  "may be absent on purpose,")
+            print("and adding one silently would be the system deciding "
+                  "something that is yours:")
+            for line in remaining:
+                print(f"  - {line}")
+    elif drift:
+        print()
+        for line in render_drift(drift):
+            print(line)
+        print("\nTo add the missing list entries (additive only, nothing "
+              "local is changed):")
+        print(f"  python -m control init --adopt "
+              f"--control-root \"{args.control_root}\"")
+
     print("\nNext:")
     print(f"  python -m control verify --control-root \"{args.control_root}\"")
     print(f"  python -m control phase0 --control-root \"{args.control_root}\"")
@@ -577,6 +605,19 @@ def cmd_doctor(args) -> int:
         config_count = len(list((control_root / "config").glob("*.yaml"))) \
             if (control_root / "config").is_dir() else 0
         print(f"  config files: {config_count}")
+        repo_config = Path(__file__).resolve().parent.parent.parent / "config"
+        if repo_config.is_dir():
+            from .bootstrap import config_drift
+            drift = config_drift(control_root, repo_config)
+            if drift:
+                print(f"  [warn] config is behind the templates in "
+                      f"{len(drift)} place(s)")
+                print("         python -m control init --adopt   "
+                      "(additive; nothing local is changed)")
+                for line in drift[:5]:
+                    print(f"         {line}")
+                if len(drift) > 5:
+                    print(f"         ... and {len(drift) - 5} more")
         if config_count < 15:
             ok = False
             print("    run: python -m control init --control-root <path>")
@@ -1690,6 +1731,9 @@ def main(argv: list[str] | None = None) -> int:
     init = sub.add_parser("init",
                           help="create CONTROL_ROOT from the config templates")
     init.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    init.add_argument("--adopt", action="store_true",
+                      help="add template list entries your config lacks; "
+                           "never removes or changes what is already there")
     init.add_argument("--templates", default="",
                       help="config template directory (default: repo config/)")
     init.set_defaults(fn=cmd_init)
