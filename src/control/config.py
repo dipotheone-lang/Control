@@ -66,7 +66,8 @@ def load_config(config_dir: Path) -> Config:
     return cfg
 
 
-def known_addresses(people: dict | None) -> set[str]:
+def known_addresses(people: dict | None,
+                    control_mailbox: str = "") -> set[str]:
     """Every internal address Control recognises.
 
     `people.yaml` holds three lists — `people`, `vacancies` and
@@ -103,6 +104,12 @@ def known_addresses(people: dict | None) -> set[str]:
         address = str(entry.get("address") or entry.get("email") or "").lower()
         if address:
             addresses.add(address)
+
+    # Control's own mailbox, when the caller has it. A message from
+    # control@ is the system's own, and reading it as an unknown
+    # internal sender would flag Control as impersonating itself.
+    if control_mailbox:
+        addresses.add(control_mailbox.lower())
 
     return addresses
 

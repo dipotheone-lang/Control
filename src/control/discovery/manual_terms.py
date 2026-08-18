@@ -81,6 +81,25 @@ class Pending:
     ocr_confidence: float | None = None
 
 
+def _below_floor_confidences(result) -> dict[str, float]:
+    """Measured confidence per below-floor document, by file name.
+
+    Stage C records these as notes rather than objects, so that a cached
+    document replays identically without holding an OCR result in
+    memory. The number is read back out of the note, and a note that
+    does not carry one simply yields nothing — an absent confidence is
+    reported as absent, never as zero (§1.1).
+    """
+    import re
+
+    found: dict[str, float] = {}
+    for note in getattr(result, "ocr_below_floor", []) or []:
+        match = re.match(r"(.+?) \(mean confidence ([0-9.]+)\)", str(note))
+        if match:
+            found[match.group(1)] = float(match.group(2))
+    return found
+
+
 def pending_from_result(result) -> list[Pending]:
     """Every document that produced no usable terms, with the reason.
 
@@ -89,15 +108,16 @@ def pending_from_result(result) -> list[Pending]:
     a below-floor scan is legible to a human, a sealed document may need
     permission first, and an engine failure may just need the engine.
     """
-    confidences = {r.path: r.confidence for r in getattr(result, "ocr_results", [])}
+    # Stage C records below-floor readings as strings carrying the
+    # measured confidence, not as OcrResult objects — so the number is
+    # parsed back out of the note rather than read off a field that
+    # does not survive the cache.
+    confidences = _below_floor_confidences(result)
     pending: list[Pending] = []
 
     for record in getattr(result, "unreadable", []):
-        confidence = None
-        for path, value in confidences.items():
-            if str(path).endswith(record.path.replace("\\", "/").split("/")[-1]):
-                confidence = value
-                break
+        name = record.path.replace("\\", "/").split("/")[-1]
+        confidence = confidences.get(name)
         pending.append(Pending(
             document=record.path,
             why=record.note or "no extractable text",

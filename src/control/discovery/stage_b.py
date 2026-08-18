@@ -82,7 +82,10 @@ def build_inventory(ub_root: Path, exclude: list[Path] | None = None, today: dat
         digest = _sha256(path) if stat.st_size <= _HASH_CAP_BYTES else f"size:{stat.st_size}"
         records.append(
             FileRecord(
-                path=str(path.relative_to(ub_root)),
+                # POSIX form always: file-inventory.csv is a deliverable and
+                # a record, and a path that changes shape with the operating
+                # system makes two runs of the same tree incomparable.
+                path=path.relative_to(ub_root).as_posix(),
                 size_bytes=stat.st_size,
                 modified=mtime.date().isoformat(),
                 ext=ext,
@@ -120,7 +123,7 @@ def build_inventory(ub_root: Path, exclude: list[Path] | None = None, today: dat
             revision_conflicts.append(sorted(r.path for r in group))
 
     dormant = sorted(
-        str(folder.relative_to(ub_root))
+        folder.relative_to(ub_root).as_posix()
         for folder, latest in folder_latest.items()
         if (today - latest).days >= DORMANT_DAYS
     )

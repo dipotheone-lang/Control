@@ -26,6 +26,10 @@ from pathlib import Path
 from . import HaltError
 from .states import LEGAL_STATES
 
+# The UB-Mannheim installer's default location. It does not add itself to
+# PATH in a silent install, so a bare `tesseract` call finds nothing.
+_TESSERACT_DEFAULT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
 
 def _level_for(run_mode: str, learning_mode: str, explicit: int | None) -> int:
     if explicit is not None:
@@ -302,6 +306,66 @@ def cmd_registers(args) -> int:
     return 0
 
 
+def cmd_classify_scan(args) -> int:
+    """§9 category profile over the Stage A scan output (metadata only).
+
+    Distinct from `classify`, which is the O-04 confidentiality
+    worksheet. This one answers a different question: of the mail
+    already scanned, what would §9 have called it?
+
+    Not a live cycle — no mailbox is touched, no reply is produced, no
+    verdict is reached. The classifier runs over metadata already on
+    disk so its behaviour on real corporate mail is visible before
+    anything depends on it."""
+    from .config import load_config
+    from .discovery.classify_scan import (
+        BODY_DEPENDENT, build_classifier, classify_rows, load_rows, merge, render,
+    )
+
+    control_root = Path(args.control_root)
+    discovery = control_root / "discovery"
+    scans = sorted(discovery.glob("outlook-scan-*.jsonl"))
+    if not scans:
+        print(f"no scan output in {discovery}. Run outlook-scan or phase0 first.")
+        return 1
+
+    wanted = {m.strip().lower() for m in args.mailbox.split(",") if m.strip()}
+    config = load_config(control_root / "config")
+    classifier, limitations = build_classifier(config)
+
+    reports = []
+    for scan in scans:
+        rows = load_rows(scan)
+        if not rows:
+            print(f"{scan.name}: empty, skipped")
+            continue
+        mailbox = str(rows[0].get("mailbox") or scan.stem)
+        if wanted and mailbox.lower() not in wanted:
+            continue
+        report = classify_rows(rows, classifier, mailbox=mailbox)
+        reports.append(report)
+        top = ", ".join(f"{c} {n}" for c, n in report.by_category.most_common(4))
+        print(f"  {mailbox}: {report.rows} messages — {top}")
+
+    if not reports:
+        print("nothing matched. Check --mailbox.")
+        return 1
+
+    merged = merge(reports)
+    merged.limitations = limitations
+    out = discovery / "CLASSIFY-SCAN.md"
+    out.write_text(render(merged), encoding="utf-8")
+
+    print(f"\n{merged.rows} messages classified across {len(reports)} mailbox(es)")
+    for category, n in merged.by_category.most_common():
+        print(f"  {category:26} {n:6}  {n / merged.rows:5.1%}")
+    print(f"\nsecurity events: {len(merged.security_events)}")
+    print("NOT detectable from metadata: " + ", ".join(BODY_DEPENDENT))
+    print("  (a zero against those is a property of the input, not a finding)")
+    print(f"\nwritten: {out}")
+    return 0
+
+
 def cmd_contracts(args) -> int:
     """Stage C — commercial terms from documents (§6)."""
     import yaml
@@ -312,9 +376,17 @@ def cmd_contracts(args) -> int:
     if not args.source:
         print("no --source and no UB_ROOT set. Nothing scanned.")
         return 1
-    source = Path(args.source)
-    if not source.is_dir():
-        print(f"source folder not found: {source}")
+
+    # Several folders may be given, comma-separated. A full-drive scan of
+    # a real document store runs for hours, and this command writes only
+    # once at the end — an interrupted run loses the whole scan. Naming
+    # the folders that actually hold contracts builds the same register
+    # without the all-or-nothing exposure.
+    sources = [Path(s.strip()) for s in str(args.source).split(",") if s.strip()]
+    missing = [s for s in sources if not s.is_dir()]
+    if missing:
+        for s in missing:
+            print(f"source folder not found: {s}")
         return 1
 
     clients, folders, projects = [], [], []
@@ -330,31 +402,83 @@ def cmd_contracts(args) -> int:
         clients = ["Siemens Energy", "Saint-Gobain", "KNAUF", "Galaxy",
                    "Canal Sugar", "Sukari", "Air Liquide"]
 
-    print(f"scanning {source} for commercial terms")
+    print(f"scanning {len(sources)} folder(s) for commercial terms")
     print(f"confidential clients: {len(clients)} | folders: {len(folders)}")
     if args.confidential_dates:
         print("D-05 ACTIVE: dates and term durations will be extracted from "
               "confidential contracts; no clause text is retained.")
-    from .ocr import OcrSettings, engine_status, summarise
 
-    ocr_config = control_root / "config" / "ocr.yaml"
-    ocr = OcrSettings.from_config(
-        yaml.safe_load(ocr_config.read_text(encoding="utf-8"))
-        if ocr_config.is_file() else None)
+    # Durable per-document outcomes. OCR over a real document store runs
+    # for hours; without this an interrupted scan loses everything and the
+    # next attempt starts from zero (§1.1 — a partial view must not be
+    # thrown away, it must be recorded).
+    cache_dir = None if args.no_cache else control_root / "data" / "stage-c-cache"
+    if cache_dir:
+        print(f"cache: {cache_dir}")
+
+    ocr = None
     if args.ocr:
-        ocr.enabled = True
-        status = engine_status()
-        print(f"OCR: floor {ocr.floor:.0f}, languages {'+'.join(ocr.languages)}")
-        for note in status["notes"]:
-            print(f"  WARNING: {note}")
-        if not status["ocr"]:
-            print("  Nothing will be OCR'd. Scans stay unreadable, which is "
-                  "reported rather than assumed empty (§1.1).")
+        from .ocr import available, ocr_document
 
-    result = run_stage_c(source, clients, folders, exclude=[control_root],
-                         permit_confidential_dates=args.confidential_dates,
-                         confidential_projects=projects,
-                         ocr_settings=ocr)
+        usable, reason = available()
+        if not usable:
+            print(f"OCR requested but unusable: {reason}")
+            print("Refusing to scan with a half-configured engine — scanned "
+                  "documents would be silently misread rather than recorded "
+                  "as gaps (§1.1, §5.5).")
+            return 1
+        floor = args.ocr_floor
+        print(f"OCR ACTIVE: {reason}")
+        print(f"  confidence floor {floor} — below it a document is UNREADABLE, "
+              "not evaluated, not posted (§5.5)")
+        print("  OCR is NOT applied to confidential documents: "
+              "confidential.yaml lists OCR")
+        print("  under metadata_only_mode.prohibited, and D-05 as recorded "
+              "covers dates, not OCR.")
+        print("  Extending it requires a CEO decision, not a flag.")
+
+        def ocr(path, _floor=floor):
+            return ocr_document(path, floor=_floor)
+
+    from .discovery.stage_c import StageCResult
+
+    result = StageCResult()
+    for source in sources:
+        print(f"  {source}")
+        part = run_stage_c(source, clients, folders, exclude=[control_root],
+                           permit_confidential_dates=args.confidential_dates,
+                           confidential_projects=projects, ocr=ocr,
+                           cache_dir=cache_dir)
+
+        # Paths inside each part are relative to that part's own root, so
+        # merging them raw would produce citations that no longer say
+        # which folder a document came from. §1.2 wants a reference that
+        # resolves; prefix each with its folder name before merging.
+        prefix = source.name
+        seen: dict[int, object] = {}
+        for record in part.documents + part.blocked + part.unreadable:
+            if id(record) not in seen:
+                seen[id(record)] = record
+                record.path = f"{prefix}/{record.path}"
+        for term in part.terms:
+            term.source = f"{prefix}/{term.source}"
+
+        result.documents.extend(part.documents)
+        result.terms.extend(part.terms)
+        result.blocked.extend(part.blocked)
+        result.unreadable.extend(part.unreadable)
+        result.d05_extracted.extend(f"{prefix}/{p}" for p in part.d05_extracted)
+        for name in ("ocr_attempted", "ocr_read", "ocr_below_floor", "ocr_failed"):
+            getattr(result, name).extend(
+                f"{prefix}/{entry}" for entry in getattr(part, name))
+        # Counts and numbers, not paths — nothing to prefix. Without
+        # this the cache works and silently reports reusing nothing,
+        # which is the one number worth seeing after a scan that took
+        # hours the first time.
+        result.ocr_confidences.extend(part.ocr_confidences)
+        result.from_cache += part.from_cache
+        print(f"    {len(part.documents)} documents, {len(part.terms)} terms, "
+              f"{len(part.blocked)} confidential, {len(part.unreadable)} unreadable")
 
     out = control_root / "discovery" / "COMMERCIAL-EXPOSURE.md"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -366,18 +490,29 @@ def cmd_contracts(args) -> int:
     if result.d05_extracted:
         print(f"confidential, dates only: {len(result.d05_extracted)}  (D-05)")
     print(f"unreadable/scanned:   {len(result.unreadable)}  (OCR needed)")
-    if result.ocr_results:
-        counts = summarise(result.ocr_results)
-        mean = counts["mean_confidence_accepted"]
-        print(f"\nOCR attempted on {counts['total']} document(s):")
-        print(f"  accepted above floor: {counts['accepted']}"
-              + (f"  (mean confidence {mean:.1f})" if mean else ""))
-        print(f"  below the §5.5 floor: {counts['below_floor']}  "
-              "— UNREADABLE, not posted")
-        print(f"  engine failed/absent: {counts['not_attempted_or_failed']}")
-        if counts["below_floor"]:
-            print("  A below-floor reading is a gap, not a document without "
-                  "terms. Those need a human (§5.5).")
+    if result.from_cache:
+        print(f"reused from cache:    {result.from_cache}")
+    if result.ocr_attempted:
+        print(f"\nOCR: {len(result.ocr_attempted)} attempted, "
+              f"{len(result.ocr_read)} trusted, "
+              f"{len(result.ocr_below_floor)} below the §5.5 floor, "
+              f"{len(result.ocr_failed)} failed")
+        if len(result.ocr_read) < len(result.ocr_attempted):
+            print("  Documents not trusted stay UNREADABLE and post nothing. "
+                  "That is the floor")
+            print("  working, not a bug — a wrong date in a register is worse "
+                  "than no date (§5.5).")
+        seen = sorted(result.ocr_confidences)
+        if seen:
+            median = seen[len(seen) // 2]
+            print(f"\n  confidence across {len(seen)} reading(s): "
+                  f"min {seen[0]:.1f}, median {median:.1f}, max {seen[-1]:.1f}")
+            print(f"  The floor is currently {args.ocr_floor:.0f}. It is a "
+                  "governance number, not a tuning knob —")
+            print("  set it from this distribution rather than from a default "
+                  "chosen without")
+            print("  seeing your documents (§5.5). Lowering it is never a "
+                  "learned change (§14.4).")
     dated = [t for t in result.terms if t.found_date]
     if dated:
         soonest = sorted(dated, key=lambda t: t.found_date)[:5]
@@ -406,6 +541,7 @@ def cmd_doctor(args) -> int:
     """Check that this machine can actually run Control."""
     import importlib
     import platform
+    import shutil
 
     ok = True
     print(f"platform: {platform.system()} {platform.release()}")
@@ -442,17 +578,83 @@ def cmd_doctor(args) -> int:
         print("\nNo CONTROL_ROOT given (--control-root or $CONTROL_ROOT)")
         ok = False
 
-    from .ocr import engine_status
+    # OCR (§5.5). Reported separately and never counted toward READY:
+    # its absence does not stop Control running, it decides whether
+    # scanned documents become records or stay declared gaps. Arabic is
+    # checked explicitly — an English-only engine turned loose on Arabic
+    # contracts returns confident nonsense, which §1.1 rates worse than
+    # the gap it replaces.
+    print("\nOCR (§5.5) — scanned documents:")
+    ocr_ready = True
+    for module, why in (("pytesseract", "Tesseract binding"),
+                        ("PIL", "image handling"),
+                        ("pymupdf", "PDF rasterising")):
+        try:
+            importlib.import_module(module)
+            print(f"  [ok]   {module:20} — {why}")
+        except ImportError:
+            ocr_ready = False
+            print(f"  [warn] {module:20} — {why} (pip install {module})")
 
-    ocr = engine_status()
-    print("\nOCR (§5.5):")
-    print(f"  [{'ok' if ocr['ocr'] else 'warn'}] tesseract engine")
-    print(f"  [{'ok' if ocr['pdf_render'] else 'warn'}] PDF rendering (PyMuPDF)")
-    if ocr["languages"]:
-        arabic = "ara" in ocr["languages"]
-        print(f"  [{'ok' if arabic else 'MISSING'}] Arabic language data")
-    for note in ocr["notes"]:
-        print(f"    {note}")
+    # Resolve the language directory rather than trusting TESSDATA_PREFIX.
+    # Language data installed under LOCALAPPDATA is invisible to any
+    # process that did not inherit that variable — a scheduled run, a
+    # service, a fresh shell — so a check that reads the ambient
+    # environment reports "Arabic missing" on the same machine where it
+    # is present. Look in the known places and say which one answered.
+    tessdata = ""
+    for candidate in (os.environ.get("TESSDATA_PREFIX", ""),
+                      str(Path(os.environ.get("LOCALAPPDATA", "")) / "tessdata"),
+                      str(Path(_TESSERACT_DEFAULT).parent / "tessdata")):
+        if candidate and (Path(candidate) / "eng.traineddata").is_file():
+            tessdata = candidate
+            break
+
+    languages: list[str] = []
+    try:
+        import pytesseract
+
+        binary = shutil.which("tesseract") or _TESSERACT_DEFAULT
+        if binary and Path(binary).is_file():
+            pytesseract.pytesseract.tesseract_cmd = str(binary)
+            print(f"  [ok]   tesseract binary     — {pytesseract.get_tesseract_version()}")
+            if not shutil.which("tesseract"):
+                print(f"         not on PATH; found at {binary}")
+            # Via the environment, not --tessdata-dir: pytesseract splits
+            # its config string on whitespace, so a path with spaces
+            # arrives broken (see ocr._apply_tessdata).
+            if tessdata:
+                os.environ["TESSDATA_PREFIX"] = tessdata
+            languages = sorted(pytesseract.get_languages(config=""))
+            if tessdata:
+                print(f"  tessdata: {tessdata}")
+        else:
+            ocr_ready = False
+            print("  [warn] tesseract binary     — not found "
+                  "(winget install UB-Mannheim.TesseractOCR)")
+    except Exception as e:
+        ocr_ready = False
+        print(f"  [warn] tesseract binary     — {str(e)[:80]}")
+
+    if languages:
+        print(f"  languages: {', '.join(languages)}")
+        if "ara" not in languages:
+            ocr_ready = False
+            print("  [warn] Arabic language data MISSING — §5.5 requires Arabic "
+                  "support.")
+            print("         Fetch ara.traineddata from tessdata_best into the "
+                  "tessdata directory")
+            print("         above. The winget package ships English only. "
+                  "Without ara, scanned Arabic")
+            print("         documents must stay UNREADABLE rather than be run "
+                  "through an engine")
+            print("         that cannot read them (§1.1).")
+    print(f"  OCR usable: {'yes' if ocr_ready else 'no — scanned documents stay UNREADABLE'}")
+    if ocr_ready:
+        print("  Stage C will use it: python -m control contracts --ocr")
+        print("  Confidential contracts are included only with "
+              "--confidential-dates,")
+        print("  under D-14, and their OCR text is never retained.")
 
     try:
         from .outlook import _dispatch_namespace
@@ -1491,12 +1693,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Stage C: extract guarantee, LD, notice and accreditation terms")
     contracts.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     contracts.add_argument("--source", default=os.environ.get("UB_ROOT", ""),
-                           help="folder to scan (default: UB_ROOT — the whole "
+                           help="folder(s) to scan, comma-separated (default: "
+                                "UB_ROOT — the whole "
                                 "drive, so a guarantee filed somewhere nobody "
                                 "remembered is still found)")
+    contracts.add_argument("--no-cache", action="store_true",
+                           help="re-read every document instead of reusing "
+                                "cached per-document outcomes")
     contracts.add_argument("--ocr", action="store_true",
-                           help="§5.5: OCR scanned documents. Readings below "
-                                "the confidence floor stay UNREADABLE")
+                           help="§5.5: OCR scanned documents (ara+eng). "
+                                "Confidential contracts only with "
+                                "--confidential-dates (D-14)")
+    contracts.add_argument("--ocr-floor", type=float, default=60.0,
+                           help="§5.5 confidence floor, 0-100 (default 60). "
+                                "Below it a document is UNREADABLE")
     contracts.add_argument("--confidential-dates", action="store_true",
                            help="D-05: extract dates and term durations from "
                                 "confidential contracts (no clause text kept)")
@@ -1521,6 +1731,14 @@ def main(argv: list[str] | None = None) -> int:
     classify.add_argument("--decided-on", default="",
                           help="ISO date of the decision (default: today)")
     classify.set_defaults(fn=cmd_classify)
+
+    classify_scan = sub.add_parser(
+        "classify-scan",
+        help="§9 category profile over scan output (metadata only, no mailbox access)")
+    classify_scan.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    classify_scan.add_argument("--mailbox", default="",
+                               help="restrict to these addresses (default: every scan)")
+    classify_scan.set_defaults(fn=cmd_classify_scan)
 
     cycle = sub.add_parser(
         "cycle", help="one sweep: fetch, classify, evaluate, enforce, gate")
@@ -1601,14 +1819,28 @@ def main(argv: list[str] | None = None) -> int:
     doctor.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     doctor.set_defaults(fn=cmd_doctor)
 
+    # Arabic filenames and citations are normal here (§4), and the Windows
+    # console defaults to cp1252, which cannot encode them: printing a
+    # citation would raise UnicodeEncodeError and take down a scan that
+    # had otherwise succeeded. Replace unencodable characters in console
+    # output only — files are written UTF-8 regardless.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     args = parser.parse_args(argv)
-    if args.command in ("startup", "discovery", "cycle", "report") and (
+    # outlook-scan and phase0 belong here now: they run the §5.6 startup
+    # before touching the mailbox, and startup verifies UB_ROOT.
+    if args.command in ("startup", "discovery", "cycle", "report",
+                        "outlook-scan", "phase0") and (
             not args.control_root or not args.ub_root):
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")
-    if (args.command in ("verify", "outlook-scan", "analyse", "phase0", "init",
-                         "contracts", "registers", "classify", "backup",
-                         "manuals", "terms")
+    if (args.command in ("verify", "analyse", "init", "contracts", "registers",
+                         "classify", "classify-scan", "backup", "manuals",
+                         "terms", "golden", "disputes")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:

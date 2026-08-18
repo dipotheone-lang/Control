@@ -1,329 +1,446 @@
 """OCR for scanned documents — charter §5.5.
 
-    "OCR with Arabic support and a **confidence floor**. Below it:
-     `UNREADABLE — MANUAL REVIEW REQUIRED`, not evaluated, not posted.
-     Never post an OCR figure below the floor. A wrong number in a
-     register is worse than no number."
+Egyptian contracting paperwork is largely scanned, and §2.2's highest-value
+dates — guarantee expiries, notice periods, LD terms — sit inside those
+scans. Without OCR they are recorded as gaps forever.
 
-The Phase 0 scan is why this exists. 362 legal documents produced
-**zero** guarantee expiries, LD rates, notice periods or
-defects-liability dates — not because there are none, but because 47%
-of them are photographs of text, rising to 81% for supplier legal
-documents. §2.2 calls a forfeited claim window the most expensive
-failure in this charter, and the windows were sitting in files nothing
-could read.
+THE FLOOR IS THE POINT. §5.5: below the confidence floor a document is
+`UNREADABLE — MANUAL REVIEW REQUIRED`, not evaluated and not posted.
+"A wrong number in a register is worse than no number." So this module
+withholds text it is not confident in rather than returning a best
+guess: `OcrResult.text` is None when the page mean falls below the
+floor, and callers cannot post what they cannot read.
 
-Three rules, and the first two are the ones that make this safe:
+§14.4 forbids the learning engine from ever lowering the floor. Nothing
+here reads a learned value; the floor arrives as an argument from the
+caller and defaults to a constant.
 
-**The floor is enforced here, not by the caller.** Below-floor text is
-never returned as text. It comes back as a refusal with the measured
-confidence attached, so a caller cannot accidentally treat a guess as
-a reading.
+Arabic is mandatory, not optional. UBCSIS documents mix Latin technical
+terms into Arabic text (§4), so recognition runs `ara+eng` together.
+An English-only engine pointed at an Arabic scan returns fluent
+nonsense at plausible confidence — a fabrication where there was an
+honest gap (§1.1). `available()` therefore reports unusable when the
+Arabic language data is absent, rather than quietly degrading.
 
-**The floor is never lowered by learning** (§14.4). The system gets
-better at reading; it does not get more willing to guess.
+Processing is local. Nothing is passed to any model or external service
+(§12.1.2), which is what makes this admissible for D-05 material —
+**and decision D-14 (17-Aug-2026) did extend D-05 to cover OCR**,
+because the first live Stage C run found 47% of legal documents are
+photographs of text, 81% for supplier legal documents. The guarantee
+expiries and forfeitable claim windows D-05 exists to catch are exactly
+the ones no text layer reaches.
 
-**A missing engine is reported, never worked around.** No silent
-fallback to a lower-quality path, and no pretending a document had no
-terms when the truth is that nothing looked at it.
+D-14 adds one condition on top of D-05's: for a client-confidential
+document the OCR text buffer is **never retained**. It passes to term
+extraction transiently, and `redact()` drops it before the result
+reaches anything that stores or renders. See `OcrResult.text_redacted`.
 """
 
-from dataclasses import dataclass
+import os
+import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 
-# §5.5 gives no number, so this is a choice and it is deliberately
-# strict: on a scanned Arabic contract, a permissive floor produces
-# plausible dates that are wrong, and a wrong date in a class 2
-# register alerts confidently on the wrong day. High floor means more
-# UNREADABLE, which is a visible gap rather than a false record.
-DEFAULT_FLOOR = 80.0
-DEFAULT_LANGUAGES = ("ara", "eng")
+# Tesseract reports per-word confidence on 0-100. 60 is deliberately
+# conservative for mixed Arabic/Latin scans: it rejects the marginal
+# page rather than admit a misread digit into a date field.
+DEFAULT_CONFIDENCE_FLOOR = 60.0
 
-# Rendering resolution. 300dpi is the usual floor for OCR on documents;
-# below it Arabic diacritics and small print degrade badly.
-DEFAULT_DPI = 300
+LANGS = "ara+eng"
+
+# Bound the work per document. A 200-page scanned contract would other-
+# wise stall a whole-drive scan; the cap is recorded on the result so a
+# truncated read is never mistaken for a complete one.
+DEFAULT_MAX_PAGES = 40
+
+# The UB-Mannheim installer's default location; a silent install does not
+# put it on PATH.
+_WINDOWS_DEFAULT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+# Rasterising at 300 dpi: below ~200 Arabic diacritics start to merge.
+RENDER_DPI = 300
 
 
 @dataclass
 class OcrResult:
-    path: str
-    text: str = ""
-    confidence: float | None = None
-    floor: float = DEFAULT_FLOOR
-    accepted: bool = False
-    reason: str = ""
-    pages: int = 0
-    engine: str = ""
-    # D-14: for a client-confidential document the OCR text is dropped
-    # at capture. Only the confidence and the reference survive.
+    """What OCR found, and how much of it is trustworthy.
+
+    `text` is None when the document fell below the floor. That is not
+    an error state — it is the §5.5 answer, and it must stay
+    unpostable.
+    """
+    source: str
+    text: str | None = None
+    mean_confidence: float = 0.0
+    words: int = 0
+    pages_read: int = 0
+    pages_total: int = 0
+    below_floor: bool = False
+    truncated: bool = False
+    error: str = ""
+    model: str = ""
+    escalated: bool = False
+    per_page_confidence: list = field(default_factory=list)
+    # Decision D-14: for a client-confidential document the OCR text
+    # buffer is never retained. It passes to term extraction transiently
+    # and what is stored keeps only the confidence and the reference.
+    # Retaining it would place the full body of an NDA contract in a
+    # structure the report layer can reach — the leak D-05's
+    # redaction-at-capture rule exists to prevent, arriving by another
+    # door. The flag records that the drop happened, so a later reader
+    # can tell a redacted result from one that found nothing.
     text_redacted: bool = False
 
     @property
-    def verdict(self) -> str:
-        if self.accepted:
-            return "OCR_ACCEPTED"
-        if self.confidence is not None:
-            return "UNREADABLE — MANUAL REVIEW REQUIRED"
-        return "NOT ATTEMPTED"
+    def usable(self) -> bool:
+        """Whether the reading may be used.
+
+        Stays true for a redacted confidential result: the terms were
+        extracted before the text was dropped, so the reading was
+        usable — what is gone is the body, deliberately.
+        """
+        if self.text_redacted:
+            return not self.below_floor and not self.error
+        return self.text is not None and not self.below_floor
 
 
-@dataclass
-class OcrSettings:
-    enabled: bool = False
-    floor: float = DEFAULT_FLOOR
-    languages: tuple = DEFAULT_LANGUAGES
-    dpi: int = DEFAULT_DPI
-    max_pages: int = 20
+def resolve_binary() -> str | None:
+    """Locate tesseract without trusting PATH."""
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    if Path(_WINDOWS_DEFAULT).is_file():
+        return _WINDOWS_DEFAULT
+    return None
 
-    @classmethod
-    def from_config(cls, config: dict | None) -> "OcrSettings":
-        data = (config or {}).get("ocr") or config or {}
-        languages = data.get("languages") or list(DEFAULT_LANGUAGES)
-        floor = float(data.get("confidence_floor", DEFAULT_FLOOR))
-        return cls(
-            enabled=bool(data.get("enabled", False)),
-            floor=floor,
-            languages=tuple(str(x) for x in languages),
-            dpi=int(data.get("dpi", DEFAULT_DPI)),
-            max_pages=int(data.get("max_pages", 20)),
+
+def resolve_tessdata_model(model: str) -> str:
+    """Directory for a named model set: 'fast' or 'best'.
+
+    Measured on real UBCSIS scans, the fast models run about three times
+    quicker at a few points lower confidence (72.6 vs 76.0 on the same
+    contract, 1658 vs 1693 words). That trade is worth taking for the
+    first pass over thousands of documents, but not for a document whose
+    reading is marginal — see `ocr_document`'s escalation.
+    """
+    local = Path(os.environ.get("LOCALAPPDATA", ""))
+    directory = local / ("tessdata_fast" if model == "fast" else "tessdata")
+    if (directory / "ara.traineddata").is_file():
+        return str(directory)
+    return resolve_tessdata()
+
+
+def resolve_tessdata() -> str:
+    """Locate the language directory without trusting TESSDATA_PREFIX.
+
+    Language data installed under LOCALAPPDATA is invisible to any
+    process that did not inherit that variable — a scheduled cycle, a
+    service, a fresh shell. Relying on the environment would make
+    Arabic support depend on how the process was started, which is a
+    silent correctness problem rather than a loud one.
+    """
+    candidates = [
+        os.environ.get("TESSDATA_PREFIX", ""),
+        str(Path(os.environ.get("LOCALAPPDATA", "")) / "tessdata"),
+        str(Path(_WINDOWS_DEFAULT).parent / "tessdata"),
+    ]
+    for candidate in candidates:
+        if candidate and (Path(candidate) / "eng.traineddata").is_file():
+            return candidate
+    return ""
+
+
+def available() -> tuple[bool, str]:
+    """(usable, reason). Usable requires the Arabic data, per §5.5."""
+    try:
+        import pytesseract  # noqa: F401
+    except ImportError:
+        return False, "pytesseract not installed"
+    try:
+        import pymupdf  # noqa: F401
+    except ImportError:
+        return False, "pymupdf not installed (PDF rasterising)"
+
+    binary = resolve_binary()
+    if not binary:
+        return False, "tesseract binary not found"
+
+    languages = _languages(binary, resolve_tessdata())
+    if "ara" not in languages:
+        return False, (
+            "Arabic language data missing — §5.5 requires Arabic support; "
+            "running English-only over Arabic scans would fabricate text"
         )
+    return True, f"tesseract with {', '.join(sorted(languages))}"
 
 
-# ---- engine availability ---------------------------------------------
+def _apply_tessdata(tessdata: str) -> None:
+    """Point tesseract at the language directory via the environment.
+
+    NOT via `--tessdata-dir` in pytesseract's config string: pytesseract
+    splits that string on whitespace, so any path containing a space —
+    "C:\\Users\\Lape Top Suez\\..." — arrives as several broken
+    arguments and tesseract fails on every document. The environment
+    variable carries spaces intact, and the subprocess inherits it.
+    """
+    if tessdata:
+        os.environ["TESSDATA_PREFIX"] = tessdata
+
+
+def _languages(binary: str, tessdata: str) -> set[str]:
+    import pytesseract
+
+    pytesseract.pytesseract.tesseract_cmd = binary
+    _apply_tessdata(tessdata)
+    try:
+        return set(pytesseract.get_languages(config=""))
+    except Exception:
+        return set()
+
+
+def _ocr_one_image(image, binary: str, tessdata: str) -> tuple[str, float, int]:
+    """Text, mean confidence and word count for a single PIL image."""
+    import pytesseract
+
+    pytesseract.pytesseract.tesseract_cmd = binary
+    _apply_tessdata(tessdata)
+    data = pytesseract.image_to_data(
+        image, lang=LANGS, config="",
+        output_type=pytesseract.Output.DICT,
+    )
+    words, confidences = [], []
+    for text, conf in zip(data.get("text", []), data.get("conf", [])):
+        try:
+            value = float(conf)
+        except (TypeError, ValueError):
+            continue
+        # -1 marks a region with no recognised text; averaging it in
+        # would drag every sparse page below the floor.
+        if value < 0 or not str(text).strip():
+            continue
+        words.append(str(text))
+        confidences.append(value)
+    if not confidences:
+        return "", 0.0, 0
+    mean = sum(confidences) / len(confidences)
+    return " ".join(words), mean, len(words)
+
+
+# A fast-model reading this close above the floor is close enough to the
+# line that the slower, more accurate model is worth the time.
+ESCALATION_MARGIN = 8.0
+
+
+def ocr_document(path: Path, *, floor: float = DEFAULT_CONFIDENCE_FLOOR,
+                 max_pages: int = DEFAULT_MAX_PAGES,
+                 model: str = "fast", escalate: bool = True) -> OcrResult:
+    """OCR a scanned PDF or image. Never raises; failures are recorded.
+
+    A per-item failure must not end a whole-drive scan (§1.1, §13.2), so
+    every error path returns a result carrying its own reason.
+
+    Two-tier by default: read with the fast models, and re-read with the
+    accurate ones only when the fast result lands below the floor or
+    within `ESCALATION_MARGIN` of it. The bulk of documents are read
+    once at three times the speed, while the marginal ones — the only
+    ones where the model choice can change the verdict — get the better
+    reading. This raises coverage without touching the floor, which
+    §14.4 forbids lowering.
+    """
+    first = _ocr_pass(path, floor=floor, max_pages=max_pages, model=model)
+    if not escalate or model == "best":
+        return first
+    if first.error and "not installed" in first.error:
+        return first
+    marginal = first.below_floor or first.mean_confidence < floor + ESCALATION_MARGIN
+    if not marginal:
+        return first
+    second = _ocr_pass(path, floor=floor, max_pages=max_pages, model="best")
+    second.escalated = True
+    # Keep whichever reading the floor actually accepts; if both fail,
+    # the more accurate model's verdict is the one to record.
+    if second.usable or not first.usable:
+        return second
+    return first
+
+
+def _ocr_pass(path: Path, *, floor: float, max_pages: int,
+              model: str) -> OcrResult:
+    path = Path(path)
+    result = OcrResult(source=str(path), model=model)
+
+    usable, reason = available()
+    if not usable:
+        result.error = reason
+        return result
+
+    binary = resolve_binary() or ""
+    tessdata = resolve_tessdata_model(model)
+
+    try:
+        if path.suffix.lower() == ".pdf":
+            texts, confidences, words = _read_pdf(
+                path, binary, tessdata, max_pages, result)
+        else:
+            texts, confidences, words = _read_image(path, binary, tessdata, result)
+    except Exception as e:                       # unreadable, not fatal
+        result.error = f"{type(e).__name__}: {str(e)[:120]}"
+        return result
+
+    result.words = words
+    result.per_page_confidence = [round(c, 1) for c in confidences]
+    if not confidences:
+        result.error = result.error or "no text recognised"
+        result.below_floor = True
+        return result
+
+    # Weight by nothing: a page is a page. A long confident page should
+    # not license a short garbled one, because the garbled page is where
+    # the misread date lives.
+    result.mean_confidence = round(sum(confidences) / len(confidences), 1)
+    if result.mean_confidence < floor:
+        result.below_floor = True
+        result.text = None                       # §5.5: withheld, not guessed
+    else:
+        result.text = "\n".join(texts)
+    return result
+
+
+def _read_pdf(path: Path, binary: str, tessdata: str, max_pages: int,
+              result: OcrResult):
+    import pymupdf
+    from PIL import Image
+
+    texts: list[str] = []
+    confidences: list[float] = []
+    words = 0
+    zoom = RENDER_DPI / 72.0
+
+    with pymupdf.open(path) as document:
+        result.pages_total = document.page_count
+        limit = min(document.page_count, max_pages)
+        result.truncated = document.page_count > limit
+        for index in range(limit):
+            page = document.load_page(index)
+            pixmap = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
+            image = Image.frombytes(
+                "RGB", (pixmap.width, pixmap.height), pixmap.samples)
+            text, mean, count = _ocr_one_image(image, binary, tessdata)
+            result.pages_read += 1
+            if count:
+                texts.append(text)
+                confidences.append(mean)
+                words += count
+    return texts, confidences, words
+
+
+def _read_image(path: Path, binary: str, tessdata: str, result: OcrResult):
+    from PIL import Image
+
+    result.pages_total = 1
+    with Image.open(path) as image:
+        text, mean, count = _ocr_one_image(image.convert("RGB"), binary, tessdata)
+    result.pages_read = 1
+    if not count:
+        return [], [], 0
+    return [text], [mean], count
+
+
+# ---- what the rest of the system asks for -----------------------------
+
+def redact(result: OcrResult) -> OcrResult:
+    """Drop the text buffer, keeping the reading's provenance (D-14).
+
+    Called at capture for a client-confidential document, before the
+    result reaches anything that stores or renders. Doing it here rather
+    than at the point of display is the whole point: a redaction applied
+    on the way out can be undone by a later template change, one applied
+    on the way in cannot.
+    """
+    from dataclasses import replace
+
+    return replace(result, text=None, text_redacted=True)
+
 
 def engine_status() -> dict:
     """What is installed, and what each missing piece costs.
 
     Returned rather than raised: a machine without OCR should still run
-    Phase 0 and report the gap, not halt.
+    Phase 0 and report the gap, not halt (§1.1). Built on the real path
+    resolution above, so it reports what an actual run would find rather
+    than what the environment claims.
     """
-    status = {"ocr": False, "pdf_render": False, "languages": [], "notes": []}
+    status = {"ocr": False, "pdf_render": False, "languages": [],
+              "binary": "", "tessdata": "", "notes": []}
 
     try:
-        import pytesseract
-
+        import pytesseract  # noqa: F401
         status["ocr"] = True
-        try:
-            status["languages"] = list(pytesseract.get_languages(config=""))
-        except Exception:
-            status["notes"].append(
-                "tesseract is installed but its language list could not be "
-                "read — Arabic support is unconfirmed")
-    except Exception:
+    except ImportError:
         status["notes"].append(
             "pytesseract not available. Install the Tesseract engine plus "
             "the Arabic language data, then: pip install pytesseract pillow")
 
     try:
-        import fitz  # PyMuPDF
-
-        _ = fitz
+        import pymupdf  # noqa: F401
         status["pdf_render"] = True
-    except Exception:
+    except ImportError:
         status["notes"].append(
-            "PyMuPDF not available, so scanned PDFs cannot be rendered for "
+            "pymupdf not available, so scanned PDFs cannot be rendered for "
             "OCR: pip install pymupdf")
 
-    if status["ocr"] and "ara" not in status["languages"]:
+    binary = resolve_binary()
+    if binary:
+        status["binary"] = binary
+    else:
+        status["ocr"] = False
         status["notes"].append(
-            "Arabic language data ('ara') is NOT installed. Arabic contracts "
-            "would be read as noise and rejected by the floor — which is the "
-            "safe direction, but they stay unreadable (§5.5)")
+            "tesseract binary not found on PATH or at "
+            f"{_WINDOWS_DEFAULT} — a silent install does not add it to PATH")
+
+    tessdata = resolve_tessdata()
+    status["tessdata"] = tessdata
+    if binary:
+        status["languages"] = sorted(_languages(binary, tessdata))
+        if "ara" not in status["languages"]:
+            status["notes"].append(
+                "Arabic language data ('ara') is NOT installed. Arabic "
+                "contracts would be read as noise and rejected by the floor "
+                "— the safe direction, but they stay unreadable (§5.5)")
+    if not tessdata:
+        status["notes"].append(
+            "no tessdata directory found. Language data under LOCALAPPDATA "
+            "is invisible to a process that did not inherit TESSDATA_PREFIX, "
+            "so a scheduled cycle would read nothing")
     return status
 
 
-# ---- reading ----------------------------------------------------------
-
-def _mean_confidence(data: dict) -> float | None:
-    """Mean confidence over words tesseract actually recognised.
-
-    Tesseract emits -1 for boxes it made no attempt at, and empty
-    strings for whitespace. Averaging those in would drag a good
-    reading below the floor and a bad one above it, depending only on
-    layout.
-    """
-    confidences = []
-    for value, word in zip(data.get("conf", []), data.get("text", [])):
-        if not str(word).strip():
-            continue
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
-            continue
-        if number >= 0:
-            confidences.append(number)
-    if not confidences:
-        return None
-    return sum(confidences) / len(confidences)
-
-
-def ocr_image(path: Path, settings: OcrSettings, *, reader=None) -> OcrResult:
-    """OCR one image. `reader` is injectable so tests need no engine."""
-    path = Path(path)
-    result = OcrResult(path=str(path), floor=settings.floor, engine="tesseract")
-
-    if reader is None:
-        try:
-            import pytesseract
-            from PIL import Image
-        except Exception as e:
-            result.reason = (
-                f"OCR engine not available ({e}). Nothing was read, and this "
-                "document is reported unreadable rather than assumed empty.")
-            return result
-
-        def reader(image_path: str, languages: str):
-            with Image.open(image_path) as image:
-                return pytesseract.image_to_data(
-                    image, lang=languages,
-                    output_type=pytesseract.Output.DICT)
-
-    try:
-        data = reader(str(path), "+".join(settings.languages))
-    except Exception as e:
-        result.reason = f"OCR failed: {e}"
-        return result
-
-    result.pages = 1
-    text = " ".join(w for w in data.get("text", []) if str(w).strip())
-    confidence = _mean_confidence(data)
-    result.confidence = confidence
-
-    if confidence is None:
-        result.reason = "no words recognised"
-        return result
-    if confidence < settings.floor:
-        # The whole point. Below-floor text is not returned at all.
-        result.reason = (
-            f"mean confidence {confidence:.1f} is below the §5.5 floor of "
-            f"{settings.floor:.1f} — UNREADABLE, not evaluated, not posted")
-        return result
-
-    result.text = text
-    result.accepted = True
-    return result
-
-
-def ocr_pdf(path: Path, settings: OcrSettings, *, renderer=None,
-            reader=None) -> OcrResult:
-    """Rasterise a text-less PDF and OCR its pages.
-
-    Page confidences are averaged weighted by recognised words, so one
-    near-blank page cannot drag a readable contract below the floor,
-    and one clean cover page cannot lift a bad scan above it.
-    """
-    path = Path(path)
-    result = OcrResult(path=str(path), floor=settings.floor, engine="tesseract")
-
-    if renderer is None:
-        try:
-            import fitz
-        except Exception as e:
-            result.reason = (
-                f"PDF rendering not available ({e}). Scanned PDFs stay "
-                "unreadable rather than being reported as empty.")
-            return result
-
-        def renderer(pdf_path: str, dpi: int, max_pages: int):
-            images = []
-            with fitz.open(pdf_path) as document:
-                for index, page in enumerate(document):
-                    if index >= max_pages:
-                        break
-                    pixmap = page.get_pixmap(dpi=dpi)
-                    images.append(pixmap.tobytes("png"))
-            return images
-
-    try:
-        images = renderer(str(path), settings.dpi, settings.max_pages)
-    except Exception as e:
-        result.reason = f"PDF rendering failed: {e}"
-        return result
-
-    if not images:
-        result.reason = "no pages rendered"
-        return result
-
-    if reader is None:
-        try:
-            import io
-
-            import pytesseract
-            from PIL import Image
-        except Exception as e:
-            result.reason = f"OCR engine not available ({e})"
-            return result
-
-        def reader(image_bytes, languages: str):
-            with Image.open(io.BytesIO(image_bytes)) as image:
-                return pytesseract.image_to_data(
-                    image, lang=languages,
-                    output_type=pytesseract.Output.DICT)
-
-    parts: list[str] = []
-    weighted, total_words = 0.0, 0
-    for image in images:
-        try:
-            data = reader(image, "+".join(settings.languages))
-        except Exception as e:
-            result.reason = f"OCR failed on a page: {e}"
-            return result
-        words = [w for w in data.get("text", []) if str(w).strip()]
-        confidence = _mean_confidence(data)
-        if confidence is None or not words:
-            continue
-        parts.append(" ".join(words))
-        weighted += confidence * len(words)
-        total_words += len(words)
-
-    result.pages = len(images)
-    if not total_words:
-        result.reason = "no words recognised on any page"
-        return result
-
-    confidence = weighted / total_words
-    result.confidence = confidence
-    if confidence < settings.floor:
-        result.reason = (
-            f"mean confidence {confidence:.1f} is below the §5.5 floor of "
-            f"{settings.floor:.1f} — UNREADABLE, not evaluated, not posted")
-        return result
-
-    result.text = "\n".join(parts)
-    result.accepted = True
-    return result
-
-
-def read_scanned(path: Path, settings: OcrSettings, **injected) -> OcrResult:
-    """Route by file type. The only entry point callers should use."""
-    suffix = Path(path).suffix.lower()
-    if not settings.enabled:
-        return OcrResult(path=str(path), floor=settings.floor,
-                         reason="OCR not enabled (§5.5) — document unread")
-    if suffix == ".pdf":
-        return ocr_pdf(path, settings, **injected)
-    return ocr_image(
-        path, settings,
-        **{k: v for k, v in injected.items() if k == "reader"})
-
-
 def summarise(results: list[OcrResult]) -> dict:
-    """Counts for the Phase 0 limitations report.
+    """The three counts §5.5 asks to be reported separately.
 
-    `below_floor` is reported separately from `failed` on purpose: one
-    means the engine read it and the reading was not trustworthy, the
-    other means nothing looked at it. Collapsing them would hide which
-    problem the company actually has.
+    "The reading was not trustworthy" and "nothing looked at it" are
+    different problems with different fixes, and collapsing them into
+    one "failed" number hides which one you have.
     """
-    accepted = [r for r in results if r.accepted]
-    below = [r for r in results if not r.accepted and r.confidence is not None]
-    failed = [r for r in results if not r.accepted and r.confidence is None]
-    confidences = [r.confidence for r in accepted if r.confidence is not None]
+    accepted = [r for r in results if r.usable]
+    below = [r for r in results if r.below_floor and not r.error]
+    failed = [r for r in results if r.error]
+    confidences = sorted(r.mean_confidence for r in results
+                         if r.mean_confidence > 0)
+
     return {
-        "total": len(results),
         "accepted": len(accepted),
         "below_floor": len(below),
-        "not_attempted_or_failed": len(failed),
-        "mean_confidence_accepted": (
-            sum(confidences) / len(confidences) if confidences else None),
+        "engine_failed": len(failed),
+        "escalated": sum(1 for r in results if r.escalated),
+        "truncated": sum(1 for r in results if r.truncated),
+        "redacted": sum(1 for r in results if r.text_redacted),
+        # The distribution, so the floor can be set from this estate's
+        # own documents rather than from a guess. A floor chosen without
+        # seeing this is the §7.2 mistake in a different register.
+        "confidence_min": confidences[0] if confidences else None,
+        "confidence_median": (confidences[len(confidences) // 2]
+                              if confidences else None),
+        "confidence_max": confidences[-1] if confidences else None,
+        "sample": len(confidences),
     }

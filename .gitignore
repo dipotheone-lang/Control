@@ -17,6 +17,16 @@ logs/**
 !logs/.gitkeep
 !logs/README.md
 
+# A CONTROL_ROOT created inside the repo. Discovery output is mail
+# metadata about identified individuals — senders, subjects, timestamps
+# — and falls under the same rule as the paths above (§12.1, §12.2).
+#
+# Anchored to the repo root on purpose. Git on Windows and macOS matches
+# ignore patterns case-insensitively, so an unanchored "CONTROL/" also
+# swallows src/control/ — the source package — and new modules there
+# would silently never be committed.
+/CONTROL/
+
 # Local environment
 .env
 *.pst
