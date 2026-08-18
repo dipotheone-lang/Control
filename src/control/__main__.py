@@ -20,7 +20,7 @@ LEARNING_MODE — flags override.
 import argparse
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import HaltError
@@ -691,6 +691,15 @@ def cmd_cycle(args) -> int:
     if result.security_events:
         print(f"SECURITY EVENTS:  {len(result.security_events)} — see the audit log")
 
+    if result.locked_period_refusals:
+        print(f"\nPERIOD LOCK (§5.2) — {len(result.locked_period_refusals)} "
+              "submission(s) not posted:")
+        for refusal in result.locked_period_refusals:
+            print(f"  {refusal}")
+        print("  The period was reported on. Posting these needs a "
+              "CEO-approved correction and a reissued report revision — "
+              "Control raises that decision, it does not take it.")
+
     if result.flags_raised or result.flags_suppressed:
         print("\nANOMALY FLAGS (§7.3)")
         print(f"  raised to the CEO:  {result.flags_raised}")
@@ -776,7 +785,7 @@ def cmd_report(args) -> int:
     what Control is NOT covering. A report that only showed what was
     found would read as assurance over ground it never saw.
     """
-    from .db import connect
+    from .db import connect, lock_period, reported_periods
     from .loader import load_class2, load_for_cycle
     from .outbox import Outbox, OutboundMessage
     from .report import HorizonItem, OpenItem, report_recipients, weekly_report
@@ -853,6 +862,20 @@ def cmd_report(args) -> int:
     year_dir.mkdir(parents=True, exist_ok=True)
     written.write_text(rendered["body"], encoding="utf-8")
 
+    # §5.2: once a management report issues, the period locks. Only the
+    # periods this report actually said something about — a period it
+    # was silent on was not reported, and locking it would refuse later
+    # entries the report never claimed to cover.
+    conn = connect(report.db_path)
+    try:
+        report_ref = f"WEEKLY-{as_of.isoformat()}"
+        # The same seven-day window the report itself covers.
+        since = datetime.combine(as_of - timedelta(days=7), datetime.min.time())
+        newly_locked = [p for p in reported_periods(conn, since.isoformat(sep=" "))
+                        if lock_period(conn, p, report_ref)]
+    finally:
+        conn.close()
+
     print(rendered["body"])
     print("\n" + "=" * 60)
     print(f"written:    {written}")
@@ -860,6 +883,10 @@ def cmd_report(args) -> int:
     print(f"recipients: {', '.join(recipients) or 'nobody configured'}")
     if note:
         print(f"  {note}")
+    if newly_locked:
+        print(f"\nPERIOD LOCK (§5.2): {', '.join(newly_locked)}")
+        print("  A later entry into a locked period needs a CEO-approved "
+              "correction and a reissued revision of this report.")
     if disposition.action == "DRAFT":
         print(f"\nDRAFT {disposition.draft_id} — management reports are never "
               "auto-sent, in any mode (§10). Nothing releases on silence.")

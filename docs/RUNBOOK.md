@@ -372,6 +372,13 @@ replying with the draft ID; nothing releases on silence.
 
 Run it for a past week with `--as-of 2026-08-20`.
 
+**Issuing the report locks the periods it reported on** (§5.2). After
+that, a late entry into one of those periods is not posted — it needs
+your approved correction and a reissued revision of the report, and the
+cycle raises that decision rather than taking it. Only periods the
+report actually said something about are locked; one it was silent on
+is untouched.
+
 Running it twice for the same date does not produce a second draft: the
 first one is the version awaiting your release, and the file on disk is
 left alone so the two cannot drift apart. To reissue after a correction,

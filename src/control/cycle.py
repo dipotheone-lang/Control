@@ -13,18 +13,19 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from . import HaltError
 from .anomaly import SUPPRESSED, Flag, record_flag, s1_out_of_hours
 from .attachments import build_submission_doc, quarantine, validate_attachment
 from .classify import Classifier, InboundMessage
 from .config import known_addresses
-from .db import connect
+from .db import connect, insert_submission
 from .discovery.classify_worksheet import (
     confidential_domains as _confidential_domains,
 )
 from .discovery.classify_worksheet import known_domains as _known_domains
 from .enforce import Absence, Action, Enforcer, TrackedItem
 from .evaluate import ObligationSpec, evaluate
-from .outbox import Disposition, Outbox, OutboundMessage
+from .outbox import Disposition, OutboundMessage, Outbox
 from .render import correction_due, render_verdict_reply
 from .startup import StartupReport
 from .transport import MailTransport
@@ -88,6 +89,9 @@ class CycleReport:
     # §7.3 substantive signals, under the D-10 CEO flag budget
     flags_raised: int = 0
     flags_suppressed: int = 0
+    # §5.2 period lock: submissions refused because the period they
+    # belong to has already been reported on.
+    locked_period_refusals: list[str] = field(default_factory=list)
 
 
 def _raise_flag(conn, flag: Flag, report: CycleReport, budget: int | None,
@@ -285,18 +289,37 @@ def run_cycle(
                     _raise_flag(conn, flag, report, flag_budget, week_start,
                                 audit)
 
-                conn.execute(
-                    "INSERT INTO submissions (obligation_id, verdict, timeliness,"
-                    " confidential, source, source_email_id, submitted_by,"
-                    " submitted_at, period) VALUES (?, ?, ?, ?, 'LIVE', ?, ?, ?, ?)",
-                    (obligation_id,
-                     evaluation.verdict if not evaluation.verdict.startswith("RECEIVED")
-                     else None,
-                     evaluation.timeliness, int(doc.confidential),
-                     fetched.message_id, fetched.sender,
-                     fetched.received_at.isoformat(), sub.period),
-                )
-                conn.commit()
+                # Through `insert_submission`, not raw SQL: the period
+                # lock (§5.2) lives in that helper, and a raw insert
+                # walks straight past it.
+                try:
+                    insert_submission(conn, {
+                        "obligation_id": obligation_id,
+                        "verdict": (evaluation.verdict
+                                    if not evaluation.verdict.startswith("RECEIVED")
+                                    else None),
+                        "timeliness": evaluation.timeliness,
+                        "confidential": int(doc.confidential),
+                        "source": "LIVE",
+                        "source_email_id": fetched.message_id,
+                        "submitted_by": fetched.sender,
+                        "submitted_at": fetched.received_at.isoformat(),
+                        "period": sub.period,
+                    })
+                except HaltError as e:
+                    # A late entry into a reported period is a real
+                    # event, not a reason to abandon the sweep (§13.2).
+                    # It is not posted; it needs a CEO-approved
+                    # correction and a reissued report revision, and
+                    # that decision is raised rather than taken here.
+                    report.locked_period_refusals.append(
+                        f"{obligation_id} {sub.period}: {e}")
+                    audit.append("submission.refused_locked_period", {
+                        "obligation": obligation_id, "period": sub.period,
+                        "message_id": fetched.message_id,
+                    })
+                    continue
+
                 audit.append("submission.evaluated", {
                     "obligation": obligation_id, "verdict": evaluation.verdict,
                     "message_id": fetched.message_id,

@@ -384,6 +384,42 @@ def period_is_locked(conn: sqlite3.Connection, period: str) -> bool:
     return row is not None
 
 
+def lock_period(conn: sqlite3.Connection, period: str, report_ref: str) -> bool:
+    """Lock a period because a management report reported on it (§5.2).
+
+    Returns True if this call locked it, False if it was already locked.
+    Idempotent by design: re-running the report for the same date must
+    not stack lock rows, and the FIRST report to cover a period is the
+    one that locked it — that is the report a later correction has to
+    reissue.
+    """
+    if period_is_locked(conn, period):
+        return False
+    conn.execute(
+        "INSERT INTO period_locks (period, locked_by_report, source)"
+        " VALUES (?, ?, 'LIVE')", (period, report_ref))
+    conn.commit()
+    return True
+
+
+def locked_periods(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    return [(row[0], row[1]) for row in conn.execute(
+        "SELECT period, locked_by_report FROM period_locks ORDER BY period")]
+
+
+def reported_periods(conn: sqlite3.Connection, since: str) -> list[str]:
+    """The periods a report actually said something about.
+
+    Deliberately narrower than "every period that exists": a period the
+    report was silent on was not reported, so locking it would refuse
+    later entries the report never claimed to cover.
+    """
+    return [row[0] for row in conn.execute(
+        "SELECT DISTINCT period FROM submissions"
+        " WHERE period IS NOT NULL AND period != '' AND posted_at >= ?"
+        " ORDER BY period", (since,))]
+
+
 def insert_submission(conn: sqlite3.Connection, row: dict) -> int:
     """Insert honouring the period lock (§5.2): a locked period requires a
     CEO-approved correction (correction_of + correction_reason)."""
