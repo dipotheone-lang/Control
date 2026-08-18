@@ -735,6 +735,98 @@ def _transport_for(report, args):
         return None
 
 
+def cmd_report(args) -> int:
+    """§11 weekly management report — always a draft (§10).
+
+    Everything the charter asks to be visible renders here: the class
+    1 & 2 horizon first, open items, external SLA, register deltas,
+    anomaly flags, and the decisions and standing limitations that say
+    what Control is NOT covering. A report that only showed what was
+    found would read as assurance over ground it never saw.
+    """
+    from .db import connect
+    from .loader import load_class2, load_for_cycle
+    from .outbox import Outbox, OutboundMessage
+    from .report import HorizonItem, OpenItem, report_recipients, weekly_report
+
+    control_root = Path(args.control_root)
+    report = _startup(args)
+    as_of = date.fromisoformat(args.as_of) if args.as_of else date.today()
+
+    conn = connect(report.db_path)
+    try:
+        loaded = load_for_cycle(report.config, conn, as_of)
+        tracked = loaded.tracked + load_class2(conn)
+
+        horizon = [
+            HorizonItem(item_id=item.item_id, obligation_class=item.obligation_class,
+                        name=item.name, owner=item.owner, due=item.due,
+                        status="OPEN")
+            for item in tracked if item.obligation_class in (1, 2)
+        ]
+        open_items = [
+            OpenItem(item_id=item.item_id, obligation_class=item.obligation_class,
+                     name=item.name, owner=item.owner,
+                     days_outstanding=loaded.calendar.working_days_between(
+                         item.due, as_of),
+                     stage="OPEN")
+            for item in tracked
+            if item.due < as_of
+            and not getattr(loaded.class3_state.get(item.item_id), "submitted", False)
+        ]
+
+        # The gaps the loader found are decisions the report must carry:
+        # each one is something Control is not doing (§1.1).
+        rendered = weekly_report(
+            conn, as_of=as_of, config_dir=control_root / "config",
+            horizon=horizon, open_items=open_items,
+            open_decisions=loaded.gaps, control_root=control_root)
+    finally:
+        conn.close()
+
+    recipients, note = report_recipients(report.config["distribution"])
+    outbox = Outbox(control_root, report.state.run_mode,
+                    ceo=recipients[0] if recipients else "ahmed@ubcsis.com")
+    disposition = outbox.submit(
+        OutboundMessage(
+            kind="MANAGEMENT_REPORT",
+            subject=rendered["subject"],
+            body=rendered["body"],
+            recipients=list(recipients),
+            dedupe_key=f"REPORT:{as_of.isoformat()}",
+            rationale="§11 weekly management report"),
+        already_sent=outbox.known_dedupe_keys())
+
+    year_dir = control_root / "reports" / "management" / str(as_of.year)
+    written = year_dir / f"weekly-{as_of.isoformat()}.md"
+
+    if disposition.action == "SKIPPED_DUPLICATE":
+        # The first run's draft is the one awaiting release. Rewriting the
+        # file underneath it would leave the copy on disk saying something
+        # the pending draft does not (§1.10, §5.2 append-only).
+        print(f"Already produced for {as_of:%d-%b-%Y} — not duplicated (§1.10).")
+        print(f"The draft awaiting release holds that version; {written} is "
+              "left as it was.")
+        print("To reissue after a correction, release or discard the pending "
+              "draft first.")
+        return 0
+
+    year_dir.mkdir(parents=True, exist_ok=True)
+    written.write_text(rendered["body"], encoding="utf-8")
+
+    print(rendered["body"])
+    print("\n" + "=" * 60)
+    print(f"written:    {written}")
+    print(f"xlsx:       {rendered['xlsx_path']}")
+    print(f"recipients: {', '.join(recipients) or 'nobody configured'}")
+    if note:
+        print(f"  {note}")
+    if disposition.action == "DRAFT":
+        print(f"\nDRAFT {disposition.draft_id} — management reports are never "
+              "auto-sent, in any mode (§10). Nothing releases on silence.")
+    return 0
+
+
 def cmd_terms(args) -> int:
     """§5.5 — the work queue for what OCR could not reach."""
     from .db import connect
@@ -1083,6 +1175,12 @@ def main(argv: list[str] | None = None) -> int:
                             "has already approved for this run mode")
     cycle.set_defaults(fn=cmd_cycle)
 
+    report_cmd = sub.add_parser(
+        "report", help="§11 weekly management report (always a draft)")
+    _common(report_cmd)
+    report_cmd.add_argument("--as-of", default="", help="ISO date, for testing")
+    report_cmd.set_defaults(fn=cmd_report)
+
     terms = sub.add_parser(
         "terms",
         help="manual entry for documents no machine could read (§5.5)")
@@ -1124,7 +1222,7 @@ def main(argv: list[str] | None = None) -> int:
     doctor.set_defaults(fn=cmd_doctor)
 
     args = parser.parse_args(argv)
-    if args.command in ("startup", "discovery", "cycle") and (
+    if args.command in ("startup", "discovery", "cycle", "report") and (
             not args.control_root or not args.ub_root):
         parser.error("--control-root and --ub-root are required "
                      "(or set CONTROL_ROOT / UB_ROOT)")

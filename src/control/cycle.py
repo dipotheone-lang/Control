@@ -9,7 +9,6 @@ and the transport — so the same cycle runs against MockTransport in
 DRY_RUN rehearsal and against Graph later without change.
 """
 
-import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -67,21 +66,6 @@ class CycleReport:
     sent: list[str] = field(default_factory=list)          # dedupe keys sent
     drafted: list[str] = field(default_factory=list)       # draft ids written
     skipped_duplicates: int = 0
-
-
-def _known_dedupe_keys(outbox: Outbox) -> set[str]:
-    """Idempotency source (§1.10): keys already sent or already pending."""
-    keys: set[str] = set()
-    for folder in (outbox.sent_dir, outbox.pending):
-        for path in folder.glob("*.json"):
-            try:
-                record = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            key = record.get("dedupe_key")
-            if key:
-                keys.add(key)
-    return keys
 
 
 def _dispatch(outbox: Outbox, transport: MailTransport, msg: OutboundMessage,
@@ -156,7 +140,7 @@ def run_cycle(
     ).fetchone())
     outbox = Outbox(control_root, startup.state.run_mode, ceo=ceo,
                     coo=coo, ceo_absent=ceo_absent)
-    known = _known_dedupe_keys(outbox)
+    known = outbox.known_dedupe_keys()
 
     try:
         # ---- inbound ----------------------------------------------------

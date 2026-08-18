@@ -145,6 +145,26 @@ class Outbox:
         if self.backup_cc not in [c.lower() for c in msg.cc]:
             msg.cc.append(self.backup_cc)
 
+    def known_dedupe_keys(self) -> set[str]:
+        """Idempotency source (§1.10): keys already sent, or already pending.
+
+        Pending counts. A draft awaiting the CEO's release is a message
+        that exists; producing a second one for the same event would put
+        two versions of the same report in front of the same person with
+        nothing saying which is current.
+        """
+        keys: set[str] = set()
+        for folder in (self.sent_dir, self.pending):
+            for path in folder.glob("*.json"):
+                try:
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                key = record.get("dedupe_key")
+                if key:
+                    keys.add(key)
+        return keys
+
     def submit(self, msg: OutboundMessage, already_sent: set[str] | None = None) -> Disposition:
         if msg.dedupe_key and already_sent and msg.dedupe_key in already_sent:
             return Disposition("SKIPPED_DUPLICATE")
