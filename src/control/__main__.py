@@ -691,6 +691,15 @@ def cmd_cycle(args) -> int:
     if result.security_events:
         print(f"SECURITY EVENTS:  {len(result.security_events)} — see the audit log")
 
+    if result.flags_raised or result.flags_suppressed:
+        print("\nANOMALY FLAGS (§7.3)")
+        print(f"  raised to the CEO:  {result.flags_raised}")
+        if result.flags_suppressed:
+            print(f"  held over budget:   {result.flags_suppressed} — recorded "
+                  "and reported, never dropped (D-10)")
+        print("  These never change a verdict and never appear in the "
+              "submitter's reply.")
+
     if result.threads_opened or result.cc_compliance:
         metric = result.cc_compliance or {}
         print("\nEXTERNAL WATCHDOG (§8.5)")

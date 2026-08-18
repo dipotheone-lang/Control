@@ -20,7 +20,7 @@ transition inserts a new row; the latest row per thread is current.
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 
 from .calendar import WorkingCalendar
 from .enforce import Action

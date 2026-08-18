@@ -305,6 +305,24 @@ Seeing that once is worth more than any description of it. The list
 shrinks as answers arrive, and it is what stops a green dashboard from
 lying to you.
 
+The sweep also runs the **§7.3 anomaly signals**. These never change a
+verdict and never appear in the submitter's reply — they are recorded
+for you alone.
+
+What runs today is the out-of-hours timestamp and the near-miss sender
+domain. Both work on metadata, so they run on confidential items too.
+The other signals — bank-detail change, duplicate invoices, sequence
+gaps, award concentration, authority, reconciliation — need sources the
+database does not hold yet, and **the weekly report names each one and
+what it needs.** An empty flags section that showed only what ran would
+read as *nothing found* rather than *most of this is not looking*.
+
+Past your D-10 budget of ten a week, further flags are **recorded and
+reported as held back, never dropped** — so the budget can be judged
+against what it actually cost you. A bank-detail change never
+suppresses: rationing the highest-priority signal in the system for
+volume would defeat the point of having a budget.
+
 The same sweep runs the **external watchdog** (§8.5). Every external
 message opens a thread with an SLA clock; a reply Control can see closes
 it, and so does the owner replying `CLOSED` on the first line — recorded

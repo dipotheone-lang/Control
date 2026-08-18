@@ -28,7 +28,7 @@ fallback to a lower-quality path, and no pretending a document had no
 terms when the truth is that nothing looked at it.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 # §5.5 gives no number, so this is a choice and it is deliberately
