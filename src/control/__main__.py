@@ -1393,6 +1393,63 @@ def cmd_disputes(args) -> int:
         conn.close()
 
 
+def cmd_advisor_brief(args) -> int:
+    """The tax advisor brief — execution order step 5.
+
+    "Send the completed statutory table for correction, not blank rows.
+    Request the full filing archive in the same message. Lead with the
+    payroll cycle and the corporate return date."
+
+    Generated rather than written, for §11's reason: a number that
+    cannot be traced to a row does not appear. The stated column comes
+    from the calendar and the observed column from the archive, so
+    neither can be typed in by hand and neither can drift.
+    """
+    from . import advisor
+    from . import extraction as ex
+    from .config import load_config
+
+    control_root = Path(args.control_root)
+    ub_root = Path(args.ub_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    config = load_config(control_root / "config")
+    statutory = config["statutory-calendar"]
+
+    observed = {}
+    evidence_rules = config.get("filing-evidence")
+    inventory = control_root / "discovery" / "file-inventory.csv"
+    if evidence_rules and (inventory.is_file() or ub_root.is_dir()):
+        paths = (ex.paths_from_inventory(inventory) if inventory.is_file()
+                 else ex.walk_paths(ub_root))
+        observed = ex.observe(ex.scan_paths(paths, evidence_rules))
+        print(f"archive: {len(paths)} path(s), evidence for "
+              f"{len(observed)} obligation(s)")
+    else:
+        print("No filing evidence available — the practice column will say "
+              "so on every row rather than being left blank, because a "
+              "blank reads as nothing filed (§1.1).")
+
+    rows, excluded = advisor.build_rows(statutory, observed)
+    out_dir = control_root / "discovery"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = out_dir / "TAX-ADVISOR-BRIEF.md"
+    written.write_text(
+        advisor.render(rows, statutory, today, excluded), encoding="utf-8")
+
+    for item in excluded:
+        print(f"  not for the advisor: {item}")
+    print(f"\n{len(rows)} obligation(s) in the table. Leading with "
+          + ", ".join(r.name for r in rows[:len(advisor.LEAD_WITH)]) + ".")
+    if not statutory.get("verified_by_advisor"):
+        print("\nEvery row is marked as CEO-stated and unverified. The "
+              "brief says so, and asks for correction rather than "
+              "agreement — agreeing with a plausible row is the failure "
+              "mode here.")
+    print(f"\nwritten: {written}")
+    print("This leaves the company from you, never from Control (§10).")
+    return 0
+
+
 def cmd_gaps(args) -> int:
     """The gap register — execution order step 3.
 
@@ -2147,6 +2204,16 @@ def main(argv: list[str] | None = None) -> int:
                                "CEO absence (§3.3)")
     disputes.add_argument("--today", default="", help="ISO date, for testing")
     disputes.set_defaults(fn=cmd_disputes)
+
+    advisor_cmd = sub.add_parser(
+        "advisor-brief",
+        help="execution order step 5: the completed statutory table, for "
+             "the tax advisor to correct")
+    advisor_cmd.add_argument("--control-root",
+                             default=os.environ.get("CONTROL_ROOT"))
+    advisor_cmd.add_argument("--ub-root", default=os.environ.get("UB_ROOT"))
+    advisor_cmd.add_argument("--today", default="", help="ISO date, for testing")
+    advisor_cmd.set_defaults(fn=cmd_advisor_brief)
 
     gaps_cmd = sub.add_parser(
         "gaps",

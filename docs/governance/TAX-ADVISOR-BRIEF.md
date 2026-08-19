@@ -1,132 +1,62 @@
 # Statutory calendar — brief for the tax advisor
 
-**Closes:** open decision **O-03** (charter §2.1)
-**Blocks:** the Phase 0 gate, and every class 1 obligation
-**Status:** `DRAFT` — to be sent to the company's tax advisor
-**Prepared for:** Ahmed Diab, CEO
+**This document is now generated.** Produce the current version with:
+
+    python -m control advisor-brief --control-root <CONTROL_ROOT> --ub-root <UB_ROOT>
+
+It is written to `discovery/TAX-ADVISOR-BRIEF.md`.
 
 ---
 
-## What is being asked, and why it is asked this way
+## Why it was moved out of this file
 
-Control alerts on statutory deadlines at T−7, T−3, T−1 and again on the
-morning of the deadline, escalating to the CEO on the day. Class 1 is
-the only obligation class that carries fines, and it is the one class
-where a wrong date is worse than no date: a system that alerts
-confidently on the wrong day teaches people to trust it, and then
-misses.
+The hand-written version was drafted when nothing was known, and it
+said so on every row: `UNVERIFIED — CONFIRM WITH ADVISOR`, twelve blank
+cells, and an explicit refusal to propose answers on the grounds that a
+proposal anchors the person correcting it.
 
-So the charter is strict about this at §2.1:
+Two things then changed, and both of them made a static document the
+wrong shape.
 
-> Exact deadlines must be confirmed with the company's tax advisor and
-> re-verified every January. **Never hardcode a statutory date from
-> assumption.**
+**The CEO stated twelve rules** in the execution order of 18-Aug-2026,
+and step 5 reversed the method: *"Send the completed statutory table
+for correction, not blank rows."* Blank rows now withhold what we hold
+and ask a paid professional to rediscover it.
 
-Every rule in `config/statutory-calendar.yaml` currently reads
-`UNVERIFIED — CONFIRM WITH ADVISOR`. Unverified rules still alert, and
-they err early. **Nothing below is a proposed answer.** Supplying a
-plausible date for the advisor to correct would anchor the answer, and
-the point of asking is to get the real one.
+**The archive was counted.** The brief carries a column showing what
+the company actually filed — how many periods, at what spacing, and
+whether that is consistent with the stated cadence. That column cannot
+be maintained by hand: it changes every time the archive is rescanned,
+and a stale number in a document sent to an advisor is worse than no
+number.
 
----
+So §11's hard rule applies to this document as much as to a management
+report: if a figure cannot be traced to a row that traces to a
+document, it does not appear. Generating it is how that is guaranteed
+rather than hoped for.
 
-## What we need for each obligation
+## What the generated version keeps from this one
 
-For each row: the filing deadline, the payment deadline where it
-differs, the period basis (monthly, quarterly, annual), how the
-deadline moves when it falls on a weekend or public holiday, and any
-lead time the preparer needs before the statutory date.
+- The three questions beyond the table — anything missing, anything
+  changing in the next twelve months, and the penalty per obligation
+- The distinction between the filing deadline and the operative one:
+  if a return is due on the 10th and the data cannot close before the
+  8th, the company's real deadline is the 8th
+- The anchoring warning, now stated as the failure mode rather than
+  avoided by leaving cells empty: **agreeing with a row because it
+  looks plausible** is what this brief is trying not to produce
 
-That last item matters more than it looks. If a return is due on the
-10th and the data cannot be closed before the 8th, the operative
-deadline for the company is the 8th, and that is what the system should
-alert on.
+## What it adds
 
-| # | Obligation | Filing deadline | Payment deadline | Period basis | Weekend/holiday rule | Internal lead time |
-|---|---|---|---|---|---|---|
-| 1 | VAT return and payment | | | | | |
-| 2 | Withholding tax | | | | | |
-| 3 | Payroll tax | | | | | |
-| 4 | Social insurance contributions | | | | | |
-| 5 | Social insurance headcount declarations (joiners/leavers) | | | | | |
-| 6 | **ETA electronic invoicing — submission** | | | | | |
-| 7 | **ETA electronic invoicing — rejection clearance window** | *(event-driven — see below)* | | | | |
-| 8 | Corporate income tax return | | | | | |
-| 9 | Corporate income tax instalments | | | | | |
-| 10 | Commercial register renewal | | | | | |
-| 11 | Tax card renewal | | | | | |
-| 12 | Industrial register renewal | | | | | |
+- The two rows the CEO wants answered first, before the table
+- Provenance on every row — all `ceo_stated`, none verified
+- The practice column, with what it cannot tell you said as plainly as
+  what it can
+- The two data-protection rows routed to counsel instead, named rather
+  than silently dropped so twelve in the register and ten in the brief
+  reconcile
+- A bilingual covering note, the Arabic authoritative (§4)
 
----
-
-## Two rows we would particularly like attention on
-
-**ETA e-invoicing (rows 6 and 7).** Phase 0 discovery found **767
-messages** from `invoicing.eta.gov.eg` in the company's mail. That
-volume says the obligation is live and active, not dormant. Two
-questions follow:
-
-- What is the submission deadline, and is it per-invoice or periodic?
-- **When an invoice is rejected, what is the window to correct and
-  resubmit, and what happens if it closes?** A rejection clearance
-  window is a deadline the company may not currently be tracking at
-  all, and it is the kind that expires quietly.
-
-Row 7 is event-driven rather than calendar-driven: the clock starts when
-ETA rejects an invoice. What we need is the **window length in days** and
-what the trigger event formally is. `config/statutory-calendar.yaml`
-carries `window_days: null` until you supply it, and Control computes no
-deadline from a null — it reports the gap instead.
-
-Ownership is now recorded: Hadeer Mohamed prepares, Mohamed Abdelsadiq
-owns, escalating to the CEO the same day.
-
-**Social insurance headcount declarations (row 5).** These are
-event-driven rather than calendar-driven — they run from a joiner or
-leaver date. We need the number of days and the event that starts the
-clock, so the system can compute the deadline when HR registers the
-event rather than waiting for a fixed date that does not exist.
-
----
-
-## Three questions beyond the table
-
-1. **Anything missing?** The list comes from the charter, not from a
-   review of this company's actual registrations. Are there filings
-   this company owes that are not listed — industry-specific, or
-   arising from its client base or contracting licences?
-
-2. **Any deadline changing in the next 12 months?** A rule that is
-   correct today and changes in March is worse than one known to be
-   changing.
-
-3. **What is the penalty for missing each one?** Not to alarm anyone —
-   Control reports the consequence of a miss alongside the deadline in
-   its CEO escalation, and it should state the real figure rather than
-   a generic warning.
-
----
-
-## What happens with the answers
-
-They go into `config/statutory-calendar.yaml` with
-`verified_by_advisor: true`, the verification date, and
-`next_annual_verification` set to January.
-
-**The learning engine may never modify a statutory deadline** (§14.2
-Tier C). These dates change only when the advisor says so, and the
-January re-verification is itself tracked as an obligation.
-
----
-
-## Sign-off
-
-| | Name | Date |
-|---|---|---|
-| Completed by | | |
-| Firm | | |
-| Received by | Mohamed Abdelsadiq, Acting CFO | |
-| Loaded into the calendar by | | |
-
-**O-03 closes when every row above carries a confirmed deadline and
-`verified_by_advisor` is set true.**
+**O-03 closes when every row carries a confirmed deadline and
+`verified_by_advisor` is set true — by a named human, never by the
+system (execution order §7).**

@@ -193,6 +193,10 @@ obligations:
   # way to not miss that.
   - id: STAT-PDPL-REGS
     name: PDPL executive regulations — watch for issue
+    # Not a tax matter. The advisor brief only carries rows a tax
+    # advisor can answer; asking one about data-protection regulations
+    # wastes their time and ours, and dilutes the rows that matter.
+    answered_by: counsel
     owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
     preparer: hadeer@ubcsis.com         # Hadeer Mohamed
     escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
@@ -210,6 +214,7 @@ obligations:
   # would be worse. It is recorded as owed, with the mechanism unknown.
   - id: STAT-PDPL-REG
     name: PDPL controller registration
+    answered_by: counsel
     owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
     preparer: hadeer@ubcsis.com         # Hadeer Mohamed
     escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
