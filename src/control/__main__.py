@@ -1393,6 +1393,187 @@ def cmd_disputes(args) -> int:
         conn.close()
 
 
+def cmd_phase1(args) -> int:
+    """Everything Phase 1 can do without a human — §16.
+
+    Phase 1 is DRY_RUN: all classes evaluated, everything a draft,
+    nothing sent. That means almost all of it is machine work, and
+    running it as eight separate commands turned a build step into an
+    afternoon of copying paths between prompts.
+
+    It stops at the two things that are decisions rather than work: the
+    CEO approving the obligation register (§6), and the CEO judging the
+    golden set unanchored (§13.1, D-03). Neither can be done for them
+    without making the gate meaningless — a test the machine cannot
+    fail is not a test.
+
+    Each step is skipped rather than fatal when its input is absent, and
+    what was skipped is stated at the end. A runner that halts halfway
+    and says nothing is worse than the eight commands it replaced.
+    """
+    control_root = Path(args.control_root)
+    steps: list[tuple[str, str]] = []      # (step, outcome)
+
+    def run(label: str, fn, needed: str = "") -> bool:
+        print(f"\n{'=' * 62}\n{label}\n{'=' * 62}")
+        try:
+            code = fn()
+        except Exception as e:                      # noqa: BLE001
+            steps.append((label, f"FAILED — {str(e)[:120]}"))
+            print(f"  step failed: {str(e)[:200]}")
+            return False
+        outcome = "done" if code == 0 else (needed or "skipped")
+        steps.append((label, outcome))
+        return code == 0
+
+    from argparse import Namespace
+
+    def like(**over):
+        base = dict(vars(args))
+        base.update(over)
+        return Namespace(**base)
+
+    # 1 — config first. A machine running on last month's decisions
+    #     produces honest-looking numbers from the wrong rules.
+    run("1. Config — install and adopt every decision the templates hold",
+        lambda: cmd_init(like(adopt=True, templates="", adopt_key=[],
+                              accept_template=args.accept_template)))
+
+    # 2 — the archive. Skipped without Outlook, which is the normal case
+    #     off the laptop.
+    if not args.skip_scan:
+        run("2. Phase 0 — scan every mailbox and write the deliverables",
+            lambda: cmd_phase0(like()),
+            needed="skipped — Outlook not available on this machine")
+
+    # 3 — propose the register. This is the join that was missing.
+    run("3. Stage D — propose the obligation register (§6)",
+        lambda: cmd_register_obligations(
+            like(approve=None, by="", min_occurrences=3,
+                 min_confidence="MEDIUM")),
+        needed="skipped — no scan output to infer from")
+
+    # 4 — what the filing archive says about the statutory rules.
+    run("4. Extraction brief — the archive against the stated rules",
+        lambda: cmd_extract_brief(like(rescan=False)),
+        needed="skipped — no filing evidence config")
+
+    # 5 — the two documents that go to humans outside the company.
+    run("5. Advisor brief — the completed statutory table",
+        lambda: cmd_advisor_brief(like()))
+
+    # 6 — a full DRY_RUN cycle: everything evaluated, everything drafted.
+    if not args.skip_cycle:
+        run("6. Cycle — evaluate everything, send nothing (DRY_RUN)",
+            lambda: cmd_cycle(like(allow_send=False, mailbox="",
+                                   today=args.today)),
+            needed="skipped — no transport on this machine")
+
+    # 7 — the report, and the gap register that says what is left.
+    run("7. Weekly report — always a draft (§10)",
+        lambda: cmd_report(like(as_of=args.today)))
+    run("8. Gap register — every open item, typed by who can close it",
+        lambda: cmd_gaps(like()))
+
+    print(f"\n{'=' * 62}\nPHASE 1 RUN COMPLETE\n{'=' * 62}")
+    for label, outcome in steps:
+        marker = "ok " if outcome == "done" else "-- "
+        print(f"  {marker}{label.split('.', 1)[-1].strip()} — {outcome}")
+
+    print("\nWhat is left, and why it cannot be done for you:")
+    print("  1. Approve the obligation register. §6 makes that approval "
+          "the thing that\n     ends Phase 0. One command:")
+    print("       python -m control register --approve --by ahmed@ubcsis.com")
+    print("  2. Judge the golden set. §13.1 and D-03: CEO only, unanchored, "
+          "no\n     pre-filled suggestions — anchoring the human to the "
+          "machine's answer\n     produces a test the machine cannot fail. "
+          "Batches of ten:")
+    print("       python -m control golden --issue")
+    print("\nEverything else above ran without you.")
+    return 0
+
+
+def cmd_register_obligations(args) -> int:
+    """Stage D proposals to an approved obligation register — §6.
+
+    Two halves, deliberately apart. Proposing is inference and Control
+    does it; approving is the decision that ends Phase 0 and only the
+    CEO makes it.
+    """
+    from . import register as reg
+    from .config import known_addresses, load_config
+    from .discovery.analyse import infer_obligations, load_rows
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    discovery = control_root / "discovery"
+    proposals_path = discovery / "PROPOSED-OBLIGATION-REGISTER.yaml"
+    obligations_path = control_root / "config" / "obligations.yaml"
+
+    if args.approve is not None:
+        if not proposals_path.is_file():
+            print(f"nothing to approve — {proposals_path.name} does not "
+                  "exist. Run this command without --approve first.")
+            return 1
+        if not args.by:
+            print("--by is required. §6 ends Phase 0 when the CEO approves "
+                  "the register, and an approval with no name attached is "
+                  "not one.")
+            return 1
+        only = set(args.approve) or None
+        approved, skipped = reg.approve(
+            proposals_path, obligations_path, args.by, only)
+        print(f"approved {len(approved)} obligation(s) as {args.by}:")
+        for item in approved:
+            print(f"  + {item}")
+        for item in skipped:
+            print(f"  - {item}")
+        if approved:
+            print("\n§6: this is what ends Phase 0. These are now tracked, "
+                  "and the class 3 ladder runs on them from the next cycle.")
+        return 0
+
+    scans = sorted(discovery.glob("outlook-scan-*.jsonl"))
+    if not scans:
+        print(f"no scan output in {discovery}. Run outlook-scan first — "
+              "there is nothing to infer obligations from.")
+        return 1
+
+    roster = known_addresses(load_config(control_root / "config")["people"])
+    candidates = []
+    for scan in scans:
+        rows = load_rows(scan)
+        if rows:
+            candidates += infer_obligations(
+                rows, min_occurrences=args.min_occurrences)
+
+    proposals, declined = reg.propose(
+        candidates, roster=roster, min_confidence=args.min_confidence)
+
+    discovery.mkdir(parents=True, exist_ok=True)
+    proposals_path.write_text(
+        __import__("yaml").safe_dump(
+            {"obligations": reg.to_rows(proposals)},
+            allow_unicode=True, sort_keys=False),
+        encoding="utf-8")
+    worksheet = discovery / "PROPOSED-OBLIGATION-REGISTER.md"
+    worksheet.write_text(
+        reg.render_worksheet(proposals, declined, today), encoding="utf-8")
+
+    usable = [p for p in proposals if p.usable]
+    print(f"{len(candidates)} Stage D candidate(s) -> {len(proposals)} "
+          f"proposal(s), {len(usable)} with a computable due date.")
+    for reason, count in sorted(declined.items()):
+        if count:
+            print(f"  declined {count}: {reason}")
+    print(f"\nworksheet: {worksheet}")
+    print("\nNothing is tracked until it carries approved_by_ceo (§6). "
+          "To approve every proposal with a usable due date:")
+    print(f"  python -m control register --approve --by ahmed@ubcsis.com "
+          f"--control-root \"{args.control_root}\"")
+    return 0
+
+
 def cmd_advisor_brief(args) -> int:
     """The tax advisor brief — execution order step 5.
 
@@ -2204,6 +2385,37 @@ def main(argv: list[str] | None = None) -> int:
                                "CEO absence (§3.3)")
     disputes.add_argument("--today", default="", help="ISO date, for testing")
     disputes.set_defaults(fn=cmd_disputes)
+
+    phase1 = sub.add_parser(
+        "phase1",
+        help="everything Phase 1 can do without a human, in one command")
+    _common(phase1)
+    phase1.add_argument("--today", default="", help="ISO date, for testing")
+    phase1.add_argument("--accept-template", action="append", default=[],
+                        metavar="FILE.yaml")
+    phase1.add_argument("--skip-scan", action="store_true",
+                        help="skip the Outlook scan (no Outlook on this machine)")
+    phase1.add_argument("--skip-cycle", action="store_true",
+                        help="skip the mail cycle (no transport)")
+    phase1.set_defaults(fn=cmd_phase1)
+
+    register_cmd = sub.add_parser(
+        "register",
+        help="§6: propose the obligation register from Stage D, or approve "
+             "it — approval is what ends Phase 0")
+    register_cmd.add_argument("--control-root",
+                              default=os.environ.get("CONTROL_ROOT"))
+    register_cmd.add_argument("--approve", nargs="*", default=None,
+                              metavar="ID",
+                              help="approve all usable proposals, or only "
+                                   "the ids named")
+    register_cmd.add_argument("--by", default="",
+                              help="who is approving; §6 says the CEO")
+    register_cmd.add_argument("--min-occurrences", type=int, default=3)
+    register_cmd.add_argument("--min-confidence", default="MEDIUM",
+                              choices=["HIGH", "MEDIUM", "LOW"])
+    register_cmd.add_argument("--today", default="", help="ISO date, for testing")
+    register_cmd.set_defaults(fn=cmd_register_obligations)
 
     advisor_cmd = sub.add_parser(
         "advisor-brief",
