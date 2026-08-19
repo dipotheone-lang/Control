@@ -163,11 +163,21 @@ class Observed:
         span. The first and last years of any collection are usually
         partial, so they are reported but never used to contradict a
         stated rule on their own.
+
+        **A year inside the span with nothing in it counts as zero, not
+        as absent.** `per_year` only knows about years that have
+        periods, so an annual obligation with filings in 2024 and 2026
+        and nothing in 2025 read as "1, 1 — matching the annual
+        cadence". The missing year was invisible, which is absence
+        looking like compliance — the failure this whole module exists
+        to avoid.
         """
         counts = self.per_year(kind)
         if len(counts) <= 2:
             return counts
-        return {year: counts[year] for year in sorted(counts)[1:-1]}
+        span = sorted(counts)
+        return {year: counts.get(year, 0)
+                for year in range(span[0] + 1, span[-1])}
 
     @property
     def complete_years(self) -> dict[int, int]:
@@ -265,15 +275,33 @@ def observe(evidence: list[Evidence]) -> dict[str, Observed]:
 
 STATED_CADENCE_PERIODS = {"monthly": 12, "quarterly": 4, "annual": 1}
 
-# The granularity that can CORROBORATE each cadence. A quarterly rule is
-# corroborated by quarterly filings; twelve monthly ones contradict it,
-# and one annual folder says nothing either way.
+# The granularity each cadence implies.
 CADENCE_GRANULARITY = {"monthly": MONTHLY, "quarterly": QUARTERLY,
                        "annual": ANNUAL}
 
-# How many periods of a given granularity fit in a year — used to turn
-# an observed count into a comparable one.
-PER_YEAR = {MONTHLY: 12, QUARTERLY: 4, ANNUAL: 1}
+# Fine to coarse. What matters is whether the OBSERVED naming is at
+# least as fine as the cadence being tested, because then the count of
+# distinct periods is comparable to the count the cadence expects.
+#
+# Four filings a year named "2025-03", "2025-06", "2025-09", "2025-12"
+# are quarterly filings that happen to be named by month, and that is
+# exactly what the live archive holds for payroll. An earlier version
+# refused to compare them at all — "a monthly count cannot confirm a
+# quarterly rule" — and threw away the answer to the order's own
+# highest-value question. Monthly naming is finer than quarterly, so it
+# can say four and it can say twelve.
+#
+# The reverse does not hold. One folder named "2025" against a monthly
+# rule says nothing: twelve returns may be inside it.
+FINENESS = {MONTHLY: 0, QUARTERLY: 1, ANNUAL: 2}
+
+
+def can_speak_to(observed_kind: str | None, cadence: str) -> bool:
+    """Whether a count at this granularity is comparable to this cadence."""
+    wanted = CADENCE_GRANULARITY.get(cadence)
+    if observed_kind is None or wanted is None:
+        return False
+    return FINENESS[observed_kind] <= FINENESS[wanted]
 
 
 @dataclass(frozen=True)
@@ -309,7 +337,7 @@ def disagreements(statutory_config: dict | None,
         # year says nothing the first one did not, and a reader who
         # skims the second stops reading the section.
         kind = record.granularity
-        if kind is None:
+        if not can_speak_to(kind, cadence):
             continue
         offending = {year: count
                      for year, count in sorted(
@@ -370,14 +398,16 @@ def upgrade_candidates(statutory_config: dict | None,
         expected = STATED_CADENCE_PERIODS.get(cadence)
         if expected is None:
             continue
-        # Like for like. An annual rule is corroborated by filings named
-        # by year, not by however many happen to carry a month — which
-        # let one monthly-dated document per year "corroborate" an
-        # annual cadence by coincidence.
-        wanted = CADENCE_GRANULARITY[cadence]
-        if record.granularity != wanted:
+        # The count must be comparable: at least as fine as the cadence.
+        # An annual folder cannot corroborate a monthly rule, because
+        # twelve returns may be inside it.
+        wanted = record.granularity
+        if not can_speak_to(wanted, cadence):
             continue
         counts = record.interior_years(wanted)
+        # A zero year is a year with no filing at all, and it is the
+        # reason corroboration is refused rather than the reason it is
+        # granted.
         if not counts or any(c != expected for c in counts.values()):
             continue
         candidates.append({
@@ -466,14 +496,12 @@ def silent_obligations(statutory_config: dict | None,
                 "partial year cannot contradict a cadence".replace(
                     "yearly", "annual"))
             continue
-        wanted = CADENCE_GRANULARITY[cadence]
-        if kind != wanted:
+        if not can_speak_to(kind, cadence):
             notes.append(
                 f"{obligation_id}: stated {cadence}, but the filings are "
-                f"named by {kind}. A {kind}ly count cannot confirm a "
-                f"{cadence} rule, and could only contradict it by "
-                f"exceeding {expected} a year — it does not.".replace(
-                    "yearly", "annual"))
+                f"named by {kind}. One {kind} may contain several "
+                f"filings, so the count cannot be compared — a coarser "
+                "name hides how many returns are inside it.")
     return notes
 
 

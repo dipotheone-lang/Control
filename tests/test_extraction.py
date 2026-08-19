@@ -356,16 +356,42 @@ def test_eight_quarterly_periods_in_a_year_contradict_a_quarterly_rule(
     assert found == [], "duplicate copies of the same quarter are one period"
 
 
-def test_an_annual_rule_is_not_corroborated_by_monthly_coincidence(
-        rules, statutory):
-    """One monthly-dated document a year "matched" an annual cadence of
-    one a year, and the brief offered a provenance upgrade on it. Like
-    is now compared with like."""
+def test_a_finer_naming_can_still_speak_to_a_coarser_cadence(rules, statutory):
+    """This test used to assert the opposite, and the opposite was wrong.
+
+    One monthly-dated renewal a year IS what an annual renewal looks
+    like. Refusing to compare a finer naming against a coarser cadence
+    threw away real evidence — and on the live archive it discarded the
+    answer to the order's own highest-value question, because payroll
+    is filed quarterly and named by the month of each quarter end.
+
+    What genuinely cannot speak is the reverse: one folder named "2025"
+    against a monthly rule, because twelve returns may be inside it.
+    """
     paths = [f"E:/UB/Legal/commercial register {y}-{y % 12 + 1:02d}.pdf"
              for y in (2021, 2022, 2023, 2024, 2025, 2026)]
     observed = observe(scan_paths(paths, rules))
     assert observed["STAT-REG"].granularity == MONTHLY
-    assert upgrade_candidates(statutory, observed, []) == []
+    candidate = next(c for c in upgrade_candidates(statutory, observed, [])
+                     if c["id"] == "STAT-REG")
+    assert "matching the stated annual cadence" in candidate["evidence"]
+
+
+def test_a_year_with_nothing_in_it_is_counted_as_zero(rules, statutory):
+    """Absence looking like compliance, one more time.
+
+    `per_year` only knows about years that have periods, so an annual
+    obligation with filings in 2024 and 2026 and nothing in 2025 read
+    as "1, 1 — matching the annual cadence". The missing year was
+    invisible.
+    """
+    paths = [f"E:/UB/Legal/commercial register renewal {y}.pdf"
+             for y in (2022, 2023, 2024, 2026, 2027)]
+    observed = observe(scan_paths(paths, rules))
+    assert observed["STAT-REG"].interior_years(ANNUAL) == {
+        2023: 1, 2024: 1, 2025: 0, 2026: 1}
+    assert upgrade_candidates(statutory, observed, []) == [], \
+        "a year with no filing is why corroboration is refused"
 
 
 def test_an_annual_rule_is_corroborated_by_annual_filings(rules, statutory):
@@ -393,8 +419,10 @@ def test_the_brief_says_which_obligations_could_not_be_asked(rules, statutory):
     assert not [n for n in notes if n.startswith("STAT-VAT")]
 
 
-def test_a_granularity_mismatch_says_so_rather_than_reading_as_agreement(
+def test_a_coarser_naming_says_so_rather_than_reading_as_agreement(
         rules, statutory):
+    """A folder named "2025" against a quarterly rule says nothing:
+    four returns may be inside it, or none."""
     from control.extraction import silent_obligations
 
     paths = [f"E:/UB/Tax/Payroll tax {y}.pdf" for y in range(2019, 2027)]
@@ -402,4 +430,5 @@ def test_a_granularity_mismatch_says_so_rather_than_reading_as_agreement(
     note = next(n for n in silent_obligations(statutory, observed)
                 if n.startswith("STAT-PAYROLL"))
     assert "stated quarterly, but the filings are named by year" in note
-    assert "cannot confirm a quarterly rule" in note
+    assert "may contain several filings" in note
+    assert "hides how many returns are inside it" in note
