@@ -127,10 +127,16 @@ def test_a_statutory_row_added_to_the_template_is_reported(tmp_path):
     assert any(r["id"] == "STAT-ETA-REJ" for r in restored["obligations"])
 
 
-def test_a_field_added_to_an_existing_row_is_reported_never_adopted(tmp_path):
-    """`window_days: 7` arriving on a rule whose local copy says null is
-    exactly the difference a machine must not close by itself — a row
-    carries decisions, and overwriting one is where they get lost."""
+def test_a_field_added_to_an_existing_row_is_adopted(tmp_path):
+    """This test used to assert the opposite.
+
+    The reasoning was that a row carries decisions and overwriting one
+    is where they get lost. True of overwriting; false of adding. A
+    field the local row does not have discards nothing, and refusing to
+    add it meant a real machine adopted every field around a statutory
+    rule while the rule itself still said UNVERIFIED — so nothing
+    alerted, and the adoption was theatre.
+    """
     import yaml
 
     from control.bootstrap import adopt_drift, bootstrap, config_drift
@@ -149,9 +155,8 @@ def test_a_field_added_to_an_existing_row_is_reported_never_adopted(tmp_path):
     drift = config_drift(root, repo_config)
     line = next(l for l in drift if "STAT-ETA-REJ" in l and "gained" in l)
     assert "window_days" in line
-    assert "never overwritten for you" in line
 
     adopt_drift(root, repo_config)
     after = yaml.safe_load(live.read_text(encoding="utf-8"))
     row = next(r for r in after["obligations"] if r["id"] == "STAT-ETA-REJ")
-    assert "window_days" not in row, "adoption must not rewrite a row"
+    assert row["window_days"] == 7

@@ -107,7 +107,7 @@ def test_an_unparseable_file_is_reported_not_crashed(machine):
 def test_the_message_says_what_it_costs(machine):
     lines = render_drift(config_drift(machine, REPO_CONFIG))
     joined = " ".join(lines)
-    assert "never overwritten" in joined
+    assert "templates gained that your copy has not" in joined
     assert "less protection than was decided" in joined
 
 
@@ -150,9 +150,18 @@ def test_a_local_only_entry_survives_adoption(machine):
                for c in after["confidential_clients"])
 
 
-def test_adopting_does_not_add_whole_keys(machine):
-    """An absent key may be absent on purpose, and adding one silently
-    would be the system deciding something that belongs to a human."""
+def test_adopting_adds_a_key_the_local_copy_lacks(machine):
+    """This test used to assert the opposite, on the reasoning that an
+    absent key might be absent on purpose.
+
+    That reasoning was wrong in the direction that costs something.
+    Adding a key the local file does not have cannot discard a decision
+    — there is nothing there to discard — and refusing to add it left a
+    real machine running for weeks on a config from before the
+    decisions it was missing, with a list of homework instead of a
+    working system. What is still refused is a real local value against
+    a real template value; that is two decisions disagreeing.
+    """
     path = machine / "config" / "materiality.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     data.pop("ceo_flag_budget_per_week", None)
@@ -162,9 +171,25 @@ def test_adopting_does_not_add_whole_keys(machine):
     adopt_drift(machine, REPO_CONFIG)
 
     after = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert "ceo_flag_budget_per_week" not in after
-    # ...and it is still reported, so it cannot be lost silently.
-    assert any("ceo_flag_budget_per_week" in line
+    assert "ceo_flag_budget_per_week" in after
+    assert not [line for line in config_drift(machine, REPO_CONFIG)
+                if "ceo_flag_budget_per_week" in line]
+
+
+def test_a_real_local_value_is_never_replaced(machine):
+    """Two decisions disagreeing. Control saying which is current would
+    be Control deciding, and a local value may be the NEWER one."""
+    path = machine / "config" / "materiality.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["ceo_flag_budget_per_week"] = 25
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
+
+    adopt_drift(machine, REPO_CONFIG)
+
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert after["ceo_flag_budget_per_week"] == 25
+    assert any("yours to say" in line
                for line in config_drift(machine, REPO_CONFIG))
 
 
@@ -286,3 +311,115 @@ def test_the_d06_review_is_chased_once_the_key_is_there(machine):
 
     due = interim_reviews_due(machine / "config", date(2026, 9, 20))
     assert due and "O-02" in due[0]
+
+
+# ---- the case this was rebuilt for -------------------------------------
+
+def test_a_placeholder_rule_is_replaced_by_the_real_one(machine):
+    """The failure that made the old design worthless in practice.
+
+    A live machine's statutory calendar had `rule: UNVERIFIED — CONFIRM
+    WITH ADVISOR` on every row. Additive-only adoption filled in owner,
+    preparer, cadence and escalation around each rule and left the rule
+    itself untouched — so `parse_due` still refused every one of them,
+    zero deadlines alerted, and the report looked exactly as broken as
+    before. A placeholder is the absence of a decision, so replacing it
+    reverts nothing.
+    """
+    path = machine / "config" / "statutory-calendar.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for row in data["obligations"]:
+        row["rule"] = "UNVERIFIED — CONFIRM WITH ADVISOR"
+        row.pop("provenance", None)
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
+
+    adopt_drift(machine, REPO_CONFIG)
+
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
+    vat = next(r for r in after["obligations"] if r["id"] == "STAT-VAT")
+    assert vat["rule"] == "end of the following month, -5 working days"
+    assert vat["provenance"] == "ceo_stated"
+
+
+def test_after_adopting_the_calendar_actually_alerts(machine):
+    """End to end, and the only measure that matters: does a deadline
+    come out of the other end? Adoption that leaves nothing alerting is
+    adoption that wasted the user's time."""
+    from datetime import date
+
+    from control.loader import build_statutory
+
+    path = machine / "config" / "statutory-calendar.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["obligations"] = [
+        {"id": r["id"], "name": r.get("name", r["id"]),
+         "rule": "UNVERIFIED — CONFIRM WITH ADVISOR"}
+        for r in data["obligations"]]
+    data["ceo_stated"] = False
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
+
+    before, _ = build_statutory(
+        yaml.safe_load(path.read_text(encoding="utf-8")), date(2026, 8, 18))
+    assert before == [], "the machine's starting state: nothing alerts"
+
+    adopt_drift(machine, REPO_CONFIG)
+
+    after, _ = build_statutory(
+        yaml.safe_load(path.read_text(encoding="utf-8")), date(2026, 8, 18))
+    assert {t.item_id for t in after} == {
+        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-CIT"}
+
+
+def test_the_previous_version_is_kept_before_a_rewrite(machine):
+    """`safe_dump` does not preserve comments, and a config file may
+    carry a paragraph explaining why a value is what it is. Losing that
+    quietly is its own version of the failure this module prevents."""
+    path = machine / "config" / "statutory-calendar.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["obligations"] = [r for r in data["obligations"]
+                           if r["id"] != "STAT-VAT"]
+    path.write_text(
+        "# a comment that safe_dump will not keep\n"
+        + yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+        encoding="utf-8")
+    original = path.read_text(encoding="utf-8")
+
+    adopt_drift(machine, REPO_CONFIG)
+
+    kept = list((machine / "config" / ".superseded").glob(
+        "statutory-calendar.*.yaml"))
+    assert len(kept) == 1
+    assert kept[0].read_text(encoding="utf-8") == original
+    assert "a comment that safe_dump will not keep" in \
+        kept[0].read_text(encoding="utf-8")
+    assert "a comment that safe_dump will not keep" not in \
+        path.read_text(encoding="utf-8")
+
+
+def test_a_label_difference_is_not_treated_as_two_decisions(machine):
+    """Identity is the `id`; `name` is how the row prints.
+
+    Reporting "Payroll tax" against "Payroll tax — return and
+    remittance" as two decisions disagreeing is technically true and
+    practically noise — and noise is what turns an adoption step into
+    homework nobody does. A wrong label is cosmetic; a wrong `rule` is
+    a missed filing, and only the second is protected.
+    """
+    path = machine / "config" / "statutory-calendar.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for row in data["obligations"]:
+        if row["id"] == "STAT-VAT":
+            row["name"] = "VAT"
+            row["owner"] = "someone.else@ubcsis.com"
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
+
+    adopt_drift(machine, REPO_CONFIG)
+
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
+    row = next(r for r in after["obligations"] if r["id"] == "STAT-VAT")
+    assert row["name"] == "VAT return and payment", "the label follows"
+    assert row["owner"] == "someone.else@ubcsis.com", \
+        "a real decision about who owns it does not"

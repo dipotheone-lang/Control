@@ -140,15 +140,66 @@ def _entry_key(entry, field_name: str | None) -> str:
     return str(entry)
 
 
-def config_drift(control_root: Path, template_config: Path) -> list[str]:
-    """What the template has that this machine's config does not.
+# A value that records no decision. Replacing one of these is not
+# overwriting a decision — it is filling a blank that was waiting for
+# the decision that has now arrived.
+_PLACEHOLDER_MARKERS = ("UNVERIFIED", "TO BE CONFIRMED", "TBC", "PENDING",
+                        "NOT PROVIDED", "TO BE SET")
 
-    Config is never overwritten, and that is right — a live file carries
-    decisions someone made, and a template would discard them. But
-    silence about the difference has its own failure: a machine set up
-    before a decision runs on the configuration from before it, forever,
-    with nothing saying so. That is how five clients added by CEO
-    decision can end up with less protection than was decided.
+
+# Fields that only decide how a row PRINTS. Identity is the `id`; a
+# `name` is a label. Reporting "Payroll tax" against "Payroll tax —
+# return and remittance" as two decisions disagreeing is technically
+# true and practically noise, and noise is what turns an adoption step
+# into homework nobody does. A wrong label is a cosmetic defect; a
+# wrong `rule` is a missed filing, and only the second is protected.
+_DISPLAY_FIELDS = {"name"}
+
+
+def _is_placeholder(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return True
+        upper = stripped.upper()
+        return any(marker in upper for marker in _PLACEHOLDER_MARKERS)
+    return False
+
+
+@dataclass(frozen=True)
+class Difference:
+    """One way this machine's config is behind the templates.
+
+    `adoptable` decides whether `adopt_drift` may close it, and the
+    three kinds are three different risks:
+
+    **Additive** — a key, a list entry or a field the local copy simply
+    does not have. Adding it cannot discard anything, because there is
+    nothing there to discard.
+
+    **Placeholder** — the local value records no decision:
+    `UNVERIFIED — CONFIRM WITH ADVISOR`, an empty string, a null.
+    Replacing it cannot revert a decision, because a placeholder is the
+    absence of one. This is the case that matters in practice: without
+    it, a machine adopts every field around a rule and the rule itself
+    still says UNVERIFIED, so nothing alerts and the adoption was
+    theatre.
+
+    **Conflict** — a real local value against a real template value.
+    Two decisions disagreeing. Never adopted; a human decides which is
+    current, and Control saying which would be Control deciding.
+    """
+
+    file: str
+    kind: str                 # key | entry | field | placeholder | conflict
+    text: str
+    adoptable: bool
+
+
+def differences(control_root: Path, template_config: Path) -> list[Difference]:
+    """Every way the live config is behind the templates, typed.
 
     Deliberately one-directional. A local file holding MORE than the
     template is the normal case — that is where decisions live — and is
@@ -158,7 +209,7 @@ def config_drift(control_root: Path, template_config: Path) -> list[str]:
 
     control_root = Path(control_root)
     template_config = Path(template_config)
-    drift: list[str] = []
+    out: list[Difference] = []
 
     for name in CONFIG_FILES:
         source, target = template_config / name, control_root / "config" / name
@@ -168,48 +219,97 @@ def config_drift(control_root: Path, template_config: Path) -> list[str]:
             template = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
             live = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
         except Exception as e:
-            drift.append(f"{name}: could not be compared ({str(e)[:60]})")
+            out.append(Difference(name, "unreadable",
+                                  f"{name}: could not be compared "
+                                  f"({str(e)[:60]})", False))
             continue
         if not isinstance(template, dict) or not isinstance(live, dict):
             continue
 
-        for key in template:
+        for key, value in template.items():
             if key not in live:
-                drift.append(f"{name}: key {key!r} is in the template and not "
-                             "in your copy")
+                out.append(Difference(
+                    name, "key",
+                    f"{name}: key {key!r} is in the template and not in "
+                    "your copy", True))
                 continue
-            if key in _NAMED_LISTS and isinstance(template[key], list) \
+
+            if key in _NAMED_LISTS and isinstance(value, list) \
                     and isinstance(live.get(key), list):
-                field_name = _NAMED_LISTS[key]
-                have = {_entry_key(e, field_name) for e in live[key]}
-                missing = [_entry_key(e, field_name) for e in template[key]
-                           if _entry_key(e, field_name) not in have]
-                # Fields added to a row that already exists. Reported,
-                # never adopted: overwriting a row is where a local
-                # decision would be lost, and `window_days: 7` arriving
-                # on a rule whose local copy says null is exactly the
-                # difference a machine must not close by itself.
-                by_key = {_entry_key(e, field_name): e for e in live[key]
-                          if isinstance(e, dict)}
-                for entry in template[key]:
-                    if not isinstance(entry, dict):
-                        continue
-                    local = by_key.get(_entry_key(entry, field_name))
-                    if local is None:
-                        continue
-                    new_fields = [f for f in entry if f not in local]
-                    if new_fields:
-                        drift.append(
-                            f"{name}: {key} entry "
-                            f"{_entry_key(entry, field_name)!r} gained "
-                            + ", ".join(sorted(new_fields))
-                            + " in the template — review and copy across by "
-                              "hand; a row is never overwritten for you")
-                if missing:
-                    drift.append(
-                        f"{name}: {key} is missing {len(missing)} entry(ies) "
-                        f"the template has — {', '.join(sorted(missing))}")
-    return drift
+                out += _list_differences(name, key, value, live[key])
+                continue
+
+            if value != live[key] and _is_placeholder(live[key]):
+                out.append(Difference(
+                    name, "placeholder",
+                    f"{name}: {key} is {live[key]!r} locally and "
+                    f"{value!r} in the template", True))
+            elif value != live[key] and not isinstance(value, (list, dict)):
+                out.append(Difference(
+                    name, "conflict",
+                    f"{name}: {key} is {live[key]!r} locally and "
+                    f"{value!r} in the template — two decisions, and "
+                    "which is current is yours to say", False))
+    return out
+
+
+def _list_differences(name: str, key: str, template_list: list,
+                      live_list: list) -> list[Difference]:
+    field_name = _NAMED_LISTS[key]
+    out: list[Difference] = []
+
+    have = {_entry_key(e, field_name) for e in live_list}
+    missing = [_entry_key(e, field_name) for e in template_list
+               if _entry_key(e, field_name) not in have]
+    if missing:
+        out.append(Difference(
+            name, "entry",
+            f"{name}: {key} is missing {len(missing)} entry(ies) the "
+            f"template has — {', '.join(sorted(missing))}", True))
+
+    by_key = {_entry_key(e, field_name): e for e in live_list
+              if isinstance(e, dict)}
+    for entry in template_list:
+        if not isinstance(entry, dict):
+            continue
+        local = by_key.get(_entry_key(entry, field_name))
+        if local is None:
+            continue
+        label = _entry_key(entry, field_name)
+        new_fields = sorted(f for f in entry if f not in local)
+        if new_fields:
+            out.append(Difference(
+                name, "field",
+                f"{name}: {key} entry {label!r} gained "
+                + ", ".join(new_fields) + " in the template", True))
+        for field_key, value in entry.items():
+            if field_key not in local or value == local[field_key]:
+                continue
+            if field_key in _DISPLAY_FIELDS:
+                out.append(Difference(
+                    name, "field",
+                    f"{name}: {key} entry {label!r} is named "
+                    f"{local[field_key]!r} locally and {value!r} in the "
+                    "template — a label, not a decision", True))
+            elif _is_placeholder(local[field_key]):
+                out.append(Difference(
+                    name, "placeholder",
+                    f"{name}: {key} entry {label!r} has {field_key} "
+                    f"{local[field_key]!r} locally, waiting for the "
+                    f"{value!r} the template now carries", True))
+            else:
+                out.append(Difference(
+                    name, "conflict",
+                    f"{name}: {key} entry {label!r} has {field_key} "
+                    f"{local[field_key]!r} locally and {value!r} in the "
+                    "template — two decisions, and which is current is "
+                    "yours to say", False))
+    return out
+
+
+def config_drift(control_root: Path, template_config: Path) -> list[str]:
+    """The differences as lines, for reporting. See `differences`."""
+    return [d.text for d in differences(control_root, template_config)]
 
 
 def render_drift(drift: list[str]) -> list[str]:
@@ -217,69 +317,134 @@ def render_drift(drift: list[str]) -> list[str]:
         return ["config matches the templates — no decisions left behind."]
     lines = [
         f"CONFIG BEHIND THE TEMPLATES — {len(drift)} difference(s).",
-        "Your files are never overwritten, because they carry decisions.",
         "These are things the templates gained that your copy has not:",
         "",
     ]
     lines += [f"  - {item}" for item in drift]
     lines += [
         "",
-        "Copy across what applies. A confidentiality list missing a client "
-        "gives that client less protection than was decided (§12.1.1).",
+        "A confidentiality list missing a client gives that client less "
+        "protection than was decided (§12.1.1).",
     ]
     return lines
 
 
+def _backup(target: Path) -> Path:
+    """Keep the file as it was, before changing it.
+
+    `yaml.safe_dump` does not preserve comments, so an adoption rewrites
+    a file that may carry a paragraph explaining why a value is what it
+    is. Losing that quietly would be its own version of the failure
+    this module exists to prevent.
+    """
+    from datetime import datetime
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    folder = target.parent / ".superseded"
+    folder.mkdir(exist_ok=True)
+    kept = folder / f"{target.stem}.{stamp}{target.suffix}"
+    shutil.copy2(target, kept)
+    return kept
+
+
 def adopt_drift(control_root: Path, template_config: Path,
                 only: str = "") -> list[str]:
-    """Add template entries the live config lacks. Never removes.
+    """Close every difference that cannot discard a decision.
 
-    Detection alone leaves the work as hand-editing YAML, which is the
-    friction that let the decision go missing in the first place. So the
-    additive half is offered as a step — but only the additive half.
+    Detection alone leaves the work as hand-editing YAML on a machine
+    where that is awkward enough not to happen — which is the same
+    friction that let the decision go missing in the first place. So
+    this closes what is safe to close, and only that.
 
-    Strictly one-directional: entries the template has and the live file
-    does not are appended; nothing local is changed, reordered or
-    removed, because that is where decisions live. Whole new config
-    KEYS are not touched either — a key absent locally may be absent
-    deliberately, and adding it silently would be the system deciding
-    something for a human. Those stay reported by `config_drift`.
+    Three things are adopted, and none of them can lose a decision:
+
+    - a key, entry or field the local copy does not have. Adding it
+      discards nothing, because nothing is there.
+    - a local value that records no decision — `UNVERIFIED`, empty,
+      null — where the template now carries a real one. A placeholder
+      is the absence of a decision, so replacing it reverts nothing.
+      **This is the case that makes the command worth running:** adopt
+      every field around a statutory rule and leave the rule itself
+      saying UNVERIFIED, and nothing alerts.
+
+    A real local value against a real template value is NOT adopted.
+    That is two decisions disagreeing, and Control saying which is
+    current would be Control deciding.
+
+    The file is copied to `config/.superseded/` before it is rewritten,
+    because `safe_dump` does not keep comments.
     """
     import yaml
 
     control_root = Path(control_root)
     template_config = Path(template_config)
-    added: list[str] = []
+    applied: list[str] = []
 
-    for name in CONFIG_FILES:
-        if only and name != only:
-            continue
-        source, target = template_config / name, control_root / "config" / name
-        if not source.is_file() or not target.is_file():
-            continue
+    pending = [d for d in differences(control_root, template_config)
+               if d.adoptable and (not only or d.file == only)]
+    by_file: dict[str, list[Difference]] = {}
+    for item in pending:
+        by_file.setdefault(item.file, []).append(item)
+
+    for name, items in by_file.items():
+        source = template_config / name
+        target = control_root / "config" / name
         template = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
         live = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
-        if not isinstance(template, dict) or not isinstance(live, dict):
-            continue
 
-        changed = False
-        for key, field_name in _NAMED_LISTS.items():
-            if not isinstance(template.get(key), list) \
-                    or not isinstance(live.get(key), list):
+        for key, value in template.items():
+            if key not in live:
+                live[key] = value
+                applied.append(f"{name}: key {key!r} added")
                 continue
-            have = {_entry_key(e, field_name) for e in live[key]}
-            for entry in template[key]:
-                if _entry_key(entry, field_name) not in have:
-                    live[key].append(entry)
-                    added.append(f"{name}: {key} += "
-                                 f"{_entry_key(entry, field_name)}")
-                    changed = True
+            if key in _NAMED_LISTS and isinstance(value, list) \
+                    and isinstance(live.get(key), list):
+                applied += _adopt_list(name, key, value, live[key])
+                continue
+            if value != live[key] and _is_placeholder(live[key]):
+                applied.append(
+                    f"{name}: {key} {live[key]!r} -> {value!r}")
+                live[key] = value
 
-        if changed:
-            target.write_text(
-                yaml.safe_dump(live, allow_unicode=True, sort_keys=False),
-                encoding="utf-8")
-    return added
+        kept = _backup(target)
+        target.write_text(
+            yaml.safe_dump(live, allow_unicode=True, sort_keys=False),
+            encoding="utf-8")
+        applied.append(f"{name}: previous version kept at "
+                       f"{kept.parent.name}/{kept.name}")
+    return applied
+
+
+def _adopt_list(name: str, key: str, template_list: list,
+                live_list: list) -> list[str]:
+    field_name = _NAMED_LISTS[key]
+    applied: list[str] = []
+
+    have = {_entry_key(e, field_name) for e in live_list}
+    by_key = {_entry_key(e, field_name): e for e in live_list
+              if isinstance(e, dict)}
+
+    for entry in template_list:
+        label = _entry_key(entry, field_name)
+        if label not in have:
+            live_list.append(entry)
+            applied.append(f"{name}: {key} += {label}")
+            continue
+        local = by_key.get(label)
+        if local is None:
+            continue
+        for field_key, value in entry.items():
+            if field_key not in local:
+                local[field_key] = value
+                applied.append(f"{name}: {key} {label} += {field_key}")
+            elif value != local[field_key] and (
+                    field_key in _DISPLAY_FIELDS
+                    or _is_placeholder(local[field_key])):
+                applied.append(
+                    f"{name}: {key} {label} {field_key} "
+                    f"{local[field_key]!r} -> {value!r}")
+                local[field_key] = value
+    return applied
 
 
 def adopt_key(control_root: Path, template_config: Path, spec: str) -> str:

@@ -585,23 +585,28 @@ def cmd_init(args) -> int:
     drift = config_drift(Path(args.control_root), template)
     if drift and args.adopt:
         added = adopt_drift(Path(args.control_root), template)
-        print(f"\nadopted {len(added)} missing entry(ies):")
+        print(f"\nadopted {len(added)} change(s):")
         for line in added:
             print(f"  + {line}")
         remaining = config_drift(Path(args.control_root), template)
         if remaining:
-            print("\nStill differing, and left for you — a whole config key "
-                  "may be absent on purpose,")
-            print("and adding one silently would be the system deciding "
-                  "something that is yours:")
+            print("\nLeft for you. Each of these is a real local value "
+                  "against a real template value —")
+            print("two decisions disagreeing, and yours may be the newer "
+                  "one. Control saying which is")
+            print("current would be Control deciding:")
             for line in remaining:
                 print(f"  - {line}")
+        else:
+            print("\nNothing left differing. Your config now carries every "
+                  "decision the templates hold.")
     elif drift:
         print()
         for line in render_drift(drift):
             print(line)
-        print("\nTo add the missing list entries (additive only, nothing "
-              "local is changed):")
+        print("\nTo close every difference that cannot discard a decision "
+              "— missing keys, entries and\nfields, and placeholder values "
+              "the templates now answer:")
         print(f"  python -m control init --adopt "
               f"--control-root \"{args.control_root}\"")
 
