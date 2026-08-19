@@ -150,6 +150,18 @@ obligations:
     rule: 30 days from event
     window_days: 30                     # counted from the event (B4)
     trigger: joiner or leaver
+    # B3. The HR roster obligation is what puts a joiner or leaver in
+    # front of Control. That makes it more than a class 3 report: it
+    # starts a statutory clock, so when it is overdue the consequence
+    # is stated in class 1 terms rather than waiting for the class 3
+    # ladder to reach the CEO at +5 working days.
+    #
+    # The id below is the one §3.3 describes ("Joiner and leaver updates
+    # are a class 3 obligation owned by HR"). It does not exist in
+    # `obligations.yaml` yet — that register is populated by Phase 0
+    # Stage D and approved by the CEO (§6) — and Control reports the
+    # link as unfulfilled rather than assuming it works.
+    registered_by_obligation: HR-ROSTER-001
     # No check_frequency. B1 specifies a daily check for the ETA
     # rejection window and says nothing about this one, and a 30-day
     # window is served by the §2.1 ladder (T-7, T-3, T-1, on the day).

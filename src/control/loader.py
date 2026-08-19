@@ -628,7 +628,9 @@ def load_for_cycle(config, conn, today: date, logs_dir=None) -> LoadResult:
     # purpose — their clock starts on an event, so there is no cadence
     # to compute from — and this is where the recorded events become
     # deadlines (execution order B1, B4).
-    from .events import build_event_items, observed_cadence_gaps
+    from .events import (
+        build_event_items, observed_cadence_gaps, registration_gaps,
+    )
 
     events, event_gaps = build_event_items(
         conn, config["statutory-calendar"], today)
@@ -662,6 +664,20 @@ def load_for_cycle(config, conn, today: date, logs_dir=None) -> LoadResult:
     result.class3_state = build_class3_state(
         conn, class3, today,
         {oid: s.period for oid, s in specs.items()})
+
+    # B3, and it needs both halves of what this function just built: the
+    # approved register, and which of it is overdue. An event window is
+    # only as good as whatever puts the event in front of Control, and
+    # for the headcount declaration that is HR's roster obligation — so
+    # an overdue roster is a class 1 consequence, not a late report.
+    overdue = {
+        item.item_id for item in class3
+        if item.due < today
+        and not getattr(result.class3_state.get(item.item_id),
+                        "submitted", False)
+    }
+    result.gaps += registration_gaps(
+        config["statutory-calendar"], set(specs), overdue)
     return result
 
 

@@ -126,6 +126,62 @@ def open_events(conn) -> list[OpenEvent]:
     ) for r in rows]
 
 
+def registration_gaps(statutory_config: dict | None,
+                      approved_obligations: set,
+                      overdue_obligations: set) -> list[str]:
+    """Whether anything ensures an event ever gets registered — B3.
+
+    An event window only counts events somebody entered. For the social
+    insurance headcount declaration the entering is done by HR's roster
+    obligation, and B3's point is that the roster is not merely a class
+    3 report: it starts a statutory clock. An overdue roster update is
+    therefore not "a report is late" — it is "a joiner or leaver may
+    have started a 30-day statutory clock that nothing is counting".
+
+    Two states are reported, and they are different failures:
+
+    **The registering obligation is not in the approved register.** Then
+    nothing at all ensures joiners reach Control, and an empty event
+    register means nothing. This is the state today: `obligations.yaml`
+    is populated by Phase 0 Stage D and approved by the CEO (§6), and
+    until that happens the link exists in configuration and nowhere else.
+
+    **It is approved and overdue.** Then the window may be running
+    unregistered, and the consequence is class 1 — so it is said in
+    class 1 terms rather than waiting for the class 3 ladder to reach
+    the CEO at +5 working days.
+
+    Control cannot know whether a joiner actually occurred. It says so:
+    the finding is conditional, because asserting an unregistered event
+    would be inventing one (§1.1).
+    """
+    gaps: list[str] = []
+    for obligation_id, rule in _window_rules(statutory_config).items():
+        registrar = rule.get("registered_by_obligation")
+        if not registrar:
+            continue
+        window = rule.get("window_days")
+        if registrar not in approved_obligations:
+            gaps.append(
+                f"{obligation_id}: its events are registered by "
+                f"{registrar}, which is not in the approved obligation "
+                "register (§6). Nothing currently ensures a joiner or "
+                "leaver reaches Control, so an empty event register for "
+                "this obligation is not evidence that no event occurred "
+                "(B3, §1.1).")
+            continue
+        if registrar in overdue_obligations:
+            gaps.append(
+                f"CLASS 1 CONSEQUENCE: {registrar} is overdue, and it is "
+                f"what registers {obligation_id} events. If any joiner or "
+                "leaver occurred in the period it covers, a "
+                f"{window}-day statutory clock is running and Control is "
+                "not counting it (B3). This is raised now rather than at "
+                "the class 3 ladder's L3, because the item at risk is "
+                "class 1 and class 1 goes to the CEO the same day (§2.1).")
+    return gaps
+
+
 def observed_cadence_gaps(logs_dir, statutory_config: dict | None, conn,
                           today: date) -> list[str]:
     """Did Control actually run often enough for these windows? — B1.

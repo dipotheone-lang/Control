@@ -377,3 +377,85 @@ def test_existing_rows_survive_a_schema_addition(tmp_path):
         assert [e.row_id for e in open_events(conn)] == [event_id]
     finally:
         conn.close()
+
+
+# ---- B3: the roster is a statutory trigger, not just a report ---------
+
+REGISTERED = {"obligations": [
+    {"id": "STAT-SI-HEADCOUNT", "name": "SI headcount declaration",
+     "owner": "accounts@ubcsis.com", "mechanism": "event_window",
+     "window_days": 30, "registered_by_obligation": "HR-ROSTER-001"},
+    {"id": "STAT-ETA-REJ", "name": "ETA rejection clearance",
+     "owner": "accounts@ubcsis.com", "mechanism": "event_window",
+     "window_days": 7},
+]}
+
+
+def test_an_unapproved_registrar_means_an_empty_register_proves_nothing():
+    """The state today: `obligations.yaml` is populated by Stage D and
+    approved by the CEO (§6), so the link exists in configuration and
+    nowhere else. Reporting silence as compliance is the failure §1.1
+    names."""
+    from control.events import registration_gaps
+
+    gaps = registration_gaps(REGISTERED, approved_obligations=set(),
+                             overdue_obligations=set())
+    line = next(g for g in gaps if g.startswith("STAT-SI-HEADCOUNT"))
+    assert "not in the approved obligation register" in line
+    assert "is not evidence that no event occurred" in line
+
+
+def test_an_overdue_registrar_is_a_class_1_consequence():
+    """B3's point. An overdue roster is not "a report is late" — it is
+    "a 30-day statutory clock may be running and nothing is counting
+    it", and class 1 goes to the CEO the same day."""
+    from control.events import registration_gaps
+
+    gaps = registration_gaps(REGISTERED, {"HR-ROSTER-001"}, {"HR-ROSTER-001"})
+    line = next(g for g in gaps if "CLASS 1 CONSEQUENCE" in g)
+    assert "30-day statutory clock is running" in line
+    assert "rather than at the class 3 ladder's L3" in line
+    # Conditional, because Control cannot know a joiner occurred.
+    assert "If any joiner or leaver occurred" in line
+
+
+def test_an_approved_registrar_that_is_current_raises_nothing():
+    from control.events import registration_gaps
+
+    assert registration_gaps(REGISTERED, {"HR-ROSTER-001"}, set()) == []
+
+
+def test_a_window_with_no_registrar_is_not_invented_one():
+    """STAT-ETA-REJ has no registering obligation — its rejections
+    arrive from ETA, not from an internal report — and inventing a link
+    would point the CEO at a control that does not exist (§1.3)."""
+    from control.events import registration_gaps
+
+    gaps = registration_gaps(REGISTERED, set(), set())
+    assert not [g for g in gaps if "STAT-ETA-REJ" in g]
+
+
+def test_the_shipped_calendar_names_the_registrar_for_the_headcount():
+    data = yaml.safe_load(
+        (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
+    row = next(r for r in data["obligations"] if r["id"] == "STAT-SI-HEADCOUNT")
+    assert row["registered_by_obligation"] == "HR-ROSTER-001"
+
+
+def test_the_b3_finding_reaches_the_weekly_report(tmp_path, capsys):
+    import shutil
+
+    from control.__main__ import main
+
+    control_root = tmp_path / "UB" / "CONTROL"
+    for name in ("data", "logs", "outbox/pending-approval", "outbox/sent",
+                 "reports/management"):
+        (control_root / name).mkdir(parents=True, exist_ok=True)
+    shutil.copytree(REPO_CONFIG, control_root / "config")
+
+    main(["report", "--control-root", str(control_root), "--ub-root",
+          str(control_root.parent), "--run-mode", "DRY_RUN",
+          "--learning-mode", "OBSERVE", "--as-of", "2026-08-20"])
+    out = capsys.readouterr().out
+    assert "registered by HR-ROSTER-001" in out
+    assert "not evidence that no event occurred" in out
