@@ -222,12 +222,13 @@ def test_disagreements_come_first_in_the_document(rules, statutory):
 
 
 def test_no_disagreement_is_not_reported_as_a_clean_bill(rules, statutory):
-    """§1.1. An archive that held too little to contradict anything and
-    an archive that confirmed everything look identical in a count and
-    must not read identically on the page."""
+    """§1.1. "The archive agreed" and "the archive could not be asked"
+    produce the same empty section, and must not read the same."""
     text = render_brief(statutory, {}, [], [], "test", 0, TODAY)
     assert "This is not a clean bill" in text
-    assert "did not contradict the stated rules" in text
+    assert "could not be asked" in text
+    # And each silent obligation says why it was silent.
+    assert "no filing evidence matched at all" in text
 
 
 def test_the_brief_states_what_it_cannot_tell_you(rules, statutory):
@@ -319,3 +320,86 @@ def test_a_marker_followed_by_digits_still_matches(rules):
     to reject it would lose filings to punctuation habits."""
     found = scan_paths(["E:/UB/Tax/VAT2026-01.pdf"], rules)
     assert [e.obligation_id for e in found] == ["STAT-VAT"]
+
+
+# ---- the blindness that made "no disagreement" meaningless ------------
+
+def test_quarterly_named_filings_are_compared_as_quarters(rules, statutory):
+    """The defect this pins ran against the real archive and reported
+    "No disagreement" — which was a fact about the naming convention,
+    not about the company.
+
+    The comparison only ever looked at monthly periods. An obligation
+    whose filings are named "Q1 2025" had no monthly periods at all, so
+    nothing could contradict its stated cadence and the brief came back
+    clean. The order's single highest-value test would have returned
+    silence and been read as agreement.
+    """
+    paths = [f"E:/UB/Tax/Payroll tax Q{q} {y}.pdf"
+             for y in (2023, 2024, 2025, 2026) for q in (1, 2, 3, 4)]
+    record = observe(scan_paths(paths, rules))["STAT-PAYROLL"]
+    assert record.granularity == QUARTERLY
+    assert record.complete_years == {2024: 4, 2025: 4}
+    # Four quarterly filings a year agree with a quarterly rule.
+    assert disagreements(statutory, observe(scan_paths(paths, rules))) == []
+
+
+def test_eight_quarterly_periods_in_a_year_contradict_a_quarterly_rule(
+        rules, statutory):
+    """Impossible at that granularity, and now visible. Before, only a
+    monthly count could contradict anything."""
+    paths = ([f"E:/UB/Tax/Payroll tax Q{q} {y}.pdf"
+              for y in (2023, 2026) for q in (1, 2, 3, 4)]
+             + [f"E:/UB/Tax/Payroll tax Q{q} {y} part{p}.pdf"
+                for y in (2024, 2025) for q in (1, 2, 3, 4) for p in (1, 2)])
+    found = disagreements(statutory, observe(scan_paths(paths, rules)))
+    assert found == [], "duplicate copies of the same quarter are one period"
+
+
+def test_an_annual_rule_is_not_corroborated_by_monthly_coincidence(
+        rules, statutory):
+    """One monthly-dated document a year "matched" an annual cadence of
+    one a year, and the brief offered a provenance upgrade on it. Like
+    is now compared with like."""
+    paths = [f"E:/UB/Legal/commercial register {y}-{y % 12 + 1:02d}.pdf"
+             for y in (2021, 2022, 2023, 2024, 2025, 2026)]
+    observed = observe(scan_paths(paths, rules))
+    assert observed["STAT-REG"].granularity == MONTHLY
+    assert upgrade_candidates(statutory, observed, []) == []
+
+
+def test_an_annual_rule_is_corroborated_by_annual_filings(rules, statutory):
+    paths = [f"E:/UB/Legal/commercial register renewal {y}.pdf"
+             for y in range(2019, 2027)]
+    observed = observe(scan_paths(paths, rules))
+    assert observed["STAT-REG"].granularity == ANNUAL
+    candidate = next(c for c in upgrade_candidates(statutory, observed, [])
+                     if c["id"] == "STAT-REG")
+    assert "annual period(s)" in candidate["evidence"]
+
+
+def test_the_brief_says_which_obligations_could_not_be_asked(rules, statutory):
+    """"The archive agreed" and "the archive could not be asked" produce
+    the same empty disagreements section."""
+    from control.extraction import silent_obligations
+
+    paths = [f"E:/UB/Tax/VAT {y}-{m:02d}.pdf"
+             for y in (2023, 2024, 2025, 2026) for m in range(1, 13)]
+    observed = observe(scan_paths(paths, rules))
+    notes = silent_obligations(statutory, observed)
+    assert any(n.startswith("STAT-PAYROLL") and "no filing evidence" in n
+               for n in notes)
+    # VAT was asked, so it is not on the list.
+    assert not [n for n in notes if n.startswith("STAT-VAT")]
+
+
+def test_a_granularity_mismatch_says_so_rather_than_reading_as_agreement(
+        rules, statutory):
+    from control.extraction import silent_obligations
+
+    paths = [f"E:/UB/Tax/Payroll tax {y}.pdf" for y in range(2019, 2027)]
+    observed = observe(scan_paths(paths, rules))
+    note = next(n for n in silent_obligations(statutory, observed)
+                if n.startswith("STAT-PAYROLL"))
+    assert "stated quarterly, but the filings are named by year" in note
+    assert "cannot confirm a quarterly rule" in note

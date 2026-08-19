@@ -1515,9 +1515,16 @@ def cmd_extract_brief(args) -> int:
               "deadlines in Tier C — raised for a human decision, never "
               "changed by the system.")
     else:
-        print("\nNo disagreement between the archive and the stated rules. "
-              "That is not a clean bill — see section 3 for what the "
-              "archive held too little to say anything about.")
+        silent = ex.silent_obligations(statutory, observed)
+        checked = len([r for r in (statutory or {}).get("obligations") or []
+                       if ex.STATED_CADENCE_PERIODS.get(
+                           str(r.get("cadence") or "").lower())]) - len(silent)
+        print(f"\nNo disagreement — but only {checked} obligation(s) could "
+              "actually be asked. \"The archive agreed\" and \"the archive "
+              "could not be asked\"\nlook identical in an empty section, so "
+              "here is which:")
+        for note in silent:
+            print(f"  - {note}")
 
     if candidates:
         print(f"\n{len(candidates)} rule(s) corroborated by the filings, "

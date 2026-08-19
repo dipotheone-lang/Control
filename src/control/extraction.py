@@ -141,19 +141,39 @@ class Observed:
         return dict(counts)
 
     @property
-    def complete_years(self) -> dict[int, int]:
-        """Monthly-period counts for years the archive plausibly covers.
+    def granularity(self) -> str | None:
+        """How this archive names its periods — month, quarter or year.
+
+        The comparison used to look at monthly periods only, which made
+        it blind in a way that produced a confident wrong answer: an
+        obligation whose filings are named "Q1 2025" or "2025" had no
+        monthly periods at all, so nothing could contradict its stated
+        cadence and the brief reported no disagreement. That is a fact
+        about the naming convention, not about the company.
+        """
+        counted = {kind: sum(len(y) for y in [self.per_year(kind)])
+                   for kind in (MONTHLY, QUARTERLY, ANNUAL)}
+        best = max(counted, key=lambda k: counted[k])
+        return best if counted[best] else None
+
+    def interior_years(self, kind: str) -> dict[int, int]:
+        """Period counts for years the archive plausibly covers in full.
 
         A year is only evidence about cadence if the archive holds the
         span. The first and last years of any collection are usually
         partial, so they are reported but never used to contradict a
         stated rule on their own.
         """
-        monthly = self.per_year(MONTHLY)
-        if len(monthly) <= 2:
-            return monthly
-        interior = sorted(monthly)[1:-1]
-        return {year: monthly[year] for year in interior}
+        counts = self.per_year(kind)
+        if len(counts) <= 2:
+            return counts
+        return {year: counts[year] for year in sorted(counts)[1:-1]}
+
+    @property
+    def complete_years(self) -> dict[int, int]:
+        """Interior years at whatever granularity the archive uses."""
+        kind = self.granularity
+        return self.interior_years(kind) if kind else {}
 
 
 def compile_marker(marker: str):
@@ -245,6 +265,16 @@ def observe(evidence: list[Evidence]) -> dict[str, Observed]:
 
 STATED_CADENCE_PERIODS = {"monthly": 12, "quarterly": 4, "annual": 1}
 
+# The granularity that can CORROBORATE each cadence. A quarterly rule is
+# corroborated by quarterly filings; twelve monthly ones contradict it,
+# and one annual folder says nothing either way.
+CADENCE_GRANULARITY = {"monthly": MONTHLY, "quarterly": QUARTERLY,
+                       "annual": ANNUAL}
+
+# How many periods of a given granularity fit in a year — used to turn
+# an observed count into a comparable one.
+PER_YEAR = {MONTHLY: 12, QUARTERLY: 4, ANNUAL: 1}
+
 
 @dataclass(frozen=True)
 class Disagreement:
@@ -278,8 +308,12 @@ def disagreements(statutory_config: dict | None,
         # every year that contradicts: a paragraph repeated once per
         # year says nothing the first one did not, and a reader who
         # skims the second stops reading the section.
+        kind = record.granularity
+        if kind is None:
+            continue
         offending = {year: count
-                     for year, count in sorted(record.complete_years.items())
+                     for year, count in sorted(
+                         record.interior_years(kind).items())
                      if count > expected}
         if not offending:
             continue
@@ -290,8 +324,9 @@ def disagreements(statutory_config: dict | None,
             obligation_id=obligation_id,
             stated=f"{cadence} — {expected} period(s) a year "
                    f"({row.get('decision') or 'no decision recorded'})",
-            observed=(f"{len(offending)} full year(s) hold more monthly "
-                      f"periods than that — {years}"),
+            observed=(f"{len(offending)} full year(s) hold more "
+                      f"{kind}ly periods than that — {years}".replace(
+                          "yearly", "annual")),
             consequence=(
                 f"the stated cadence is wrong and about {missing} "
                 f"obligation(s) a year are missing from the register for "
@@ -335,7 +370,14 @@ def upgrade_candidates(statutory_config: dict | None,
         expected = STATED_CADENCE_PERIODS.get(cadence)
         if expected is None:
             continue
-        counts = record.complete_years
+        # Like for like. An annual rule is corroborated by filings named
+        # by year, not by however many happen to carry a month — which
+        # let one monthly-dated document per year "corroborate" an
+        # annual cadence by coincidence.
+        wanted = CADENCE_GRANULARITY[cadence]
+        if record.granularity != wanted:
+            continue
+        counts = record.interior_years(wanted)
         if not counts or any(c != expected for c in counts.values()):
             continue
         candidates.append({
@@ -343,8 +385,9 @@ def upgrade_candidates(statutory_config: dict | None,
             "from": "ceo_stated",
             "to": "document_evidenced",
             "evidence": (
-                f"{len(record.periods)} distinct period(s) across "
-                f"{len(record.years)} year(s); "
+                f"{len(record.periods)} distinct {wanted}ly period(s) "
+                f"across {len(record.years)} year(s); ".replace(
+                    "yearly", "annual")
                 + ", ".join(f"{year}: {count}" for year, count
                             in sorted(counts.items()))
                 + f" — matching the stated {cadence} cadence"),
@@ -387,6 +430,53 @@ def walk_paths(ub_root: Path) -> list[str]:
 
 # ---- the brief --------------------------------------------------------
 
+def silent_obligations(statutory_config: dict | None,
+                       observed: dict) -> list[str]:
+    """Obligations the archive could not speak about, and why.
+
+    "No disagreement" has two completely different causes: the archive
+    agreed, or the archive could not be asked. A brief that printed the
+    same sentence for both would be reporting a naming convention as
+    evidence — which is the failure §1.1 exists to prevent, wearing the
+    clothes of a clean result.
+    """
+    notes = []
+    for row in (statutory_config or {}).get("obligations") or []:
+        obligation_id = str(row.get("id") or "")
+        cadence = str(row.get("cadence") or "").lower()
+        expected = STATED_CADENCE_PERIODS.get(cadence)
+        if expected is None:
+            continue
+        record = observed.get(obligation_id)
+        if record is None:
+            notes.append(f"{obligation_id}: no filing evidence matched at "
+                         "all — nothing could be checked")
+            continue
+        kind = record.granularity
+        if kind is None:
+            notes.append(
+                f"{obligation_id}: {record.documents} document(s), none "
+                "naming a period — nothing could be counted")
+            continue
+        interior = record.interior_years(kind)
+        if not interior:
+            notes.append(
+                f"{obligation_id}: {len(record.periods)} {kind}ly "
+                f"period(s), but no year the archive covers in full — a "
+                "partial year cannot contradict a cadence".replace(
+                    "yearly", "annual"))
+            continue
+        wanted = CADENCE_GRANULARITY[cadence]
+        if kind != wanted:
+            notes.append(
+                f"{obligation_id}: stated {cadence}, but the filings are "
+                f"named by {kind}. A {kind}ly count cannot confirm a "
+                f"{cadence} rule, and could only contradict it by "
+                f"exceeding {expected} a year — it does not.".replace(
+                    "yearly", "annual"))
+    return notes
+
+
 def render_brief(statutory_config: dict | None,
                  observed: dict[str, Observed],
                  disagreeing: list[Disagreement],
@@ -428,11 +518,17 @@ def render_brief(statutory_config: dict | None,
             "None. No obligation shows more filed periods in a year than "
             "its stated cadence allows.",
             "",
-            "This is not a clean bill. It means the archive did not "
-            "contradict the stated rules — including where it held too "
-            "little to contradict anything. Section 3 says which.",
+            "**This is not a clean bill**, and the difference matters: "
+            "\"the archive agreed\" and \"the archive could not be asked\" "
+            "produce the same empty section. The list below says which "
+            "obligations are which.",
             "",
         ]
+        silent = silent_obligations(statutory_config, observed)
+        if silent:
+            lines += ["Could not be asked:", ""]
+            lines += [f"- {note}" for note in silent]
+            lines.append("")
     else:
         for item in disagreeing:
             lines += [
