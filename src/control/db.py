@@ -35,6 +35,8 @@ APPEND_ONLY = (
     "registers_accreditations",
     "registers_quotations",
     "registers_tenders",
+    "statutory_events",
+    "statutory_event_closures",
 )
 
 # SQLite grammar: all column definitions must precede table-level CHECKs,
@@ -325,6 +327,46 @@ CREATE TABLE IF NOT EXISTS registers_tenders (
     {_PROVENANCE_CHECK}
 );
 
+-- Event-driven statutory windows (§2.1; execution order B1, B4).
+--
+-- Some class 1 deadlines have no cadence at all: the clock starts when
+-- something happens. ETA rejects an invoice and seven days begin; an
+-- employee joins or leaves and thirty days begin. There is no date to
+-- compute until the event exists, so these obligations are tracked from
+-- here rather than from the calendar.
+--
+-- `event_date` and `registered_at` are separate columns on purpose, and
+-- the deadline is computed from `event_date` (B4). HR registering a
+-- joiner five working days after the fact consumes five days of the
+-- thirty; computing from the registration date would hide exactly that
+-- erosion and report a comfortable thirty-day window that does not
+-- exist.
+CREATE TABLE IF NOT EXISTS statutory_events (
+    id INTEGER PRIMARY KEY,
+    obligation_id TEXT NOT NULL,
+    event_type    TEXT NOT NULL,
+    event_date    TEXT NOT NULL,
+    registered_at TEXT NOT NULL,
+    reference     TEXT,
+    -- MANUAL means a human entered it because Control cannot see the
+    -- mailbox it arrives in (M1). That is a coverage fact, not a
+    -- formality, and it is reported as one.
+    detection     TEXT NOT NULL CHECK (detection IN ('MANUAL','OBSERVED')),
+    {_PROVENANCE}
+);
+
+-- The clock stopping. A separate table rather than a column, because
+-- the events table is append-only and a discharge is not a correction
+-- of the event — the event happened and the record of it stays true.
+CREATE TABLE IF NOT EXISTS statutory_event_closures (
+    id INTEGER PRIMARY KEY,
+    event_id      INTEGER NOT NULL,
+    discharged_on TEXT NOT NULL,
+    declared_by   TEXT NOT NULL,
+    reference     TEXT,
+    {_PROVENANCE}
+);
+
 CREATE TABLE IF NOT EXISTS period_locks (
     id INTEGER PRIMARY KEY,
     period TEXT NOT NULL,
@@ -353,8 +395,32 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def init_db(db_path: Path) -> sqlite3.Connection:
-    conn = connect(db_path)
+def _tables(conn: sqlite3.Connection) -> set[str]:
+    return {row[0] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+
+def ensure_schema(conn: sqlite3.Connection) -> list[str]:
+    """Create anything missing. Returns the names of tables it added.
+
+    Every statement in SCHEMA is `IF NOT EXISTS`, so this is safe to run
+    against a live database and is how a table added after a deployment
+    reaches one that already exists.
+
+    It has to be run on every open, not only at creation. Running it
+    only when the file was absent meant a schema addition never arrived
+    on a database already in the field: the code expected a table the
+    running system did not have, and the first query against it failed
+    at the point of use rather than at startup. The event register is
+    the addition that found this.
+
+    Nothing here can destroy data — there is no ALTER, no DROP, and the
+    append-only triggers are `IF NOT EXISTS` too. A column added to an
+    existing table would NOT arrive this way, and would need a stated
+    migration; §5.2's append-only rule means such a change is a new
+    table far more often than an altered one.
+    """
+    before = _tables(conn)
     conn.executescript(SCHEMA)
     for table in APPEND_ONLY:
         conn.executescript(_append_only_triggers(table))
@@ -367,6 +433,12 @@ def init_db(db_path: Path) -> sqlite3.Connection:
         " VALUES ('charter_version', ?)", (CHARTER_VERSION,)
     )
     conn.commit()
+    return sorted(_tables(conn) - before)
+
+
+def init_db(db_path: Path) -> sqlite3.Connection:
+    conn = connect(db_path)
+    ensure_schema(conn)
     return conn
 
 

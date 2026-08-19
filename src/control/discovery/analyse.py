@@ -18,7 +18,7 @@ absent rather than estimated (§1.1).
 import json
 import re
 import statistics
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -82,6 +82,13 @@ class ObligationCandidate:
     per_active_day: float = 0.0
     pattern_kind: str = "RECURRING"      # RECURRING | BULK | THREAD
     reply_ratio: float = 0.0
+    # When it actually arrives, from the timestamps. §6 Stage D asks for
+    # "observed cadence measured from timestamps", and a due expression
+    # has to name a day — so the modal weekday and day-of-month are
+    # carried here as OBSERVATIONS, never as decisions.
+    modal_weekday: str = ""
+    modal_day_of_month: int = 0
+    modal_hour: int = 0
 
 
 def _cadence_for(gap: float | None) -> str:
@@ -91,6 +98,22 @@ def _cadence_for(gap: float | None) -> str:
         if low <= gap <= high:
             return name
     return f"irregular (~{gap:.0f}d)"
+
+
+def _modal(values):
+    """The most common value, or None if there is no clear winner.
+
+    A tie is no answer: two equally common submission days means the
+    obligation has no observed day, and inventing one would put a
+    deadline in the register that nobody agreed to (§1.1).
+    """
+    if not values:
+        return None
+    counts = Counter(values)
+    ranked = counts.most_common(2)
+    if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
+        return None
+    return ranked[0][0]
 
 
 def infer_obligations(rows: list[dict], *, min_occurrences: int = 3
@@ -181,6 +204,10 @@ def infer_obligations(rows: list[dict], *, min_occurrences: int = 3
             pattern_kind=("BULK" if is_bulk
                           else "THREAD" if is_thread else "RECURRING"),
             reply_ratio=round(reply_ratio, 2),
+            modal_weekday=_modal(
+                [t.strftime("%A").lower() for t in times]) or "",
+            modal_day_of_month=int(_modal([t.day for t in times]) or 0),
+            modal_hour=int(_modal([t.hour for t in times]) or 0),
         ))
 
     order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}

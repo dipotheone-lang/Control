@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass, field
 from email.utils import parseaddr
 
+from .hse import HSE_INCIDENT
+
 INTERNAL_DOMAIN = "ubcsis.com"
 PEER_ADDRESS = "elevate@ubcsis.com"
 BACKUP_ADDRESS = "contact.ubcsis@gmail.com"
@@ -86,6 +88,10 @@ class Classification:
     confidential: bool = False
     security_event: bool = False
     flags: list[str] = field(default_factory=list)
+    # Which decision imposes metadata-only handling, when one does.
+    # "CONFIDENTIAL_CLIENT" (D-01) or "HSE_INCIDENT" (D-17, D-18) — the
+    # same reduced check set for opposite reasons (§12.1.3, B5).
+    restricted_basis: str = ""
 
 
 class Classifier:
@@ -95,12 +101,19 @@ class Classifier:
         obligation_forms: dict[str, str] | None = None,
         confidential_domains: set[str] | None = None,
         known_domains: set[str] | None = None,
+        hse_scope=None,
+        hse_senders: set[str] | None = None,
     ):
         self.roster = {e.lower() for e in roster_emails}
         self.obligation_forms = {k.lower(): v for k, v in (obligation_forms or {}).items()}
         self.confidential_domains = {d.lower() for d in (confidential_domains or set())}
         # Domains we correspond with legitimately — the near-miss reference set.
         self.known_domains = {d.lower() for d in (known_domains or set())} | {INTERNAL_DOMAIN}
+        # B5: the HSE split. `hse_senders` is who the function reports
+        # from — an "incident" in a procurement thread is not a health
+        # record, so the split is applied only to HSE traffic.
+        self.hse_scope = hse_scope
+        self.hse_senders = {e.lower() for e in (hse_senders or set())}
 
     # -- helpers -----------------------------------------------------------
 
@@ -136,7 +149,16 @@ class Classifier:
 
         if domain in self.confidential_domains:
             result.confidential = True
+            result.restricted_basis = "CONFIDENTIAL_CLIENT"
             result.flags.append(f"confidential client domain: {domain} (§12.1.1)")
+        elif self.hse_scope is not None and email in self.hse_senders:
+            verdict = self.hse_scope.classify(msg.subject, msg.attachments)
+            if verdict.restricted:
+                result.confidential = True
+                result.restricted_basis = HSE_INCIDENT
+                result.flags.append(f"HSE: {verdict.reason}")
+            else:
+                result.flags.append(f"HSE: {verdict.reason}")
 
         # Security events outrank every routine category.
         near = self._near_miss(domain)

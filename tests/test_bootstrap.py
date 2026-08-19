@@ -84,3 +84,79 @@ def test_render_names_the_backup_obligation(tmp_path):
     text = render_result(result)
     assert "not in git" in text
     assert "Back it up" in text
+
+
+def test_the_new_optional_configs_are_installed(tmp_path):
+    """`hse.yaml` and `filing-evidence.yaml` are optional to `config.py`
+    — their absence is fail-safe rather than a §5.6 halt — but a machine
+    that never receives them runs the restrictive default forever with
+    nothing saying why."""
+    from control.bootstrap import bootstrap
+
+    repo_config = Path(__file__).resolve().parent.parent / "config"
+    root = tmp_path / "CONTROL"
+    bootstrap(root, repo_config)
+    assert (root / "config" / "hse.yaml").is_file()
+    assert (root / "config" / "filing-evidence.yaml").is_file()
+
+
+def test_a_statutory_row_added_to_the_template_is_reported(tmp_path):
+    """The gap this closes was live on a real machine: the file existed,
+    so bootstrap "kept" it, and the twelve class 1 rows the CEO stated
+    were never compared against the local copy at all."""
+    import yaml
+
+    from control.bootstrap import adopt_drift, bootstrap, config_drift
+
+    repo_config = Path(__file__).resolve().parent.parent / "config"
+    root = tmp_path / "CONTROL"
+    bootstrap(root, repo_config)
+
+    live = root / "config" / "statutory-calendar.yaml"
+    data = yaml.safe_load(live.read_text(encoding="utf-8"))
+    data["obligations"] = [r for r in data["obligations"]
+                           if r["id"] != "STAT-ETA-REJ"]
+    live.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+
+    drift = config_drift(root, repo_config)
+    assert any("STAT-ETA-REJ" in line for line in drift)
+
+    added = adopt_drift(root, repo_config)
+    assert any("STAT-ETA-REJ" in line for line in added)
+    restored = yaml.safe_load(live.read_text(encoding="utf-8"))
+    assert any(r["id"] == "STAT-ETA-REJ" for r in restored["obligations"])
+
+
+def test_a_field_added_to_an_existing_row_is_adopted(tmp_path):
+    """This test used to assert the opposite.
+
+    The reasoning was that a row carries decisions and overwriting one
+    is where they get lost. True of overwriting; false of adding. A
+    field the local row does not have discards nothing, and refusing to
+    add it meant a real machine adopted every field around a statutory
+    rule while the rule itself still said UNVERIFIED — so nothing
+    alerted, and the adoption was theatre.
+    """
+    import yaml
+
+    from control.bootstrap import adopt_drift, bootstrap, config_drift
+
+    repo_config = Path(__file__).resolve().parent.parent / "config"
+    root = tmp_path / "CONTROL"
+    bootstrap(root, repo_config)
+
+    live = root / "config" / "statutory-calendar.yaml"
+    data = yaml.safe_load(live.read_text(encoding="utf-8"))
+    for row in data["obligations"]:
+        if row["id"] == "STAT-ETA-REJ":
+            row.pop("window_days")
+    live.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+
+    drift = config_drift(root, repo_config)
+    line = next(l for l in drift if "STAT-ETA-REJ" in l and "gained" in l)
+    assert "window_days" in line
+
+    adopt_drift(root, repo_config)
+    after = yaml.safe_load(live.read_text(encoding="utf-8"))
+    row = next(r for r in after["obligations"] if r["id"] == "STAT-ETA-REJ")
+    assert row["window_days"] == 7

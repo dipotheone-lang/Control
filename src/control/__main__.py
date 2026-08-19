@@ -67,6 +67,13 @@ def _startup(args):
           f"RUN_MODE={report.state.run_mode}, LEARNING_MODE={report.state.learning_mode}")
     print(f"open disputes: {report.open_disputes} | open threads: {report.open_threads} | "
           f"active absences: {report.active_absences}")
+    if report.schema_added:
+        # A schema change applied to a database already in the field is
+        # not a routine event, and it is not something to discover from
+        # a crash three commands later.
+        print(f"schema: created {', '.join(report.schema_added)} — the code "
+              "was newer than this database. Existing rows are untouched "
+              "(§5.2); the addition is in the audit log.")
     return report
 
 
@@ -577,24 +584,35 @@ def cmd_init(args) -> int:
     # machine was set up would otherwise never arrive.
     drift = config_drift(Path(args.control_root), template)
     if drift and args.adopt:
-        added = adopt_drift(Path(args.control_root), template)
-        print(f"\nadopted {len(added)} missing entry(ies):")
+        added = adopt_drift(Path(args.control_root), template,
+                            accept_template=args.accept_template)
+        print(f"\nadopted {len(added)} change(s):")
         for line in added:
             print(f"  + {line}")
         remaining = config_drift(Path(args.control_root), template)
         if remaining:
-            print("\nStill differing, and left for you — a whole config key "
-                  "may be absent on purpose,")
-            print("and adding one silently would be the system deciding "
-                  "something that is yours:")
+            print("\nLeft for you. Each of these is a real local value "
+                  "against a real template value —")
+            print("two decisions disagreeing, and yours may be the newer "
+                  "one. Control saying which is")
+            print("current would be Control deciding:")
             for line in remaining:
                 print(f"  - {line}")
+            print("\nIf the template side is the current decision, take it "
+                  "for that file in one step:")
+            for name in sorted({line.split(":")[0] for line in remaining}):
+                print(f"  python -m control init --adopt --accept-template "
+                      f"{name} --control-root \"{args.control_root}\"")
+        else:
+            print("\nNothing left differing. Your config now carries every "
+                  "decision the templates hold.")
     elif drift:
         print()
         for line in render_drift(drift):
             print(line)
-        print("\nTo add the missing list entries (additive only, nothing "
-              "local is changed):")
+        print("\nTo close every difference that cannot discard a decision "
+              "— missing keys, entries and\nfields, and placeholder values "
+              "the templates now answer:")
         print(f"  python -m control init --adopt "
               f"--control-root \"{args.control_root}\"")
 
@@ -964,7 +982,8 @@ def cmd_cycle(args) -> int:
 
     conn = connect(report.db_path)
     try:
-        loaded = load_for_cycle(report.config, conn, today)
+        loaded = load_for_cycle(report.config, conn, today,
+                                logs_dir=control_root / "logs")
         class2 = load_class2(conn)
         tracked = loaded.tracked + class2
 
@@ -1116,7 +1135,8 @@ def cmd_report(args) -> int:
 
     conn = connect(report.db_path)
     try:
-        loaded = load_for_cycle(report.config, conn, as_of)
+        loaded = load_for_cycle(report.config, conn, as_of,
+                                logs_dir=control_root / "logs")
         tracked = loaded.tracked + load_class2(conn)
 
         horizon = [
@@ -1368,6 +1388,511 @@ def cmd_disputes(args) -> int:
 
         for line in dsp.rejection_pattern(conn):
             print(f"\n§8.6: {line}")
+        return 0
+    finally:
+        conn.close()
+
+
+def cmd_phase1(args) -> int:
+    """Everything Phase 1 can do without a human — §16.
+
+    Phase 1 is DRY_RUN: all classes evaluated, everything a draft,
+    nothing sent. That means almost all of it is machine work, and
+    running it as eight separate commands turned a build step into an
+    afternoon of copying paths between prompts.
+
+    It stops at the two things that are decisions rather than work: the
+    CEO approving the obligation register (§6), and the CEO judging the
+    golden set unanchored (§13.1, D-03). Neither can be done for them
+    without making the gate meaningless — a test the machine cannot
+    fail is not a test.
+
+    Each step is skipped rather than fatal when its input is absent, and
+    what was skipped is stated at the end. A runner that halts halfway
+    and says nothing is worse than the eight commands it replaced.
+    """
+    control_root = Path(args.control_root)
+    steps: list[tuple[str, str]] = []      # (step, outcome)
+
+    def run(label: str, fn, needed: str = "") -> bool:
+        print(f"\n{'=' * 62}\n{label}\n{'=' * 62}")
+        try:
+            code = fn()
+        except Exception as e:                      # noqa: BLE001
+            steps.append((label, f"FAILED — {str(e)[:120]}"))
+            print(f"  step failed: {str(e)[:200]}")
+            return False
+        outcome = "done" if code == 0 else (needed or "skipped")
+        steps.append((label, outcome))
+        return code == 0
+
+    from argparse import Namespace
+
+    def like(**over):
+        base = dict(vars(args))
+        base.update(over)
+        return Namespace(**base)
+
+    # 1 — config first. A machine running on last month's decisions
+    #     produces honest-looking numbers from the wrong rules.
+    run("1. Config — install and adopt every decision the templates hold",
+        lambda: cmd_init(like(adopt=True, templates="", adopt_key=[],
+                              accept_template=args.accept_template)))
+
+    # 2 — the archive. Skipped without Outlook, which is the normal case
+    #     off the laptop.
+    if not args.skip_scan:
+        run("2. Phase 0 — scan every mailbox and write the deliverables",
+            lambda: cmd_phase0(like()),
+            needed="skipped — Outlook not available on this machine")
+
+    # 3 — propose the register. This is the join that was missing.
+    run("3. Stage D — propose the obligation register (§6)",
+        lambda: cmd_register_obligations(
+            like(approve=None, by="", min_occurrences=3,
+                 min_confidence="MEDIUM")),
+        needed="skipped — no scan output to infer from")
+
+    # 4 — what the filing archive says about the statutory rules.
+    run("4. Extraction brief — the archive against the stated rules",
+        lambda: cmd_extract_brief(like(rescan=False)),
+        needed="skipped — no filing evidence config")
+
+    # 5 — the two documents that go to humans outside the company.
+    run("5. Advisor brief — the completed statutory table",
+        lambda: cmd_advisor_brief(like()))
+
+    # 6 — a full DRY_RUN cycle: everything evaluated, everything drafted.
+    if not args.skip_cycle:
+        run("6. Cycle — evaluate everything, send nothing (DRY_RUN)",
+            lambda: cmd_cycle(like(allow_send=False, mailbox="",
+                                   today=args.today)),
+            needed="skipped — no transport on this machine")
+
+    # 7 — the report, and the gap register that says what is left.
+    run("7. Weekly report — always a draft (§10)",
+        lambda: cmd_report(like(as_of=args.today)))
+    run("8. Gap register — every open item, typed by who can close it",
+        lambda: cmd_gaps(like()))
+
+    print(f"\n{'=' * 62}\nPHASE 1 RUN COMPLETE\n{'=' * 62}")
+    for label, outcome in steps:
+        marker = "ok " if outcome == "done" else "-- "
+        print(f"  {marker}{label.split('.', 1)[-1].strip()} — {outcome}")
+
+    print("\nWhat is left, and why it cannot be done for you:")
+    print("  1. Approve the obligation register. §6 makes that approval "
+          "the thing that\n     ends Phase 0. One command:")
+    print("       python -m control register --approve --by ahmed@ubcsis.com")
+    print("  2. Judge the golden set. §13.1 and D-03: CEO only, unanchored, "
+          "no\n     pre-filled suggestions — anchoring the human to the "
+          "machine's answer\n     produces a test the machine cannot fail. "
+          "Batches of ten:")
+    print("       python -m control golden --issue")
+    print("\nEverything else above ran without you.")
+    return 0
+
+
+def cmd_register_obligations(args) -> int:
+    """Stage D proposals to an approved obligation register — §6.
+
+    Two halves, deliberately apart. Proposing is inference and Control
+    does it; approving is the decision that ends Phase 0 and only the
+    CEO makes it.
+    """
+    from . import register as reg
+    from .config import known_addresses, load_config
+    from .discovery.analyse import infer_obligations, load_rows
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    discovery = control_root / "discovery"
+    proposals_path = discovery / "PROPOSED-OBLIGATION-REGISTER.yaml"
+    obligations_path = control_root / "config" / "obligations.yaml"
+
+    if args.approve is not None:
+        if not proposals_path.is_file():
+            print(f"nothing to approve — {proposals_path.name} does not "
+                  "exist. Run this command without --approve first.")
+            return 1
+        if not args.by:
+            print("--by is required. §6 ends Phase 0 when the CEO approves "
+                  "the register, and an approval with no name attached is "
+                  "not one.")
+            return 1
+        only = set(args.approve) or None
+        approved, skipped = reg.approve(
+            proposals_path, obligations_path, args.by, only)
+        print(f"approved {len(approved)} obligation(s) as {args.by}:")
+        for item in approved:
+            print(f"  + {item}")
+        for item in skipped:
+            print(f"  - {item}")
+        if approved:
+            print("\n§6: this is what ends Phase 0. These are now tracked, "
+                  "and the class 3 ladder runs on them from the next cycle.")
+        return 0
+
+    scans = sorted(discovery.glob("outlook-scan-*.jsonl"))
+    if not scans:
+        print(f"no scan output in {discovery}. Run outlook-scan first — "
+              "there is nothing to infer obligations from.")
+        return 1
+
+    roster = known_addresses(load_config(control_root / "config")["people"])
+    candidates = []
+    for scan in scans:
+        rows = load_rows(scan)
+        if rows:
+            candidates += infer_obligations(
+                rows, min_occurrences=args.min_occurrences)
+
+    proposals, declined = reg.propose(
+        candidates, roster=roster, min_confidence=args.min_confidence)
+
+    discovery.mkdir(parents=True, exist_ok=True)
+    proposals_path.write_text(
+        __import__("yaml").safe_dump(
+            {"obligations": reg.to_rows(proposals)},
+            allow_unicode=True, sort_keys=False),
+        encoding="utf-8")
+    worksheet = discovery / "PROPOSED-OBLIGATION-REGISTER.md"
+    worksheet.write_text(
+        reg.render_worksheet(proposals, declined, today), encoding="utf-8")
+
+    usable = [p for p in proposals if p.usable]
+    print(f"{len(candidates)} Stage D candidate(s) -> {len(proposals)} "
+          f"proposal(s), {len(usable)} with a computable due date.")
+    for reason, count in sorted(declined.items()):
+        if count:
+            print(f"  declined {count}: {reason}")
+    print(f"\nworksheet: {worksheet}")
+    print("\nNothing is tracked until it carries approved_by_ceo (§6). "
+          "To approve every proposal with a usable due date:")
+    print(f"  python -m control register --approve --by ahmed@ubcsis.com "
+          f"--control-root \"{args.control_root}\"")
+    return 0
+
+
+def cmd_advisor_brief(args) -> int:
+    """The tax advisor brief — execution order step 5.
+
+    "Send the completed statutory table for correction, not blank rows.
+    Request the full filing archive in the same message. Lead with the
+    payroll cycle and the corporate return date."
+
+    Generated rather than written, for §11's reason: a number that
+    cannot be traced to a row does not appear. The stated column comes
+    from the calendar and the observed column from the archive, so
+    neither can be typed in by hand and neither can drift.
+    """
+    from . import advisor
+    from . import extraction as ex
+    from .config import load_config
+
+    control_root = Path(args.control_root)
+    ub_root = Path(args.ub_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    config = load_config(control_root / "config")
+    statutory = config["statutory-calendar"]
+
+    observed = {}
+    evidence_rules = config.get("filing-evidence")
+    inventory = control_root / "discovery" / "file-inventory.csv"
+    if evidence_rules and (inventory.is_file() or ub_root.is_dir()):
+        paths = (ex.paths_from_inventory(inventory) if inventory.is_file()
+                 else ex.walk_paths(ub_root))
+        observed = ex.observe(ex.scan_paths(paths, evidence_rules))
+        print(f"archive: {len(paths)} path(s), evidence for "
+              f"{len(observed)} obligation(s)")
+    else:
+        print("No filing evidence available — the practice column will say "
+              "so on every row rather than being left blank, because a "
+              "blank reads as nothing filed (§1.1).")
+
+    rows, excluded = advisor.build_rows(statutory, observed)
+    out_dir = control_root / "discovery"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = out_dir / "TAX-ADVISOR-BRIEF.md"
+    written.write_text(
+        advisor.render(rows, statutory, today, excluded), encoding="utf-8")
+
+    for item in excluded:
+        print(f"  not for the advisor: {item}")
+    print(f"\n{len(rows)} obligation(s) in the table. Leading with "
+          + ", ".join(r.name for r in rows[:len(advisor.LEAD_WITH)]) + ".")
+    if not statutory.get("verified_by_advisor"):
+        print("\nEvery row is marked as CEO-stated and unverified. The "
+              "brief says so, and asks for correction rather than "
+              "agreement — agreeing with a plausible row is the failure "
+              "mode here.")
+    print(f"\nwritten: {written}")
+    print("This leaves the company from you, never from Control (§10).")
+    return 0
+
+
+def cmd_gaps(args) -> int:
+    """The gap register — execution order step 3.
+
+    Every open item, typed by who can close it, counted per type and
+    never totalled. §6 of the order requires legal coverage to stay
+    visible at 0%, and an average across types is precisely a way of
+    not doing that.
+    """
+    from . import gaps as gp
+    from .db import connect, ensure_schema
+    from .loader import load_for_cycle
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    repo = Path(__file__).resolve().parent.parent.parent
+
+    order = repo / "docs" / "decisions" / "EXECUTION-ORDER-18-Aug-2026.md"
+    charter = repo / "CLAUDE.md"
+    order_text = order.read_text(encoding="utf-8") if order.is_file() else ""
+    charter_text = charter.read_text(encoding="utf-8") if charter.is_file() else ""
+    if not order_text:
+        print(f"execution order not found at {order} — the register would be "
+              "missing the seven items the CEO already listed, and a partial "
+              "register that does not say so is worse than none (§1.1).")
+        return 1
+
+    report = _startup(args)
+    conn = connect(report.db_path)
+    try:
+        ensure_schema(conn)
+        loaded = load_for_cycle(report.config, conn, today,
+                                logs_dir=control_root / "logs")
+        live = loaded.gaps
+    finally:
+        conn.close()
+
+    documents = sorted((repo / "docs" / "governance").glob("*.md"))
+    found = gp.collect(order_text, charter_text, documents, live)
+    per_type = gp.counts(found)
+
+    out_dir = control_root / "discovery"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = out_dir / "GAP-REGISTER.md"
+    written.write_text(gp.render(found, today), encoding="utf-8")
+
+    print(f"gap register — {len(found)} item(s), counted per type and never "
+          "totalled:")
+    for kind in gp.TYPES:
+        print(f"  {kind:8} {per_type[kind]:3}  — {gp.TYPE_NOTE[kind]}")
+    print("\nLEGAL coverage reads 0% and must stay visible at 0% until "
+          "counsel is engaged — that is D-52 working, not failing "
+          "(execution order §6).")
+
+    for note in gp.reconcile(found, order_text):
+        print(f"\nRECONCILIATION: {note}")
+
+    print(f"\nwritten: {written}")
+    return 0
+
+
+def cmd_extract_brief(args) -> int:
+    """The extraction brief — execution order step 2.
+
+    Read-only against the filing archive. Reports disagreements first
+    and resolves none of them: §14.2 puts statutory deadlines in Tier C,
+    raised with evidence for a human decision and never changed by the
+    system.
+    """
+    from . import extraction as ex
+    from .config import load_config
+
+    control_root = Path(args.control_root)
+    ub_root = Path(args.ub_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    config = load_config(control_root / "config")
+
+    evidence_rules = config.get("filing-evidence")
+    if not evidence_rules:
+        print("filing-evidence.yaml is missing from config. Without it "
+              "nothing identifies a filing, and guessing which documents "
+              "are returns is exactly what this brief must not do (§1.1).")
+        return 1
+
+    inventory = control_root / "discovery" / "file-inventory.csv"
+    if inventory.is_file() and not args.rescan:
+        paths = ex.paths_from_inventory(inventory)
+        source = f"Stage B inventory ({inventory.name})"
+    else:
+        if not ub_root.is_dir():
+            print(f"UB_ROOT not reachable: {ub_root} — halting rather than "
+                  "reporting on a partial view (§13.2).")
+            return 1
+        print(f"No inventory at {inventory} — walking {ub_root}. "
+              "This is the slow path.")
+        paths = ex.walk_paths(ub_root)
+        source = f"direct walk of {ub_root}"
+
+    found = ex.scan_paths(paths, evidence_rules)
+    observed = ex.observe(found)
+    statutory = config["statutory-calendar"]
+    disagreeing = ex.disagreements(statutory, observed)
+    candidates = ex.upgrade_candidates(statutory, observed, disagreeing)
+
+    brief = ex.render_brief(statutory, observed, disagreeing, candidates,
+                            source, len(paths), today)
+    out_dir = control_root / "discovery"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = out_dir / "EXTRACTION-BRIEF.md"
+    written.write_text(brief, encoding="utf-8")
+
+    print(f"{len(paths)} path(s) considered, {len(found)} matched as filing "
+          f"evidence across {len(observed)} obligation(s).")
+    if disagreeing:
+        print(f"\n{len(disagreeing)} DISAGREEMENT(S) — the archive "
+              "contradicts a CEO-stated rule:")
+        for item in disagreeing:
+            print(f"  {item.obligation_id}: stated {item.stated}; "
+                  f"observed {item.observed}")
+        print("\nNone of these is resolved here. §14.2 puts statutory "
+              "deadlines in Tier C — raised for a human decision, never "
+              "changed by the system.")
+    else:
+        silent = ex.silent_obligations(statutory, observed)
+        checked = len([r for r in (statutory or {}).get("obligations") or []
+                       if ex.STATED_CADENCE_PERIODS.get(
+                           str(r.get("cadence") or "").lower())]) - len(silent)
+        print(f"\nNo disagreement — but only {checked} obligation(s) could "
+              "actually be asked. \"The archive agreed\" and \"the archive "
+              "could not be asked\"\nlook identical in an empty section, so "
+              "here is which:")
+        for note in silent:
+            print(f"  - {note}")
+
+    if candidates:
+        print(f"\n{len(candidates)} rule(s) corroborated by the filings, "
+              "proposed for ceo_stated → document_evidenced:")
+        for candidate in candidates:
+            print(f"  {candidate['id']}: {candidate['evidence']}")
+        print("\nO-03 stays open regardless — the archive shows what the "
+              "company did, not what the law requires.")
+
+    print(f"\nwritten: {written}")
+    return 0
+
+
+def cmd_event(args) -> int:
+    """Event-driven statutory windows — §2.1, execution order B1 and B4.
+
+    Two class 1 obligations have no cadence: the ETA rejection clearance
+    window starts when ETA rejects an invoice, and the social insurance
+    headcount declaration starts when someone joins or leaves. There is
+    no date to compute until the event exists.
+
+    This command is how the event gets in. It exists as a human-driven
+    command rather than a detector because M1 keeps Control on
+    `control@` only, and ETA rejections arrive in `accounts@` — so for
+    now a person enters them, and every row says so.
+    """
+    from . import events as ev
+    from .config import load_config
+    from .db import connect, ensure_schema
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    conn = connect(control_root / "data" / "control.db")
+    try:
+        # This command does not go through startup, and the event tables
+        # postdate every database created before them.
+        added = ensure_schema(conn)
+        if added:
+            print(f"schema: created {', '.join(added)}")
+        statutory = load_config(control_root / "config")["statutory-calendar"]
+
+        # §5.2 requires `submitted_by` on every row, and this register is
+        # the one place where a human's memory is the only evidence
+        # there is. An unattributable row here could not be checked with
+        # anyone later.
+        if (args.discharge or args.obligation) and not args.by:
+            print("--by is required: every row records who entered it "
+                  "(§5.2), and for a manually detected event that is the "
+                  "only evidence of where the date came from.")
+            return 1
+
+        if args.discharge:
+            event_id = int(args.discharge)
+            if event_id not in {e.row_id for e in ev.open_events(conn)}:
+                print(f"No open event {event_id}. Nothing recorded.")
+                return 1
+            on = date.fromisoformat(args.on) if args.on else today
+            ev.discharge_event(conn, event_id, on, args.by,
+                               reference=args.reference or None)
+            print(f"event {event_id}: discharged on {on:%d-%b-%Y} by "
+                  f"{args.by}")
+            print("  the event row is unchanged — closure is its own row "
+                  "(§5.2)")
+            return 0
+
+        if args.obligation:
+            if not args.date:
+                print("--date is required: the deadline counts from the day "
+                      "the event happened, not from today (B4).")
+                return 1
+            event_date = date.fromisoformat(args.date)
+            if event_date > today:
+                print(f"Not recorded: {event_date:%d-%b-%Y} is in the future. "
+                      "An event that has not happened starts no clock.")
+                return 1
+            event_id = ev.record_event(
+                conn, args.obligation, args.type or "UNSPECIFIED", event_date,
+                args.reference or None, "MANUAL", args.by,
+                registered_at=today)
+            print(f"event {event_id}: {args.obligation} on "
+                  f"{event_date:%d-%b-%Y}, entered by {args.by}")
+            lag = (today - event_date).days
+            if lag:
+                print(f"  registered {lag} day(s) after the event — that "
+                      "much of the window was already spent before Control "
+                      "could start counting (B4)")
+            tracked, _ = ev.build_event_items(conn, statutory, today)
+            mine = next((t for t in tracked
+                         if t.item_id.endswith(f"#{event_id}")), None)
+            if mine:
+                print(f"  due {mine.due:%d-%b-%Y} "
+                      f"(T-{(mine.due - today).days}), owner {mine.owner}")
+            else:
+                print("  no deadline computed — see the gaps in the next "
+                      "report; the clock is running and Control is not "
+                      "counting it")
+            return 0
+
+        # No arguments: show what is running.
+        tracked, gaps = ev.build_event_items(conn, statutory, today)
+        rows = ev.open_events(conn)
+        if not rows:
+            print("No statutory events on record — nothing is being counted.")
+        else:
+            print(f"{len(rows)} open statutory event(s):\n")
+            due_by_id = {t.item_id: t for t in tracked}
+            for event in rows:
+                item = due_by_id.get(
+                    f"{event.obligation_id}#{event.row_id}")
+                when = (f"due {item.due:%d-%b-%Y} "
+                        f"(T-{(item.due - today).days})" if item
+                        else "NO DEADLINE COMPUTED")
+                print(f"  [{event.row_id}] {event.obligation_id} — "
+                      f"{event.event_type} on {event.event_date:%d-%b-%Y} — "
+                      f"{when}")
+                if event.reference:
+                    print(f"       ref {event.reference}")
+                if event.registration_lag_days:
+                    print(f"       registered {event.registration_lag_days} "
+                          "day(s) late — that much of the window was gone "
+                          "before Control saw it")
+                print(f"       detection: {event.detection}")
+        for line in gaps:
+            print(f"\n  {line}")
+        print("\nTo record:   python -m control event --obligation "
+              "STAT-ETA-REJ --type ETA_REJECTION \\\n"
+              "               --date YYYY-MM-DD --reference INV-1234 "
+              "--by you@ubcsis.com")
+        print("To discharge: python -m control event --discharge <id> "
+              "--by you@ubcsis.com")
         return 0
     finally:
         conn.close()
@@ -1769,6 +2294,11 @@ def main(argv: list[str] | None = None) -> int:
                       help="copy one named config key from the template, "
                            "e.g. authority.yaml:interim. Naming it is you "
                            "deciding; it never replaces a key you already have")
+    init.add_argument("--accept-template", action="append", default=[],
+                      metavar="FILE.yaml",
+                      help="resolve this file's conflicts in favour of the "
+                           "template, because you have decided the template "
+                           "side is current. Repeatable.")
     init.add_argument("--adopt", action="store_true",
                       help="add template list entries your config lacks; "
                            "never removes or changes what is already there")
@@ -1855,6 +2385,89 @@ def main(argv: list[str] | None = None) -> int:
                                "CEO absence (§3.3)")
     disputes.add_argument("--today", default="", help="ISO date, for testing")
     disputes.set_defaults(fn=cmd_disputes)
+
+    phase1 = sub.add_parser(
+        "phase1",
+        help="everything Phase 1 can do without a human, in one command")
+    _common(phase1)
+    phase1.add_argument("--today", default="", help="ISO date, for testing")
+    phase1.add_argument("--accept-template", action="append", default=[],
+                        metavar="FILE.yaml")
+    phase1.add_argument("--skip-scan", action="store_true",
+                        help="skip the Outlook scan (no Outlook on this machine)")
+    phase1.add_argument("--skip-cycle", action="store_true",
+                        help="skip the mail cycle (no transport)")
+    phase1.set_defaults(fn=cmd_phase1)
+
+    register_cmd = sub.add_parser(
+        "register",
+        help="§6: propose the obligation register from Stage D, or approve "
+             "it — approval is what ends Phase 0")
+    register_cmd.add_argument("--control-root",
+                              default=os.environ.get("CONTROL_ROOT"))
+    register_cmd.add_argument("--approve", nargs="*", default=None,
+                              metavar="ID",
+                              help="approve all usable proposals, or only "
+                                   "the ids named")
+    register_cmd.add_argument("--by", default="",
+                              help="who is approving; §6 says the CEO")
+    register_cmd.add_argument("--min-occurrences", type=int, default=3)
+    register_cmd.add_argument("--min-confidence", default="MEDIUM",
+                              choices=["HIGH", "MEDIUM", "LOW"])
+    register_cmd.add_argument("--today", default="", help="ISO date, for testing")
+    register_cmd.set_defaults(fn=cmd_register_obligations)
+
+    advisor_cmd = sub.add_parser(
+        "advisor-brief",
+        help="execution order step 5: the completed statutory table, for "
+             "the tax advisor to correct")
+    advisor_cmd.add_argument("--control-root",
+                             default=os.environ.get("CONTROL_ROOT"))
+    advisor_cmd.add_argument("--ub-root", default=os.environ.get("UB_ROOT"))
+    advisor_cmd.add_argument("--today", default="", help="ISO date, for testing")
+    advisor_cmd.set_defaults(fn=cmd_advisor_brief)
+
+    gaps_cmd = sub.add_parser(
+        "gaps",
+        help="execution order step 3: every open item, typed by who can "
+             "close it")
+    _common(gaps_cmd)
+    gaps_cmd.add_argument("--today", default="", help="ISO date, for testing")
+    gaps_cmd.set_defaults(fn=cmd_gaps)
+
+    extract = sub.add_parser(
+        "extract-brief",
+        help="execution order step 2: what the filing archive says about "
+             "the CEO-stated statutory rules")
+    extract.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    extract.add_argument("--ub-root", default=os.environ.get("UB_ROOT"))
+    extract.add_argument("--rescan", action="store_true",
+                         help="walk UB_ROOT instead of reusing the Stage B "
+                              "inventory")
+    extract.add_argument("--today", default="", help="ISO date, for testing")
+    extract.set_defaults(fn=cmd_extract_brief)
+
+    event = sub.add_parser(
+        "event",
+        help="event-driven class 1 windows: record an event, discharge one, "
+             "or list what is running (B1, B4)")
+    event.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    event.add_argument("--obligation", default="",
+                       help="e.g. STAT-ETA-REJ, STAT-SI-HEADCOUNT")
+    event.add_argument("--type", default="",
+                       help="e.g. ETA_REJECTION, JOINER, LEAVER")
+    event.add_argument("--date", default="",
+                       help="ISO date the event HAPPENED — the deadline "
+                            "counts from this, not from today (B4)")
+    event.add_argument("--reference", default="",
+                       help="invoice number, employee reference")
+    event.add_argument("--discharge", default="",
+                       help="event id to close")
+    event.add_argument("--on", default="",
+                       help="ISO date the obligation was discharged")
+    event.add_argument("--by", default="", help="who is entering this")
+    event.add_argument("--today", default="", help="ISO date, for testing")
+    event.set_defaults(fn=cmd_event)
 
     golden = sub.add_parser(
         "golden",

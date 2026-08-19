@@ -130,19 +130,27 @@ def build_submission_doc(
     form_code: str | None = None,
     revision: str | None = None,
     confidential: bool = False,
+    restricted_basis: str = "",
 ) -> SubmissionDoc:
     """Produce the SubmissionDoc the evaluation engine consumes.
 
-    Confidential items (§12.1.2): the body is never opened — metadata
-    only, and the doc is marked so evaluation runs the reduced set.
+    Restricted items: the body is never opened — metadata only, and the
+    doc is marked so evaluation runs the §12.1.3 reduced set. Two
+    decisions land here for opposite reasons: a client NDA (D-01) and
+    an individual HSE incident record, which is special-category health
+    data (D-17) and never read (D-18). `restricted_basis` carries which,
+    because the reduced set is the same but the sentence explaining it
+    is not.
+
     A failed parse is UNREADABLE for manual review (§5.5) — a wrong
     number in a register is worse than no number.
     """
-    if confidential:
+    if confidential or restricted_basis:
         return SubmissionDoc(
             received_at=received_at,
             attachment_name=filename,
             confidential=True,
+            restricted_basis=restricted_basis,
         )
     if content is None:
         return SubmissionDoc(received_at=received_at, attachment_name=None)

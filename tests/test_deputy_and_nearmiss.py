@@ -195,23 +195,37 @@ def test_eta_ownership_matches_the_ceo_answer():
         assert row["escalation"] == "ahmed@ubcsis.com"    # CEO, same day
 
 
-def test_the_rejection_window_is_null_rather_than_guessed():
-    """No deadline can be computed from a null, and that is the point —
-    a plausible number here would alert confidently on the wrong day."""
+def test_the_rejection_window_carries_a_number_only_with_its_source():
+    """This test used to assert the window was null.
+
+    The execution order of 18-Aug-2026 supplied 7 days (D-31), so null
+    is no longer the honest value. What it guarded survives: a number
+    here may exist only if it says where it came from, because the
+    failure mode is a plausible figure nobody can trace.
+    """
     data = yaml.safe_load(
         (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
     rejection = next(r for r in data["obligations"] if r["id"] == "STAT-ETA-REJ")
-    assert rejection["window_days"] is None
+    assert rejection["window_days"] == 7
+    assert rejection["provenance"] == "ceo_stated"
+    assert rejection["decision"] == "D-31"
     assert rejection["trigger"]
-    assert "UNVERIFIED" in rejection["rule"]
+    # And the clock still starts on the event, so no cadence may fire.
+    assert "from rejection" in rejection["rule"]
 
 
-def test_every_statutory_rule_is_still_unverified():
-    """O-03 is open. Nothing may look confirmed before the advisor."""
+def test_no_statutory_rule_claims_more_than_the_CEO_said():
+    """O-03 is open. `ceo_stated` is not `verified_by_advisor` and never
+    becomes it by time passing — §7 of the execution order makes
+    promotion without a named human a stop condition."""
     data = yaml.safe_load(
         (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
     assert data["verified_by_advisor"] is False
-    assert all("UNVERIFIED" in row["rule"] for row in data["obligations"])
+    assert data["ceo_stated"] is True
+    assert data["last_verified"] is None
+    assert data["source"]
+    for row in data["obligations"]:
+        assert row["provenance"] == "ceo_stated", row["id"]
 
 
 def test_the_cycle_reads_absence_from_the_register(tmp_path):

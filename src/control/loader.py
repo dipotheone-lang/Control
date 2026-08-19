@@ -113,6 +113,42 @@ def _due_time(expression: str) -> time:
     return time(int(match.group(1)), int(match.group(2)))
 
 
+# The phrase that marks a refusal as event-driven rather than unreadable.
+# Named once because build_statutory counts the two kinds separately —
+# they are both silence, but they have different remedies, and a count
+# that merged them would tell the CEO to chase the wrong person.
+EVENT_WINDOW_MARKER = "is an event-driven window"
+
+# An event-driven window is not a recurring deadline and must never be
+# read as one. "7 days from rejection" is the ETA clearance window: it
+# starts when ETA rejects an invoice, and the execution order of
+# 18-Aug-2026 calls it the tightest statutory window in the system.
+# Before this guard the day-of-month branch matched the leading "7" and
+# produced day 7 of the month — a confidently wrong statutory date,
+# which §2.1 rates worse than no date at all.
+_EVENT_WINDOW = re.compile(
+    r"\b\d{1,3}\s*(?:calendar\s+|working\s+|business\s+)?days?\s+"
+    r"(?:from|after|of)\b")
+
+_MONTHS_BY_NAME = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5,
+    "june": 6, "july": 7, "august": 8, "september": 9, "october": 10,
+    "november": 11, "december": 12,
+}
+_MONTH_END = re.compile(
+    r"end of (?:the )?(following|next|current|same) month|month[- ]end")
+_ANNUAL_DATE = re.compile(
+    r"\b(\d{1,2})\s+(" + "|".join(_MONTHS_BY_NAME) + r")\b"
+    r"|\b(" + "|".join(_MONTHS_BY_NAME) + r")\s+(\d{1,2})\b")
+_LEAD_DAYS = re.compile(r"[-−]\s*(\d{1,2})\s*working days?")
+
+
+def _last_day(year: int, month: int) -> date:
+    if month == 12:
+        return date(year, 12, 31)
+    return date(year, month + 1, 1) - timedelta(days=1)
+
+
 def parse_due(expression: str, cadence: str, today: date) -> tuple[datetime | None, str]:
     """The next due datetime for this obligation, or a reason it is unknown.
 
@@ -125,6 +161,15 @@ def parse_due(expression: str, cadence: str, today: date) -> tuple[datetime | No
         return None, "no due expression"
 
     at = _due_time(text)
+
+    # Event-driven windows are refused before anything else, because
+    # every later branch would find a number in them and turn it into a
+    # calendar date. They are tracked by the event register, not here.
+    if _EVENT_WINDOW.search(text):
+        return None, (
+            f"{expression!r} {EVENT_WINDOW_MARKER}, not a recurring "
+            "deadline — its clock starts on an event, so it is tracked from "
+            "the event register rather than from a cadence")
 
     # Explicit date wins over any cadence.
     explicit = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
@@ -146,6 +191,44 @@ def parse_due(expression: str, cadence: str, today: date) -> tuple[datetime | No
             ahead = 14
         return datetime.combine(today + timedelta(days=ahead), at), ""
 
+    # "31 March" / "March 31" — a specific day in a named month, which is
+    # unambiguous in a way that a bare day-of-month is not.
+    annual = _ANNUAL_DATE.search(text)
+    if annual:
+        day = int(annual.group(1) or annual.group(4))
+        name = (annual.group(2) or annual.group(3))
+        month = _MONTHS_BY_NAME[name]
+        if cadence and cadence not in ("annual", "annually", "yearly", ""):
+            return None, (f"cadence {cadence!r} with a fixed calendar date "
+                          f"{expression!r} — ambiguous, not guessed")
+        try:
+            target = date(today.year, month, day)
+        except ValueError:
+            return None, (f"{day} {name.title()} is not a real date")
+        if target < today:
+            target = date(today.year + 1, month, day)
+        return _apply_lead(datetime.combine(target, at), text)
+
+    # "end of the following month" and its variants. Month-end is a real
+    # statutory shape — several Egyptian filings land on it — and it
+    # cannot be written as a day-of-month at all, because the day it
+    # falls on changes with the month.
+    month_end = _MONTH_END.search(text)
+    if month_end:
+        which = month_end.group(1) or "current"
+        year, month = today.year, today.month
+        if which in ("following", "next"):
+            month += 1
+            if month > 12:
+                month, year = 1, year + 1
+        due = _last_day(year, month)
+        if due < today:
+            month += 1
+            if month > 12:
+                month, year = 1, year + 1
+            due = _last_day(year, month)
+        return _apply_lead(datetime.combine(due, at), text)
+
     day_of_month = re.search(r"\bday\s*(\d{1,2})\b|^(\d{1,2})\b", text)
     if day_of_month:
         number = int(day_of_month.group(1) or day_of_month.group(2))
@@ -162,6 +245,26 @@ def parse_due(expression: str, cadence: str, today: date) -> tuple[datetime | No
         return datetime.combine(date(year, month, number), at), ""
 
     return None, f"due expression {expression!r} not understood"
+
+
+def _apply_lead(due: datetime, text: str) -> tuple[datetime, str]:
+    """Shift a statutory date earlier by an operative lead.
+
+    The execution order sets VAT's operative date at five working days
+    before the statutory one. The statutory date stays the anchor — the
+    lead is when Control acts, not when the law falls due — so the
+    subtraction happens here rather than by editing the rule, and a
+    lead that is missing simply leaves the statutory date standing.
+    """
+    lead = _LEAD_DAYS.search(text)
+    if not lead:
+        return due, ""
+    remaining, moved = int(lead.group(1)), due
+    while remaining:
+        moved -= timedelta(days=1)
+        if moved.weekday() not in (4, 5):      # Fri, Sat — §8.3 Sun-Thu week
+            remaining -= 1
+    return moved, ""
 
 
 def _period_for(cadence: str, due: datetime) -> str:
@@ -327,6 +430,60 @@ def build_obligations(obligations_config: dict | None, people_config: dict | Non
 
 # ---- class 1 ----------------------------------------------------------
 
+# Why a class 1 obligation has no countdown. These are not degrees of
+# the same problem — they are four different facts with four different
+# people to chase, and reporting them in one sentence shape sent the
+# reader to the wrong one. Only AWAITING_DATE is an O-03 answer that is
+# missing; the rest are correctly configured and either handled
+# elsewhere or not yet built.
+SILENCE_AWAITING_DATE = "awaiting a date"
+SILENCE_BY_EVENT = "event-driven"
+SILENCE_BY_EXCEPTION = "monitored by exception"
+SILENCE_NO_MECHANISM = "no mechanism exists"
+
+
+def _no_countdown(row: dict, problem: str) -> tuple[str, str | None]:
+    """Classify a class 1 row that produced no date, and say what it is.
+
+    Returns (category, message). A `None` message means another module
+    owns the reporting for this row and a line here would duplicate it.
+    """
+    obligation_id = str(row.get("id") or "")
+    name = str(row.get("name") or obligation_id)
+    mechanism = str(row.get("mechanism") or "")
+
+    if mechanism == "event_window":
+        # Tracked from the event register (§2.1, B1/B4). `events.py`
+        # reports whether any events are on record; a second line here
+        # would say "no alert can fire" about an obligation that is
+        # working exactly as designed.
+        return SILENCE_BY_EVENT, None
+
+    if mechanism == "exception_detection":
+        # B2. Real-time submission has no deadline, so a countdown here
+        # would alert every day on a thing with no due date. What it
+        # needs is detection of a submission that did not happen.
+        return SILENCE_BY_EXCEPTION, (
+            f"{obligation_id}: {name} is real-time and has no deadline by "
+            "design (B2). It is monitored by detecting a submission that "
+            "did not happen, not by a countdown — and that detector is not "
+            "built, so nothing is watching it today.")
+
+    if row.get("obligation_exists") and row.get("mechanism_available") == "unknown":
+        # B7. Owed, with no known way to discharge it. Recording it as
+        # absent would be false; recording it as satisfied would be
+        # worse.
+        return SILENCE_NO_MECHANISM, (
+            f"{obligation_id}: {name} is owed and there is no known way to "
+            "discharge it yet"
+            + (f" ({row['note'].strip()})" if row.get("note") else "")
+            + ". It is recorded as outstanding rather than as absent or as "
+              "met (§1.1).")
+
+    return SILENCE_AWAITING_DATE, (
+        f"{obligation_id}: {problem} — no class 1 alert can fire (O-03)")
+
+
 def build_statutory(statutory_config: dict | None, today: date
                     ) -> tuple[list, list[str]]:
     """Class 1 tracked items, and the reason most of them are missing.
@@ -340,21 +497,16 @@ def build_statutory(statutory_config: dict | None, today: date
     tracked: list[TrackedItem] = []
     gaps: list[str] = []
     config = statutory_config or {}
-
-    if not config.get("verified_by_advisor"):
-        gaps.append(
-            "statutory-calendar.yaml: verified_by_advisor is false (O-03). "
-            "No statutory deadline has been confirmed with the tax advisor, "
-            "so class 1 — the only class carrying fines — is tracking "
-            "nothing. This is the highest-priority gap in the system."
-        )
+    silence: dict[str, int] = {}
 
     for row in config.get("obligations") or []:
         obligation_id = str(row.get("id") or "")
         due, problem = parse_due(row.get("rule", ""), "", today)
         if due is None:
-            gaps.append(f"{obligation_id}: {problem} — no class 1 alert "
-                        "can fire (O-03)")
+            category, message = _no_countdown(row, problem)
+            silence[category] = silence.get(category, 0) + 1
+            if message:
+                gaps.append(message)
             continue
         tracked.append(TrackedItem(
             item_id=obligation_id, obligation_class=1,
@@ -362,6 +514,54 @@ def build_statutory(statutory_config: dict | None, today: date
             owner=str(row.get("owner") or "accounts@ubcsis.com").lower(),
             due=due.date(),
         ))
+
+    # Coverage before provenance. Once some rows carry dates, a reader
+    # sees alerts and can take the register for coverage — so the share
+    # that is dark is stated as a share, not left implicit in a list of
+    # per-row lines. Two-thirds silent is a different fact from a rule
+    # nobody has verified, and the report has to carry both.
+    silent = sum(silence.values())
+    if silent and tracked:
+        # Ordered by how many people it takes to fix, most first.
+        detail = ", ".join(
+            f"{silence[c]} {c}" for c in (
+                SILENCE_AWAITING_DATE, SILENCE_BY_EVENT,
+                SILENCE_BY_EXCEPTION, SILENCE_NO_MECHANISM)
+            if silence.get(c))
+        gaps.append(
+            f"statutory-calendar.yaml: {len(tracked)} of {len(tracked) + silent}"
+            f" class 1 obligations have a usable date. The other {silent} fire "
+            f"no countdown ({detail}) — and class 1 is the only class "
+            "carrying fines, so that share is the highest-priority gap in the "
+            "system (O-03).")
+
+    # The provenance line goes LAST so it reads as a qualification on
+    # what was found rather than a preamble to it — and it says which
+    # of the two situations this is. "Tracking nothing" and "tracking
+    # four dates nobody qualified has checked" are different states
+    # with different remedies, and one message for both would have been
+    # false in whichever case it did not fit.
+    if not config.get("verified_by_advisor"):
+        if not tracked:
+            gaps.append(
+                "statutory-calendar.yaml: no statutory deadline has a usable "
+                "date, so class 1 — the only class carrying fines — is "
+                "tracking nothing. This is the highest-priority gap in the "
+                "system (O-03).")
+        elif config.get("ceo_stated"):
+            gaps.append(
+                f"statutory-calendar.yaml: {len(tracked)} class 1 deadline(s) "
+                "are alerting on CEO-STATED dates, not advisor-verified ones "
+                f"({config.get('source', 'source not recorded')}). They alert "
+                "early and erring early is the chartered behaviour (§2.1) — "
+                "but nobody qualified has confirmed them, and time passing "
+                "does not confirm them. O-03 stays open until a named "
+                "advisor does.")
+        else:
+            gaps.append(
+                f"statutory-calendar.yaml: {len(tracked)} class 1 deadline(s) "
+                "are alerting on dates with no recorded provenance at all — "
+                "neither advisor-verified nor CEO-stated (O-03).")
     return tracked, gaps
 
 
@@ -408,7 +608,7 @@ def build_class3_state(conn, tracked: list, today: date,
 
 # ---- the whole thing --------------------------------------------------
 
-def load_for_cycle(config, conn, today: date) -> LoadResult:
+def load_for_cycle(config, conn, today: date, logs_dir=None) -> LoadResult:
     result = LoadResult()
     calendar, calendar_gaps = build_calendar(config["sla"])
     result.calendar = calendar
@@ -424,10 +624,60 @@ def load_for_cycle(config, conn, today: date) -> LoadResult:
         config["statutory-calendar"], today)
     result.gaps += statutory_gaps
 
-    result.tracked = class3 + statutory
+    # Event-driven class 1 windows. `build_statutory` refuses these on
+    # purpose — their clock starts on an event, so there is no cadence
+    # to compute from — and this is where the recorded events become
+    # deadlines (execution order B1, B4).
+    from .events import (
+        build_event_items, observed_cadence_gaps, registration_gaps,
+    )
+
+    events, event_gaps = build_event_items(
+        conn, config["statutory-calendar"], today)
+    result.gaps += event_gaps
+
+    # B1: Control cannot schedule itself, so the only enforcement of
+    # "checked daily" available to it is to observe the cadence it
+    # actually ran at and report the misses. The evidence is its own
+    # audit log, so this needs the log directory.
+    if logs_dir is not None:
+        result.gaps += observed_cadence_gaps(
+            logs_dir, config["statutory-calendar"], conn, today)
+
+    # B5: the HSE split, and the one tightening Control applied without
+    # a decision to point at. A control applied quietly is
+    # indistinguishable from one nobody decided on, so it is disclosed
+    # rather than left in the config for someone to find.
+    from .hse import HseScope, cc_exclusion_note
+
+    hse = HseScope.from_config(config.get("hse"))
+    result.gaps += cc_exclusion_note(hse)
+    if not hse.configured:
+        result.gaps.append(
+            "hse.yaml is missing, so HSE reporting cannot be split into "
+            "aggregate statistics and individual incident records (B5). "
+            "Every HSE item is read metadata-only under D-18 — the "
+            "conservative direction, but it means the monthly statistics "
+            "return is not being checked either.")
+
+    result.tracked = class3 + statutory + events
     result.class3_state = build_class3_state(
         conn, class3, today,
         {oid: s.period for oid, s in specs.items()})
+
+    # B3, and it needs both halves of what this function just built: the
+    # approved register, and which of it is overdue. An event window is
+    # only as good as whatever puts the event in front of Control, and
+    # for the headcount declaration that is HR's roster obligation — so
+    # an overdue roster is a class 1 consequence, not a late report.
+    overdue = {
+        item.item_id for item in class3
+        if item.due < today
+        and not getattr(result.class3_state.get(item.item_id),
+                        "submitted", False)
+    }
+    result.gaps += registration_gaps(
+        config["statutory-calendar"], set(specs), overdue)
     return result
 
 

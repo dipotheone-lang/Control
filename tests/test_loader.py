@@ -182,15 +182,89 @@ def test_a_governing_clause_with_no_checkable_rule_says_c6_is_not_assessed():
 
 # ---- class 1: the loudest gap in the system --------------------------
 
-def test_unverified_statutory_rules_track_nothing_and_say_so():
+def test_partial_statutory_coverage_never_reads_as_coverage():
+    """This test used to assert the register tracked nothing at all.
+
+    The execution order of 18-Aug-2026 supplied dates for four of the
+    twelve, so "tracking nothing" is no longer true — but the thing the
+    test guarded is: the loudest fact must still be the share that is
+    dark, because a register that shows four alerts and eight technical
+    lines reads as coverage to anyone skimming it.
+    """
     data = yaml.safe_load(
         (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
     tracked, gaps = build_statutory(data, SUNDAY)
-    assert tracked == []
+    assert tracked, "four CEO-stated dates should now alert"
     assert any("highest-priority gap in the system" in g for g in gaps)
     assert any("only class carrying fines" in g for g in gaps)
-    # Every obligation reports its own silence, not just the header.
-    assert len([g for g in gaps if "no class 1 alert" in g]) == 9
+    # The header states it as a share, so it cannot be skimmed past.
+    assert any(f"{len(tracked)} of {len(data['obligations'])}" in g
+               for g in gaps)
+    # Every silent obligation names itself somewhere — either here, or
+    # in the event register, which owns the reporting for its two.
+    silent = {r["id"] for r in data["obligations"]} - {t.item_id for t in tracked}
+    event_driven = {r["id"] for r in data["obligations"]
+                    if r.get("mechanism") == "event_window"}
+    joined = " ".join(gaps)
+    for obligation_id in silent - event_driven:
+        assert obligation_id in joined, obligation_id
+
+
+def test_the_four_kinds_of_silence_are_counted_apart():
+    """All four are "no countdown"; the remedies are four different
+    people. A missing date is chased from the advisor or from HR, an
+    event window waits for an event, an exception-detected obligation
+    waits for a detector to be built, and a registration nobody can
+    perform waits for regulations. One merged count would send the CEO
+    to the wrong one.
+    """
+    data = yaml.safe_load(
+        (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
+    _, gaps = build_statutory(data, SUNDAY)
+    coverage = next(g for g in gaps if "have a usable date" in g)
+    for phrase in ("awaiting a date", "event-driven",
+                   "monitored by exception", "no mechanism exists"):
+        assert phrase in coverage
+
+
+def test_a_real_time_obligation_is_not_reported_as_a_missing_date():
+    """B2. ETA submission has no deadline by design. Listing it beside
+    the rules Hadeer still owes would send someone to ask her for a date
+    that does not exist — and would hide the real gap, which is that the
+    detector is not built."""
+    data = yaml.safe_load(
+        (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
+    _, gaps = build_statutory(data, SUNDAY)
+    line = next(g for g in gaps if g.startswith("STAT-ETA-SUB"))
+    assert "no deadline by design (B2)" in line
+    assert "that detector is not built" in line
+    assert "O-03" not in line
+
+
+def test_an_obligation_with_no_way_to_discharge_it_says_exactly_that():
+    """B7. Recording it as absent would be false; recording it as met
+    would be worse. It is owed, and the mechanism does not exist."""
+    data = yaml.safe_load(
+        (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
+    _, gaps = build_statutory(data, SUNDAY)
+    line = next(g for g in gaps if g.startswith("STAT-PDPL-REG:"))
+    assert "no known way to discharge it yet" in line
+    assert "rather than as absent or as met" in line
+    assert "D-40" in line
+
+
+def test_the_event_windows_are_left_to_the_event_register():
+    """Two modules reporting the same obligation would say "no alert can
+    fire" about one that is working as designed."""
+    data = yaml.safe_load(
+        (REPO_CONFIG / "statutory-calendar.yaml").read_text(encoding="utf-8"))
+    _, gaps = build_statutory(data, SUNDAY)
+    per_row = [g for g in gaps if not g.startswith("statutory-calendar.yaml")]
+    assert not [g for g in per_row
+                if g.startswith(("STAT-ETA-REJ", "STAT-SI-HEADCOUNT"))]
+    # But they are still counted in the coverage share.
+    coverage = next(g for g in gaps if "have a usable date" in g)
+    assert "2 event-driven" in coverage
 
 
 def test_a_verified_statutory_rule_with_a_date_is_tracked():
@@ -312,13 +386,162 @@ def test_the_repo_config_loads_and_reports_exactly_what_is_missing(conn):
     config = load_config(REPO_CONFIG)
     result = load_for_cycle(config, conn, SUNDAY)
 
-    # Nothing is tracked, and every reason is named.
+    # Class 3 tracks nothing, class 1 tracks only what the CEO stated,
+    # and every reason is named.
     assert result.approved == 0
-    assert result.tracked == []
+    assert {t.item_id for t in result.tracked} == {
+        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-CIT"}
     text = " ".join(result.gaps)
     assert "obligations.yaml is empty" in text
-    assert "verified_by_advisor is false" in text
+    assert "not advisor-verified" in text
     assert "no public holidays on file" in text
 
     # The roster is live even though the register is not.
     assert len(result.roster) >= 11
+
+
+# ---- statutory shapes from the execution order of 18-Aug-2026 --------
+
+def test_an_event_window_is_never_read_as_a_day_of_month():
+    """The defect this guards actually happened.
+
+    "7 days from rejection" is the ETA clearance window — the tightest
+    statutory window in the system, whose clock starts when ETA rejects
+    an invoice. The day-of-month branch matched its leading "7" and
+    produced day 7 of the month: a confidently wrong statutory date,
+    which §2.1 rates worse than no date at all.
+    """
+    from control.loader import parse_due
+
+    for text in ("7 days from rejection", "30 days from event",
+                 "5 working days after notification",
+                 "14 calendar days from the award"):
+        due, problem = parse_due(text, "", date(2026, 8, 18))
+        assert due is None, f"{text!r} became a calendar date"
+        assert "event-driven window" in problem
+
+
+def test_month_end_is_expressible_because_it_is_a_real_statutory_shape():
+    """Several Egyptian filings land on month-end, and month-end cannot
+    be written as a day-of-month: the day it falls on changes."""
+    from control.loader import parse_due
+
+    due, problem = parse_due("end of the following month", "",
+                             date(2026, 8, 18))
+    assert problem == ""
+    assert due.date() == date(2026, 9, 30)
+
+    # February, and a leap year, without a special case.
+    due, _ = parse_due("end of the following month", "", date(2028, 1, 5))
+    assert due.date() == date(2028, 2, 29)
+
+
+def test_the_operative_lead_moves_earlier_without_moving_the_statutory_date():
+    """VAT's operative date is five working days before the statutory
+    one. The statutory date stays the anchor; the lead is when Control
+    acts, not when the law falls due."""
+    from control.loader import parse_due
+
+    statutory, _ = parse_due("end of the following month", "",
+                             date(2026, 8, 18))
+    operative, _ = parse_due("end of the following month, -5 working days",
+                             "", date(2026, 8, 18))
+    assert statutory.date() == date(2026, 9, 30)
+    # Sunday-Thursday week (§8.3): back over 29, 28, 27, 24, 23.
+    assert operative.date() == date(2026, 9, 23)
+    assert operative < statutory
+
+
+def test_a_fixed_calendar_date_is_unambiguous_where_a_day_number_is_not():
+    """31 March is a real date; "day 31" monthly is not."""
+    from control.loader import parse_due
+
+    for text in ("31 March", "March 31"):
+        due, problem = parse_due(text, "", date(2026, 8, 18))
+        assert problem == ""
+        assert due.date() == date(2027, 3, 31), text
+
+    # ...and the bare day number is still refused.
+    due, problem = parse_due("day 31", "", date(2026, 8, 18))
+    assert due is None
+    assert "1..28" in problem
+
+
+def test_a_date_that_does_not_exist_is_refused_not_clamped():
+    from control.loader import parse_due
+
+    due, problem = parse_due("31 February", "", date(2026, 8, 18))
+    assert due is None
+    assert "not a real date" in problem
+
+
+def test_an_undated_rule_still_produces_no_date():
+    """§2.1: unverified rules alert early, but only where a date exists.
+    'dates pending' is not a date."""
+    from control.loader import parse_due
+
+    for text in ("annual — dates pending", "real-time",
+                 "UNVERIFIED — CONFIRM WITH ADVISOR"):
+        due, problem = parse_due(text, "", date(2026, 8, 18))
+        assert due is None, text
+        assert problem
+
+
+def test_the_provenance_line_distinguishes_nothing_from_unverified():
+    """"Tracking nothing" and "tracking four dates nobody qualified has
+    checked" are different states with different remedies. One message
+    for both would be false in whichever case it did not fit."""
+    from control.loader import build_statutory
+
+    today = date(2026, 8, 18)
+    stated = {
+        "verified_by_advisor": False, "ceo_stated": True,
+        "source": "Execution order 18-Aug-2026 §2.3",
+        "obligations": [{"id": "STAT-X", "name": "X", "rule": "day 15"}],
+    }
+    tracked, gaps = build_statutory(stated, today)
+    assert len(tracked) == 1
+    line = gaps[-1]
+    assert "CEO-STATED" in line
+    assert "time passing does not confirm them" in line
+    assert "tracking nothing" not in line
+
+    empty = dict(stated, obligations=[
+        {"id": "STAT-Y", "name": "Y", "rule": "UNVERIFIED — pending"}])
+    _, gaps = build_statutory(empty, today)
+    assert "tracking nothing" in gaps[-1]
+
+    bare = {"verified_by_advisor": False,
+            "obligations": [{"id": "STAT-Z", "name": "Z", "rule": "day 15"}]}
+    _, gaps = build_statutory(bare, today)
+    assert "no recorded provenance" in gaps[-1]
+
+
+def test_the_shipped_calendar_alerts_on_the_recurring_obligations():
+    """What the execution order's step 1 actually buys, asserted rather
+    than assumed: the four with known dates alert; the rest stay visible
+    gaps naming what each needs."""
+    import pathlib
+
+    import yaml
+
+    from control.loader import build_statutory
+
+    config = yaml.safe_load(
+        (pathlib.Path(__file__).resolve().parent.parent
+         / "config" / "statutory-calendar.yaml").read_text(encoding="utf-8"))
+    tracked, gaps = build_statutory(config, date(2026, 8, 18))
+
+    assert {t.item_id for t in tracked} == {
+        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-CIT"}
+
+    # VAT alerts on its operative date, five working days early.
+    vat = next(t for t in tracked if t.item_id == "STAT-VAT")
+    assert vat.due == date(2026, 9, 23)
+
+    # The event windows produce no invented date and no line here —
+    # they are counted in the coverage share and reported by the event
+    # register, which knows whether any events are on record.
+    joined = " ".join(gaps)
+    assert "2 event-driven" in joined
+    assert not [g for g in gaps if g.startswith("STAT-ETA-REJ")]
