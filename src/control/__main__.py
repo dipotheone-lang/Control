@@ -1382,6 +1382,66 @@ def cmd_disputes(args) -> int:
         conn.close()
 
 
+def cmd_gaps(args) -> int:
+    """The gap register — execution order step 3.
+
+    Every open item, typed by who can close it, counted per type and
+    never totalled. §6 of the order requires legal coverage to stay
+    visible at 0%, and an average across types is precisely a way of
+    not doing that.
+    """
+    from . import gaps as gp
+    from .db import connect, ensure_schema
+    from .loader import load_for_cycle
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    repo = Path(__file__).resolve().parent.parent.parent
+
+    order = repo / "docs" / "decisions" / "EXECUTION-ORDER-18-Aug-2026.md"
+    charter = repo / "CLAUDE.md"
+    order_text = order.read_text(encoding="utf-8") if order.is_file() else ""
+    charter_text = charter.read_text(encoding="utf-8") if charter.is_file() else ""
+    if not order_text:
+        print(f"execution order not found at {order} — the register would be "
+              "missing the seven items the CEO already listed, and a partial "
+              "register that does not say so is worse than none (§1.1).")
+        return 1
+
+    report = _startup(args)
+    conn = connect(report.db_path)
+    try:
+        ensure_schema(conn)
+        loaded = load_for_cycle(report.config, conn, today,
+                                logs_dir=control_root / "logs")
+        live = loaded.gaps
+    finally:
+        conn.close()
+
+    documents = sorted((repo / "docs" / "governance").glob("*.md"))
+    found = gp.collect(order_text, charter_text, documents, live)
+    per_type = gp.counts(found)
+
+    out_dir = control_root / "discovery"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = out_dir / "GAP-REGISTER.md"
+    written.write_text(gp.render(found, today), encoding="utf-8")
+
+    print(f"gap register — {len(found)} item(s), counted per type and never "
+          "totalled:")
+    for kind in gp.TYPES:
+        print(f"  {kind:8} {per_type[kind]:3}  — {gp.TYPE_NOTE[kind]}")
+    print("\nLEGAL coverage reads 0% and must stay visible at 0% until "
+          "counsel is engaged — that is D-52 working, not failing "
+          "(execution order §6).")
+
+    for note in gp.reconcile(found, order_text):
+        print(f"\nRECONCILIATION: {note}")
+
+    print(f"\nwritten: {written}")
+    return 0
+
+
 def cmd_extract_brief(args) -> int:
     """The extraction brief — execution order step 2.
 
@@ -2064,6 +2124,14 @@ def main(argv: list[str] | None = None) -> int:
                                "CEO absence (§3.3)")
     disputes.add_argument("--today", default="", help="ISO date, for testing")
     disputes.set_defaults(fn=cmd_disputes)
+
+    gaps_cmd = sub.add_parser(
+        "gaps",
+        help="execution order step 3: every open item, typed by who can "
+             "close it")
+    _common(gaps_cmd)
+    gaps_cmd.add_argument("--today", default="", help="ISO date, for testing")
+    gaps_cmd.set_defaults(fn=cmd_gaps)
 
     extract = sub.add_parser(
         "extract-brief",
