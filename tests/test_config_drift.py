@@ -423,3 +423,68 @@ def test_a_label_difference_is_not_treated_as_two_decisions(machine):
     assert row["name"] == "VAT return and payment", "the label follows"
     assert row["owner"] == "someone.else@ubcsis.com", \
         "a real decision about who owns it does not"
+
+
+def test_a_conflict_is_taken_only_when_the_human_names_the_file(machine):
+    """The friction this removes is real and the safety it keeps is too.
+
+    Ten conflicts in `people.yaml` all encoded one decision — O-01,
+    closed 16-Aug-2026, moving two reporting lines to the CEO. Asking
+    for ten hand edits to apply one decision is how the adoption step
+    stops being run at all. Naming the file is the human deciding once.
+    """
+    path = machine / "config" / "people.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for person in data["people"]:
+        if person["email"] == "shymaa@ubcsis.com":
+            person["reports_to"] = "ghareeb@ubcsis.com"
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
+
+    # Not named: the conflict stands and is reported.
+    adopt_drift(machine, REPO_CONFIG)
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
+    shymaa = next(p for p in after["people"]
+                  if p["email"] == "shymaa@ubcsis.com")
+    assert shymaa["reports_to"] == "ghareeb@ubcsis.com"
+    assert any("shymaa" in line for line in config_drift(machine, REPO_CONFIG))
+
+    # Named: taken.
+    adopt_drift(machine, REPO_CONFIG, accept_template=["people.yaml"])
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
+    shymaa = next(p for p in after["people"]
+                  if p["email"] == "shymaa@ubcsis.com")
+    assert shymaa["reports_to"] == "ahmed@ubcsis.com"
+
+
+def test_naming_one_file_does_not_touch_another(machine):
+    """Deciding about the roster is not deciding about thresholds."""
+    path = machine / "config" / "materiality.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["ceo_flag_budget_per_week"] = 25
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
+
+    adopt_drift(machine, REPO_CONFIG, accept_template=["people.yaml"])
+
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert after["ceo_flag_budget_per_week"] == 25
+
+
+def test_accepting_the_template_never_removes_a_local_only_value(machine):
+    """Drift is one-directional: a value the local copy holds and the
+    template does not was never in question, and taking the template
+    side for the conflicts must not quietly become taking the file."""
+    path = machine / "config" / "people.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["people"].append({"email": "newjoiner@ubcsis.com", "name": "New",
+                           "tier": 1})
+    data["local_only_key"] = "kept"
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                    encoding="utf-8")
+
+    adopt_drift(machine, REPO_CONFIG, accept_template=["people.yaml"])
+
+    after = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert after["local_only_key"] == "kept"
+    assert any(p["email"] == "newjoiner@ubcsis.com" for p in after["people"])

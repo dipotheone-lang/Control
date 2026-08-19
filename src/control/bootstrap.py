@@ -348,7 +348,7 @@ def _backup(target: Path) -> Path:
 
 
 def adopt_drift(control_root: Path, template_config: Path,
-                only: str = "") -> list[str]:
+                only: str = "", accept_template=()) -> list[str]:
     """Close every difference that cannot discard a decision.
 
     Detection alone leaves the work as hand-editing YAML on a machine
@@ -371,6 +371,13 @@ def adopt_drift(control_root: Path, template_config: Path,
     That is two decisions disagreeing, and Control saying which is
     current would be Control deciding.
 
+    `accept_template` names files where the human has decided the
+    template side is the current one — the whole point being that they
+    decide once per file rather than once per field. It resolves only
+    the conflicts already reported for that file; anything the local
+    copy holds and the template does not is untouched, because drift is
+    one-directional and a local-only value was never in question.
+
     The file is copied to `config/.superseded/` before it is rewritten,
     because `safe_dump` does not keep comments.
     """
@@ -380,8 +387,10 @@ def adopt_drift(control_root: Path, template_config: Path,
     template_config = Path(template_config)
     applied: list[str] = []
 
+    accepted = {str(f) for f in accept_template}
     pending = [d for d in differences(control_root, template_config)
-               if d.adoptable and (not only or d.file == only)]
+               if (d.adoptable or (d.kind == "conflict" and d.file in accepted))
+               and (not only or d.file == only)]
     by_file: dict[str, list[Difference]] = {}
     for item in pending:
         by_file.setdefault(item.file, []).append(item)
@@ -399,9 +408,11 @@ def adopt_drift(control_root: Path, template_config: Path,
                 continue
             if key in _NAMED_LISTS and isinstance(value, list) \
                     and isinstance(live.get(key), list):
-                applied += _adopt_list(name, key, value, live[key])
+                applied += _adopt_list(name, key, value, live[key],
+                                       take_template=name in accepted)
                 continue
-            if value != live[key] and _is_placeholder(live[key]):
+            if value != live[key] and (
+                    name in accepted or _is_placeholder(live[key])):
                 applied.append(
                     f"{name}: {key} {live[key]!r} -> {value!r}")
                 live[key] = value
@@ -416,7 +427,7 @@ def adopt_drift(control_root: Path, template_config: Path,
 
 
 def _adopt_list(name: str, key: str, template_list: list,
-                live_list: list) -> list[str]:
+                live_list: list, take_template: bool = False) -> list[str]:
     field_name = _NAMED_LISTS[key]
     applied: list[str] = []
 
@@ -438,7 +449,8 @@ def _adopt_list(name: str, key: str, template_list: list,
                 local[field_key] = value
                 applied.append(f"{name}: {key} {label} += {field_key}")
             elif value != local[field_key] and (
-                    field_key in _DISPLAY_FIELDS
+                    take_template
+                    or field_key in _DISPLAY_FIELDS
                     or _is_placeholder(local[field_key])):
                 applied.append(
                     f"{name}: {key} {label} {field_key} "

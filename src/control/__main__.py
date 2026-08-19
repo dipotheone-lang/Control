@@ -584,7 +584,8 @@ def cmd_init(args) -> int:
     # machine was set up would otherwise never arrive.
     drift = config_drift(Path(args.control_root), template)
     if drift and args.adopt:
-        added = adopt_drift(Path(args.control_root), template)
+        added = adopt_drift(Path(args.control_root), template,
+                            accept_template=args.accept_template)
         print(f"\nadopted {len(added)} change(s):")
         for line in added:
             print(f"  + {line}")
@@ -597,6 +598,11 @@ def cmd_init(args) -> int:
             print("current would be Control deciding:")
             for line in remaining:
                 print(f"  - {line}")
+            print("\nIf the template side is the current decision, take it "
+                  "for that file in one step:")
+            for name in sorted({line.split(":")[0] for line in remaining}):
+                print(f"  python -m control init --adopt --accept-template "
+                      f"{name} --control-root \"{args.control_root}\"")
         else:
             print("\nNothing left differing. Your config now carries every "
                   "decision the templates hold.")
@@ -2043,6 +2049,11 @@ def main(argv: list[str] | None = None) -> int:
                       help="copy one named config key from the template, "
                            "e.g. authority.yaml:interim. Naming it is you "
                            "deciding; it never replaces a key you already have")
+    init.add_argument("--accept-template", action="append", default=[],
+                      metavar="FILE.yaml",
+                      help="resolve this file's conflicts in favour of the "
+                           "template, because you have decided the template "
+                           "side is current. Repeatable.")
     init.add_argument("--adopt", action="store_true",
                       help="add template list entries your config lacks; "
                            "never removes or changes what is already there")
