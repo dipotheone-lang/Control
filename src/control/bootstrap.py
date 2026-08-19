@@ -38,6 +38,10 @@ CONFIG_FILES = (
     "statutory-calendar.yaml", "materiality.yaml", "learning-policy.yaml",
     "confidential.yaml", "mailbox-scope.yaml", "transport.yaml",
     "backup.yaml", "continuity.yaml",
+    # Optional in `config.py` — their absence is fail-safe rather than a
+    # §5.6 halt — but a machine that never receives them runs the
+    # restrictive default forever with nothing saying why.
+    "hse.yaml", "filing-evidence.yaml",
 )
 
 
@@ -122,6 +126,11 @@ _NAMED_LISTS = {
     "special_addresses": "address",
     "mailboxes": None,          # bare strings
     "preconditions": "id",
+    # Statutory rows. Without this the twelve class 1 obligations the
+    # CEO stated on 18-Aug-2026 were invisible to drift on any machine
+    # set up before them: the file existed, so it was "kept", and the
+    # rows inside it were never compared.
+    "obligations": "id",
 }
 
 
@@ -175,6 +184,27 @@ def config_drift(control_root: Path, template_config: Path) -> list[str]:
                 have = {_entry_key(e, field_name) for e in live[key]}
                 missing = [_entry_key(e, field_name) for e in template[key]
                            if _entry_key(e, field_name) not in have]
+                # Fields added to a row that already exists. Reported,
+                # never adopted: overwriting a row is where a local
+                # decision would be lost, and `window_days: 7` arriving
+                # on a rule whose local copy says null is exactly the
+                # difference a machine must not close by itself.
+                by_key = {_entry_key(e, field_name): e for e in live[key]
+                          if isinstance(e, dict)}
+                for entry in template[key]:
+                    if not isinstance(entry, dict):
+                        continue
+                    local = by_key.get(_entry_key(entry, field_name))
+                    if local is None:
+                        continue
+                    new_fields = [f for f in entry if f not in local]
+                    if new_fields:
+                        drift.append(
+                            f"{name}: {key} entry "
+                            f"{_entry_key(entry, field_name)!r} gained "
+                            + ", ".join(sorted(new_fields))
+                            + " in the template — review and copy across by "
+                              "hand; a row is never overwritten for you")
                 if missing:
                     drift.append(
                         f"{name}: {key} is missing {len(missing)} entry(ies) "
