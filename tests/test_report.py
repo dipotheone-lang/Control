@@ -40,8 +40,21 @@ def test_horizon_first_sorted_and_windowed(conn, tmp_path):
 def test_empty_horizon_states_the_gap(conn, tmp_path):
     r = weekly_report(conn, as_of=AS_OF, horizon=[], open_items=[],
                       open_decisions=[], control_root=tmp_path)
+    assert "No class 1 or 2 deadlines on record" in r["body"]
     assert "register is incomplete" in r["body"]
     assert "O-03" in r["body"]
+
+
+def test_a_populated_horizon_carries_the_same_caveat(conn, tmp_path):
+    """The caveat used to fire only on an empty horizon, which had it
+    backwards. A horizon showing dates is the one a reader mistakes for
+    coverage — an empty one is obviously empty.
+    """
+    r = weekly_report(conn, as_of=AS_OF, horizon=_horizon(), open_items=[],
+                      open_decisions=[], control_root=tmp_path)
+    horizon_section = r["body"].split("2. OPEN")[0]
+    assert "register is incomplete" in horizon_section
+    assert "do not read this list as coverage" in horizon_section
 
 
 def test_disputes_standing_line(conn, tmp_path):

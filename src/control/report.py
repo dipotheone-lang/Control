@@ -47,6 +47,26 @@ LIMITATION_CONFIDENTIAL_AR = (
     "ومطابقة الدليل لهذه البنود على الإدارة المختصة وليس على النظام."
 )
 
+# D-17, D-18, execution order B5. Not a charter-mandated verbatim line
+# like the one above — it is the same kind of scope boundary for a
+# different reason, and a reader looking for what is not covered has to
+# find both in the same place. Aggregate HSE statistics are evaluated
+# in full; only the individual records are restricted.
+LIMITATION_HSE_EN = (
+    "Individual HSE incident records are tracked for receipt and timeliness "
+    "only. They are special-category health data (D-17) and their contents "
+    "are never read (D-18), so accuracy and completeness for these items "
+    "rest with the responsible department. Aggregate HSE statistics are "
+    "assessed in full."
+)
+LIMITATION_HSE_AR = (
+    "يتم متابعة تقارير الحوادث الفردية الخاصة بالسلامة والصحة المهنية من حيث "
+    "الاستلام والالتزام بالمواعيد فقط. وهي بيانات صحية ذات طبيعة خاصة "
+    "(القرار D-17) ولا تتم قراءة محتواها إطلاقاً (القرار D-18)، ومن ثم تظل "
+    "مسؤولية الدقة والاكتمال لهذه البنود على الإدارة المختصة. أما الإحصاءات "
+    "المجمعة للسلامة والصحة المهنية فيتم تقييمها بالكامل."
+)
+
 
 @dataclass
 class HorizonItem:
@@ -75,18 +95,25 @@ def _horizon_section(horizon: list[HorizonItem], as_of: date) -> list[str]:
               and as_of <= h.due <= as_of + timedelta(days=30)]
     if not window:
         lines.append(
-            "   No class 1 or 2 deadlines on record for the next 30 days. "
-            "If this is unexpected, the register is incomplete — verify the "
-            "statutory calendar (O-03) and the commercial registers before "
-            "trusting the silence."
-        )
-        return lines
-    for h in sorted(window, key=lambda x: x.due):
-        days = (h.due - as_of).days
-        lines.append(
-            f"   [{h.obligation_class}] {h.due:%d-%b-%Y} (T-{days}) {h.name} — "
-            f"owner {h.owner} — {h.status}"
-        )
+            "   No class 1 or 2 deadlines on record for the next 30 days.")
+    else:
+        for h in sorted(window, key=lambda x: x.due):
+            days = (h.due - as_of).days
+            lines.append(
+                f"   [{h.obligation_class}] {h.due:%d-%b-%Y} (T-{days}) "
+                f"{h.name} — owner {h.owner} — {h.status}"
+            )
+    # The caveat runs in BOTH branches. It used to fire only on an empty
+    # horizon, which had it backwards: a horizon showing four dates is
+    # more likely to be read as coverage than one showing none, so the
+    # populated case is where the reminder is worth most. This shows
+    # what is on record; section 6 shows what is not.
+    lines.append(
+        "   This horizon is only as complete as the register behind it — "
+        "the register is incomplete until the statutory calendar is "
+        "advisor-verified (O-03) and the commercial registers are built. "
+        "Gaps are itemised below; do not read this list as coverage."
+    )
     return lines
 
 
@@ -563,7 +590,8 @@ def weekly_report(
         + sections
         + ["", "STANDING LIMITATIONS",
            f"   {shared_en}",
-           f"   {LIMITATION_CONFIDENTIAL_EN}"]
+           f"   {LIMITATION_CONFIDENTIAL_EN}",
+           f"   {LIMITATION_HSE_EN}"]
     )
     ar = "\n".join([
         f"تقرير كنترول الأسبوعي — {as_of:%d-%b-%Y}",
@@ -575,6 +603,7 @@ def weekly_report(
         "القيود الدائمة:",
         f"   {shared_ar}",
         f"   {LIMITATION_CONFIDENTIAL_AR}",
+        f"   {LIMITATION_HSE_AR}",
     ])
 
     return {

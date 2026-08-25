@@ -1,0 +1,112 @@
+# HSE reporting — split by what the record contains
+# Execution order 18-Aug-2026, build change B5; decisions D-17, D-18;
+# conflict resolution §3.2.
+#
+# WHY THIS FILE EXISTS, AND WHY THE REASON IS WRITTEN HERE
+#
+# D-17 records that HSE incident records are special-category health
+# data. D-13 makes the lawful basis legitimate interests, and
+# special-category data normally needs a stronger basis than that. The
+# execution order resolves the conflict by making D-18 a hard rule:
+# individual incident reports are metadata-only, never read, so the
+# health data is never processed at all. A conflict that is made moot
+# rather than argued.
+#
+# The order then says, in the same paragraph: "Record the reason in
+# config so it is not relaxed casually." This file is that record.
+#
+# **Any future request to read incident content re-opens D-17 and
+# requires a CEO decision, not a configuration change.** Reading it is
+# also a §7 stop condition of the execution order — halt and escalate,
+# not a judgement call. Editing `incident_reports` below does not make
+# it permitted; it makes the edit the thing that has to be explained.
+
+incident_reports: metadata_only        # D-18. Never read. See above.
+aggregate_reports: evaluated           # D-17 does not reach counts.
+
+decision: D-17, D-18
+basis_if_read: none — legitimate interests (D-13) does not cover special category
+stop_condition: execution order §7 — any request to read HSE incident content
+
+# ---- What counts as an individual incident report --------------------
+#
+# Conservative by design, on the same asymmetry as §12.1.1: treating an
+# aggregate as restricted costs a check; treating an incident as an
+# aggregate processes health data with no basis for it. If in doubt,
+# restricted.
+#
+# Matching is on the subject line and attachment filenames only —
+# metadata — because deciding whether a document may be read by reading
+# it is not a control.
+
+incident_markers:
+  - incident
+  - accident
+  - injury
+  - injured
+  - near miss
+  - near-miss
+  - nearmiss
+  - first aid
+  - first-aid
+  - lost time
+  - lost-time
+  - lti
+  - fatality
+  - fatal
+  - medical
+  - hospital
+  - ambulance
+  - rca                                # root cause analysis of an incident
+  - root cause
+  - investigation report
+  - حادث
+  - حوادث
+  - إصابة
+  - اصابة
+  - وشيك                               # near miss
+  - إسعاف
+  - اسعاف
+
+# An aggregate marker alone is not enough to permit reading — an
+# incident marker anywhere overrides it. These exist so that a monthly
+# statistics return is not held back for containing the word "incident"
+# in a column heading in its filename.
+aggregate_markers:
+  - monthly hse
+  - hse monthly
+  - statistics
+  - statistical
+  - man-hours
+  - manhours
+  - man hours
+  - kpi
+  - dashboard
+  - summary
+  - إحصائ
+  - احصائ
+  - شهري
+
+# An HSE item matching neither list is restricted, not evaluated. An
+# unclassifiable HSE document is exactly the case the asymmetry above
+# was written for.
+default_when_unmatched: restricted
+
+# ---- Continuity CC ---------------------------------------------------
+#
+# D-04 excludes SUSPECTED_FRAUD, S1-S4 flags, SOD itemisations and
+# confidential-client content from the standing CC to the external
+# consumer Gmail account. It was written before D-17 existed and does
+# not name special-category health data.
+#
+# Control applies the exclusion anyway. §14.1's safety spine permits
+# tightening without approval and requires approval only to loosen, and
+# sending a notice about an individual's incident report to a consumer
+# mailbox outside company control is the thing D-04's list exists to
+# prevent, arriving by a door the list did not anticipate.
+#
+# This is raised for CEO confirmation as an extension of D-04, not
+# recorded as one. Until confirmed it stands as a tightening Control
+# applied and disclosed.
+cc_excluded: true
+cc_exclusion_status: PROPOSED — extends D-04, applied meanwhile as a tightening (§14.1)

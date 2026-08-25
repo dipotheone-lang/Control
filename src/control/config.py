@@ -34,6 +34,27 @@ REQUIRED_FILES = (
     "continuity.yaml",
 )
 
+# Files that refine behaviour but whose absence is fail-safe, so §5.6's
+# halt would be the wrong response. `hse.yaml` splits HSE reporting into
+# aggregate statistics (evaluated) and individual incident records
+# (metadata-only, D-18). Without it every HSE item is treated as an
+# incident record and read metadata-only — the conservative direction —
+# and Control says that is what it is doing rather than implying the
+# split is working. Halting instead would trade a working restrictive
+# default for no system at all.
+OPTIONAL_FILES = (
+    "hse.yaml",
+    # What counts as evidence of a statutory filing (execution order
+    # step 2). Its absence stops the extraction brief and nothing else,
+    # and the brief refuses to run rather than guessing which documents
+    # are returns.
+    "filing-evidence.yaml",
+    # §12.5's schedule. Absent, nothing is measured and nothing is
+    # deleted — which is the safe direction, and the report says so
+    # rather than implying retention is handled.
+    "retention.yaml",
+)
+
 
 @dataclass
 class Config:
@@ -42,6 +63,10 @@ class Config:
 
     def __getitem__(self, name: str) -> dict:
         return self.data[name]
+
+    def get(self, name: str, default=None):
+        """For the optional files. Required ones use `[]` and raise."""
+        return self.data.get(name, default)
 
 
 def load_config(config_dir: Path) -> Config:
@@ -61,6 +86,21 @@ def load_config(config_dir: Path) -> Config:
         if content is None:
             raise HaltError(f"config empty: {path.name} (§5.6 — halt)")
         data[filename.removesuffix(".yaml")] = content
+    for filename in OPTIONAL_FILES:
+        path = config_dir / filename
+        if not path.is_file():
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                content = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            # Present but unparseable is not the same as absent. The
+            # fail-safe default covers a missing file; it does not cover
+            # a file somebody edited into nonsense.
+            raise HaltError(f"config unparseable: {path.name}: {e}") from e
+        if content:
+            data[filename.removesuffix(".yaml")] = content
+
     cfg = Config(root=config_dir, data=data)
     _validate(cfg)
     return cfg

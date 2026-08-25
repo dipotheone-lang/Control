@@ -59,11 +59,13 @@ def test_it_is_always_a_draft(root, capsys):
     assert not list((control_root / "outbox" / "sent").glob("*.json"))
 
 
-def test_an_empty_register_reads_as_empty_not_as_clear(root, capsys):
-    """§11's hard rule. A reassuring zero is the failure mode."""
+def test_a_partial_register_reads_as_partial_not_as_clear(root, capsys):
+    """§11's hard rule. A reassuring number is the failure mode, and
+    four class 1 alerts on a twelve-row register is exactly that shape.
+    """
     run(root)
     out = capsys.readouterr().out
-    assert "No class 1 or 2 deadlines on record" in out
+    assert "4 of 12 class 1 obligations have a usable date" in out
     assert "the register is incomplete" in out
 
 
@@ -73,7 +75,7 @@ def test_every_loader_gap_reaches_the_page(root, capsys):
     run(root)
     out = capsys.readouterr().out
     assert "obligations.yaml is empty" in out
-    assert "verified_by_advisor is false" in out
+    assert "not advisor-verified" in out
     assert "only class carrying fines" in out
 
 

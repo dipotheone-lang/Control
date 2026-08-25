@@ -96,7 +96,21 @@ class SubmissionDoc:
     revision: str | None = None
     fields: dict = field(default_factory=dict)
     unreadable: bool = False
+    # `confidential` switches on the §12.1.3 reduced check set;
+    # `restricted_basis` says under which decision. Two documents get
+    # the identical treatment for opposite reasons — an NDA (D-01) and
+    # special-category health data (D-17/D-18) — and a report line
+    # citing the wrong one describes a restriction that does not exist.
     confidential: bool = False
+    restricted_basis: str = ""
+
+    def __post_init__(self):
+        # The pair cannot be allowed to disagree, so neither is set
+        # independently of the other.
+        if self.restricted_basis:
+            self.confidential = True
+        elif self.confidential:
+            self.restricted_basis = "CONFIDENTIAL_CLIENT"
 
 
 @dataclass
@@ -358,7 +372,18 @@ def _evaluate_confidential(
     else:
         results["C2"] = "NOT VERIFIABLE"
 
+    label = _NOT_ASSESSED.get(doc.restricted_basis, _NOT_ASSESSED[""])
     for check in ("C3", "C4", "C5", "C6", "C7"):
-        results[check] = "NOT ASSESSED — CONFIDENTIAL SCOPE"
+        results[check] = label
 
     return Evaluation(verdict, timeliness_text, findings, results)
+
+
+# The same reduced set, named by the decision that imposed it. §12.1.4's
+# stated limitation is about client confidentiality and would be simply
+# untrue of an injury record.
+_NOT_ASSESSED = {
+    "": "NOT ASSESSED — CONFIDENTIAL SCOPE",
+    "CONFIDENTIAL_CLIENT": "NOT ASSESSED — CONFIDENTIAL SCOPE",
+    "HSE_INCIDENT": "NOT ASSESSED — SPECIAL CATEGORY (D-17, D-18)",
+}
