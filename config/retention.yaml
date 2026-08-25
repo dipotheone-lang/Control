@@ -1,0 +1,152 @@
+# Retention schedule — charter §12.5, execution order §2.4 (B11)
+#
+# WHAT THIS FILE IS FOR
+#
+# §12.5 requires a schedule per record class and says deletion is
+# deliberate and logged. B11 records that the mechanism "does not
+# exist; build before first retention falls due" — because a retention
+# schedule without a way to act on it is a document, not a control.
+#
+# NOTHING HERE IS CONFIRMED BY COUNSEL. O-10 is open, every period
+# below is at best `ceo_stated`, and the engine refuses to delete on an
+# unconfirmed period. That refusal is the point: deleting a commercial
+# book early may breach a statutory minimum, and deletion is the one
+# operation this system cannot undo. Reporting what is due costs
+# nothing and is done regardless.
+
+confirmed_by_counsel: false          # O-10
+source: Execution order 18-Aug-2026 §2.4, and docs/governance/RETENTION-SCHEDULE.md
+provenance: ceo_stated
+
+# Egyptian commercial and tax law impose minimums on commercial books
+# and supporting documents — commonly five years (D-26, D-49). A period
+# below this floor is refused by the engine even when counsel has
+# confirmed the schedule, because a schedule cannot authorise less than
+# the law requires.
+#
+# IT APPLIES PER CLASS, AND MOST CLASSES ARE NOT COMMERCIAL BOOKS.
+# Applying it to everything would push the wrong way: an anomaly flag
+# or a submission record held for five years because a tax rule about
+# ledgers says so is personal data kept longer than needed, which is
+# the PDPL failure §12.5 exists to prevent, arriving from the opposite
+# direction. Only a class carrying commercial or supporting financial
+# records sets `statutory_floor_applies: true`.
+statutory_floor_months: 60
+
+classes:
+  - id: SUBMISSIONS
+    name: Submission and verdict records (class 3)
+    tables: [submissions, findings]
+    months: 24
+    decision: RETENTION-SCHEDULE.md class B
+    note: >
+      Long enough for the §11 six-month trend and an annual review with
+      comparison; short enough that a defect from three years ago
+      cannot resurface in a conversation about a person.
+
+  - id: ANOMALIES
+    name: Anomaly observations (S1-S4)
+    tables: [anomalies]
+    months: 24
+    decision: RETENTION-SCHEDULE.md class B
+    note: >
+      Fraud patterns need multi-period visibility; unbounded retention
+      of unconfirmed suspicion does not. A flag under investigation is
+      retained until the investigation closes — which the engine cannot
+      determine, so those are reported and never swept.
+
+  - id: THREADS
+    name: External SLA thread records
+    tables: [external_threads]
+    months: 24
+    decision: RETENTION-SCHEDULE.md class B
+
+  - id: DISPUTES
+    name: Disputes — named records
+    tables: [disputes]
+    months: 24
+    decision: D-33
+    note: >
+      D-33 keeps the anonymised test case permanently and the NAMED
+      record for 24 months. The engine cannot split a row into its
+      anonymised and named halves, so this is reported and blocked
+      rather than swept — see `unbuilt` below.
+
+  - id: AUDIT
+    name: Hash-chained audit log
+    tables: [audit_log]
+    paths: [logs]
+    months: 84
+    decision: D-14 (execution order — proposed renumber D-57)
+    never_delete: true
+    note: >
+      Seven years, and NEVER swept by this engine at any age. The chain
+      is the evidence that the record is unaltered (§13.3); deletion IS
+      a chain break, and a chain break is a critical incident. Ageing
+      the log out is a decision that has to be taken knowing that, not
+      a sweep that happens on a schedule.
+
+  - id: UNMATCHED_METADATA
+    name: Message metadata matched to no obligation or thread
+    paths: [discovery/scan-cache]
+    months: 3
+    decision: D-34
+    note: >
+      Metadata swept from a mailbox and matched to nothing has served
+      its purpose once the sweep completes. Keeping it because it was
+      easy to collect is the accumulation §12.5 exists to prevent.
+
+  - id: OUTBOX
+    name: Outbox — sent messages
+    paths: [outbox/sent]
+    months: 24
+    decision: RETENTION-SCHEDULE.md
+
+  - id: BACKUPS
+    name: Encrypted backups
+    paths: [data/backup]
+    months: 12
+    decision: RETENTION-SCHEDULE.md
+    note: Cold-start capability without an indefinite shadow copy.
+
+  - id: SUBMITTED_FILES
+    name: Submitted documents on disk
+    paths: [data/submissions]
+    months: 24
+    statutory_floor_applies: true
+    decision: RETENTION-SCHEDULE.md class B
+    note: >
+      The one class that plausibly holds supporting documents for the
+      commercial books, so the five-year floor applies and 24 months is
+      refused. Counsel has to say whether a submitted report IS a
+      supporting document — if it is not, this drops back to 24 months
+      and nothing else changes.
+
+# ---- What cannot be built without a decision -------------------------
+#
+# §5.2 makes the record tables append-only, enforced by triggers rather
+# than convention: "UPDATE and DELETE are blocked". §12.5 requires
+# deletion. Both are in the charter and both are load-bearing, and for
+# the tables holding most of the personal data they cannot both hold.
+#
+# The engine does not resolve this. It reports every row that is past
+# its period and cannot be deleted, so the size of the problem is
+# visible rather than discovered at a data-subject request.
+unbuilt:
+  - id: APPEND_ONLY_CONFLICT
+    what: §5.2 append-only versus §12.5 deletion
+    affects: [submissions, findings, anomalies, disputes, external_threads]
+    needs: >
+      A CEO decision on which gives way, and how. Three shapes exist and
+      none is Control's to pick: lift the trigger for a logged retention
+      sweep and accept that the tables are no longer strictly
+      append-only; redact the personal columns in place and keep the
+      row, which is an UPDATE and equally blocked; or hold that the
+      append-only record is itself the lawful basis and set retention
+      to match the audit log. The third is the only one that needs no
+      code, and it is the one with the largest PDPL exposure.
+  - id: DISPUTE_SPLIT
+    what: D-33 splits a dispute into an anonymised case and a named record
+    needs: >
+      The two live in one row. Separating them is a schema change, and
+      until it exists the named half ages without a way to remove it.

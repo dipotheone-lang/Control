@@ -41,7 +41,7 @@ CONFIG_FILES = (
     # Optional in `config.py` — their absence is fail-safe rather than a
     # §5.6 halt — but a machine that never receives them runs the
     # restrictive default forever with nothing saying why.
-    "hse.yaml", "filing-evidence.yaml",
+    "hse.yaml", "filing-evidence.yaml", "retention.yaml",
 )
 
 

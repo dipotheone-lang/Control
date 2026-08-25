@@ -1631,6 +1631,52 @@ def cmd_advisor_brief(args) -> int:
     return 0
 
 
+def cmd_retention(args) -> int:
+    """§12.5 retention — what is past its period, and why nothing went.
+
+    Deliberately report-only for now. §5.2 makes the record tables
+    append-only and §12.5 requires deletion; both are in the charter
+    and for those tables they cannot both hold. Control does not pick
+    between two charter rules (§1.3) — it measures the problem and
+    raises it.
+    """
+    from . import retention as ret
+    from .config import load_config
+    from .db import connect, ensure_schema
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    config = load_config(control_root / "config").get("retention")
+
+    conn = connect(control_root / "data" / "control.db")
+    try:
+        ensure_schema(conn)
+        due = ret.survey(conn, control_root, config, today)
+    finally:
+        conn.close()
+
+    why = ret.blockers(config)
+    out_dir = control_root / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = out_dir / f"retention-{today.isoformat()}.md"
+    written.write_text(ret.render(due, why, config, today), encoding="utf-8")
+
+    rows = sum(d.rows for d in due)
+    files = sum(d.files for d in due)
+    print(f"{rows} database row(s) and {files} file(s) are past their "
+          "retention period.")
+    print("\nNothing was deleted:")
+    for reason in why:
+        print(f"  - {' '.join(reason.split())}")
+    blocked = [b for d in due for b in d.blocked]
+    if blocked:
+        print(f"\n{len(blocked)} blocker(s) on specific records:")
+        for what, reason in blocked:
+            print(f"  - {what}: {' '.join(reason.split())}")
+    print(f"\nwritten: {written}")
+    return 0
+
+
 def cmd_gaps(args) -> int:
     """The gap register — execution order step 3.
 
@@ -2426,6 +2472,15 @@ def main(argv: list[str] | None = None) -> int:
     advisor_cmd.add_argument("--ub-root", default=os.environ.get("UB_ROOT"))
     advisor_cmd.add_argument("--today", default="", help="ISO date, for testing")
     advisor_cmd.set_defaults(fn=cmd_advisor_brief)
+
+    retention_cmd = sub.add_parser(
+        "retention",
+        help="§12.5: what is past its retention period, and why nothing "
+             "has been deleted")
+    retention_cmd.add_argument("--control-root",
+                               default=os.environ.get("CONTROL_ROOT"))
+    retention_cmd.add_argument("--today", default="", help="ISO date, for testing")
+    retention_cmd.set_defaults(fn=cmd_retention)
 
     gaps_cmd = sub.add_parser(
         "gaps",

@@ -49,6 +49,10 @@ OPTIONAL_FILES = (
     # and the brief refuses to run rather than guessing which documents
     # are returns.
     "filing-evidence.yaml",
+    # §12.5's schedule. Absent, nothing is measured and nothing is
+    # deleted — which is the safe direction, and the report says so
+    # rather than implying retention is handled.
+    "retention.yaml",
 )
 
 
