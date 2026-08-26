@@ -17,6 +17,22 @@ logs/**
 !logs/.gitkeep
 !logs/README.md
 
+# Phase 0 output — the same rule, and the hole this file used to have.
+#
+# On the live laptop CONTROL_ROOT *is* the repo checkout, so Stage A-J
+# write straight into this tracked directory: file-inventory.csv lists
+# every path on the company drive, COMMERCIAL-EXPOSURE.md carries
+# contract dates and guarantee values for NDA clients, GAP-ANALYSIS.md
+# names individuals and their filing behaviour. One `git add -A` would
+# push all of it to GitHub — §1.8, "never leak internal content
+# externally", and §12.1/§12.2 in one move.
+#
+# The rule below only ever covered a CONTROL_ROOT *nested* inside the
+# repo. The repo's own discovery/ was tracked.
+discovery/**
+!discovery/.gitkeep
+!discovery/README.md
+
 # A CONTROL_ROOT created inside the repo. Discovery output is mail
 # metadata about identified individuals — senders, subjects, timestamps
 # — and falls under the same rule as the paths above (§12.1, §12.2).
