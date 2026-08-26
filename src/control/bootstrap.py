@@ -42,6 +42,11 @@ CONFIG_FILES = (
     # §5.6 halt — but a machine that never receives them runs the
     # restrictive default forever with nothing saying why.
     "hse.yaml", "filing-evidence.yaml",
+    # Three Phase 1 gate rows close on a human act rather than on a file
+    # existing (§16, §12.4). Without somewhere to record the act they
+    # could never close, and Control does not write this one — it counts
+    # what a person put in it.
+    "acknowledgements.yaml",
 )
 
 
