@@ -10,12 +10,19 @@ nothing to remind anyone about, and had no submissions to build a
 golden set from — with the gate that ends Phase 0 unreachable by any
 command.
 
-This is that join, in two halves that must stay apart.
+This module is now the APPROVAL half only.
 
-**Proposing is inference and Control does it.** A candidate is a sender
-plus a recurring subject with a measured cadence. Everything derived
-from timestamps — the weekday, the day of month, the hour — is carried
-as an observation and labelled as one.
+**Proposing moved to `discovery/register_proposal.py`**, which builds
+from the drive rather than from the mailboxes — and that difference is
+not a preference. Stage D against `control@` finds almost nothing: the
+recurring senders are the tax portal and the e-invoicing gateway,
+because the company's internal reporting was never sent there. It is in
+`1. Invoices/2022 In/Progress Reports - 2022 In/` and folders like it.
+A register built from the mail alone proposes an empty class 3 with a
+clean conscience, which is the exact failure this system exists to
+prevent. The mailbox-based proposer that used to live here was
+superseded rather than kept alongside — two register builders is the
+competing-revisions defect the charter flags in Stage B.
 
 **Approving is a decision and only the CEO makes it.** Nothing reaches
 `obligations.yaml` without `approved_by_ceo`, because §6 makes that
@@ -297,9 +304,25 @@ def approve(proposals_path: Path, obligations_path: Path, by: str,
         if obligation_id in existing:
             skipped.append(f"{obligation_id}: already in the register")
             continue
-        if not row.get("due"):
+        # The due expression is validated, not merely checked for
+        # emptiness. `register_proposal` writes "NOT ESTABLISHED" rather
+        # than a blank, which is truthy — so a presence check would have
+        # approved every row that has no deadline at all, and an
+        # approved row that tracks nothing is worse than an unapproved
+        # one because it looks like coverage.
+        from .loader import parse_due
+
+        due, problem = parse_due(str(row.get("due") or ""),
+                                 str(row.get("cadence") or ""), date.today())
+        if due is None:
+            # The proposal's own recorded reason first: "arrives weekly
+            # but on no consistent day" tells the reader what to do
+            # about it, where "no due expression" only tells them it is
+            # missing.
+            reason = (row.get("open_question") or problem
+                      or "reason not recorded")
             skipped.append(f"{obligation_id}: no computable due date — "
-                           f"{row.get('open_question') or 'reason not recorded'}")
+                           f"{reason}")
             continue
         rows.append({**row, "approved_by_ceo": by})
         approved.append(obligation_id)

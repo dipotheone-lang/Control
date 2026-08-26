@@ -1480,6 +1480,12 @@ def cmd_phase1(args) -> int:
         marker = "ok " if outcome == "done" else "-- "
         print(f"  {marker}{label.split('.', 1)[-1].strip()} — {outcome}")
 
+    # The run is not the answer. §16's gate is seven conditions and
+    # Control can close none of them, so the runner ends by measuring
+    # them rather than by reporting that it finished.
+    run("9. Phase 1 gate — the seven conditions, measured", lambda: cmd_gate(
+        like()))
+
     print("\nWhat is left, and why it cannot be done for you:")
     print("  1. Approve the obligation register. §6 makes that approval "
           "the thing that\n     ends Phase 0. One command:")
@@ -1493,6 +1499,48 @@ def cmd_phase1(args) -> int:
     return 0
 
 
+def cmd_gate(args) -> int:
+    """The Phase 0 and Phase 1 gates, measured — §16, §13.1.
+
+    Control can close none of the seven Phase 1 conditions by itself.
+    That is the point of writing them down, and it is why this measures
+    rather than decides: each condition becomes a row with its state,
+    the evidence actually observed, and the named person who can close
+    it.
+    """
+    from . import phase1 as gate
+    from .config import load_config
+    from .db import connect, ensure_schema
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    config = load_config(control_root / "config")
+
+    conn = None
+    db_path = control_root / "data" / "control.db"
+    if db_path.is_file():
+        conn = connect(db_path)
+        ensure_schema(conn)
+    try:
+        evidence = gate.gather(control_root, conn, config)
+    finally:
+        if conn is not None:
+            conn.close()
+
+    phase0 = gate.assess_phase0(evidence)
+    phase1_items = gate.assess_phase1(evidence)
+    for line in gate.console_lines(phase0, phase1_items):
+        print(line)
+
+    out_dir = control_root / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = out_dir / f"phase1-gate-{today.isoformat()}.md"
+    written.write_text(
+        gate.render(phase0, phase1_items, evidence, today), encoding="utf-8")
+    print(f"\nwritten: {written}")
+    return 0
+
+
 def cmd_register_obligations(args) -> int:
     """Stage D proposals to an approved obligation register — §6.
 
@@ -1501,8 +1549,10 @@ def cmd_register_obligations(args) -> int:
     CEO makes it.
     """
     from . import register as reg
-    from .config import known_addresses, load_config
-    from .discovery.analyse import infer_obligations, load_rows
+    from .config import load_config
+    from .discovery import forms as forms_mod
+    from .discovery import register_proposal as proposal
+    from .discovery import series as series_mod
 
     control_root = Path(args.control_root)
     today = date.fromisoformat(args.today) if args.today else date.today()
@@ -1533,40 +1583,49 @@ def cmd_register_obligations(args) -> int:
                   "and the class 3 ladder runs on them from the next cycle.")
         return 0
 
-    scans = sorted(discovery.glob("outlook-scan-*.jsonl"))
-    if not scans:
-        print(f"no scan output in {discovery}. Run outlook-scan first — "
-              "there is nothing to infer obligations from.")
+    # Built from the DRIVE, not from the mailboxes. Stage D against
+    # control@ finds almost nothing: the recurring senders are the tax
+    # portal and the e-invoicing gateway, because the company's internal
+    # reporting was never sent there. A register built from the mail
+    # alone would have proposed an empty class 3 with a clean
+    # conscience.
+    inventory = discovery / "file-inventory.csv"
+    ub_root = Path(args.ub_root) if args.ub_root else None
+    if inventory.is_file():
+        rows = series_mod.read_inventory(inventory)
+        source = f"Stage B inventory ({inventory.name})"
+    elif ub_root and ub_root.is_dir():
+        rows = series_mod.walk(ub_root)
+        source = f"direct walk of {ub_root}"
+    else:
+        print(f"no file inventory at {inventory} and UB_ROOT not reachable. "
+              "The register is built from document series on the drive, so "
+              "there is nothing to infer from.")
         return 1
 
-    roster = known_addresses(load_config(control_root / "config")["people"])
-    candidates = []
-    for scan in scans:
-        rows = load_rows(scan)
-        if rows:
-            candidates += infer_obligations(
-                rows, min_occurrences=args.min_occurrences)
+    detected = series_mod.detect(rows)
+    significant = series_mod.significant(detected)
 
-    proposals, declined = reg.propose(
-        candidates, roster=roster, min_confidence=args.min_confidence)
+    manual_root = control_root / "knowledge" / "manuals"
+    if ub_root and ub_root.is_dir():
+        manual_root = ub_root
+    forms_register = forms_mod.build(manual_root)
+
+    statutory = load_config(control_root / "config")["statutory-calendar"]
+    register = proposal.build(significant, forms_register, statutory, today)
 
     discovery.mkdir(parents=True, exist_ok=True)
-    proposals_path.write_text(
-        __import__("yaml").safe_dump(
-            {"obligations": reg.to_rows(proposals)},
-            allow_unicode=True, sort_keys=False),
-        encoding="utf-8")
-    worksheet = discovery / "PROPOSED-OBLIGATION-REGISTER.md"
-    worksheet.write_text(
-        reg.render_worksheet(proposals, declined, today), encoding="utf-8")
+    proposals_path.write_text(proposal.to_yaml(register), encoding="utf-8")
+    gap_analysis = discovery / "GAP-ANALYSIS.md"
+    gap_analysis.write_text(
+        proposal.render_gap_analysis(register, today), encoding="utf-8")
 
-    usable = [p for p in proposals if p.usable]
-    print(f"{len(candidates)} Stage D candidate(s) -> {len(proposals)} "
-          f"proposal(s), {len(usable)} with a computable due date.")
-    for reason, count in sorted(declined.items()):
-        if count:
-            print(f"  declined {count}: {reason}")
-    print(f"\nworksheet: {worksheet}")
+    print(f"source: {source} — {len(rows)} path(s), {len(detected)} series, "
+          f"{len(significant)} significant")
+    for line in proposal.render_summary(register):
+        print(f"  {line}")
+    print(f"\nproposals: {proposals_path}")
+    print(f"gap analysis: {gap_analysis}")
     print("\nNothing is tracked until it carries approved_by_ceo (§6). "
           "To approve every proposal with a usable due date:")
     print(f"  python -m control register --approve --by ahmed@ubcsis.com "
@@ -2398,6 +2457,13 @@ def main(argv: list[str] | None = None) -> int:
     phase1.add_argument("--skip-cycle", action="store_true",
                         help="skip the mail cycle (no transport)")
     phase1.set_defaults(fn=cmd_phase1)
+
+    gate_cmd = sub.add_parser(
+        "gate",
+        help="§16: the Phase 0 and Phase 1 gate conditions, measured")
+    _common(gate_cmd)
+    gate_cmd.add_argument("--today", default="", help="ISO date, for testing")
+    gate_cmd.set_defaults(fn=cmd_gate)
 
     register_cmd = sub.add_parser(
         "register",

@@ -539,3 +539,116 @@ def document_adopted(config_dir: Path, document: str) -> bool:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     entries = (data.get("documents") or {}).get(document) or {}
     return bool(entries.get("adopted") or entries.get("issued"))
+
+
+# ---- gathering the evidence -------------------------------------------
+
+def gather(control_root: Path, conn, config) -> Evidence:
+    """Read the gate's evidence off disk and out of the database.
+
+    Every field is an observation. Nothing here decides whether a
+    condition is met — `assess_phase0` and `assess_phase1` do that, and
+    keeping the two apart is what makes a wrong row traceable to a wrong
+    reading rather than to a judgement buried in a gatherer.
+
+    A source that is absent produces the default, which is always the
+    conservative one: zero cases, nothing acknowledged, nothing adopted.
+    An unreadable file must never read as a satisfied condition.
+    """
+    import yaml
+
+    control_root = Path(control_root)
+    config_dir = control_root / "config"
+    e = Evidence()
+
+    obligations = (config["obligations"] or {}).get("obligations") or []
+    e.register_approved = len([r for r in obligations
+                               if r.get("approved_by_ceo")])
+    proposed = control_root / "discovery" / "PROPOSED-OBLIGATION-REGISTER.yaml"
+    if proposed.is_file():
+        try:
+            data = yaml.safe_load(proposed.read_text(encoding="utf-8")) or {}
+            e.register_proposed = len(data.get("obligations") or [])
+        except Exception:
+            e.register_proposed = 0
+
+    people = (config["people"] or {}).get("people") or []
+    e.reporting_lines_unconfirmed = len(
+        [p for p in people if p.get("confirmed") is False])
+
+    statutory = config["statutory-calendar"] or {}
+    e.statutory_verified_by_advisor = bool(
+        statutory.get("verified_by_advisor"))
+    e.statutory_ceo_stated = len(
+        [r for r in (statutory.get("obligations") or [])
+         if r.get("provenance") == "ceo_stated"])
+
+    authority = config["authority"] or {}
+    thresholds = authority.get("thresholds") or {}
+    e.authority_thresholds_set = any(
+        v for v in thresholds.values() if isinstance(v, (int, float)) and v)
+    e.authority_interim_active = bool(authority.get("interim"))
+    e.authority_review_due = str(authority.get("review_due") or "")
+
+    golden = control_root / "tests" / "golden-set"
+    if golden.is_dir():
+        e.golden_cases = len(list(golden.glob("*.yaml")))
+    worksheets = golden / "worksheets"
+    if worksheets.is_dir():
+        e.golden_batches_issued = len(list(worksheets.glob("batch-*.md")))
+
+    e.usage_policy_drafted = _drafted(control_root, "USAGE-POLICY")
+    e.iwr_drafted = _drafted(control_root, "IWR-AMENDMENT")
+    e.pdpl_drafted = _drafted(control_root, "PDPL-BASIS")
+    e.usage_policy_acknowledged, e.usage_policy_expected = acknowledgements(
+        config_dir, "usage_policy")
+    e.iwr_adopted = document_adopted(config_dir, "iwr")
+    e.pdpl_issued = document_adopted(config_dir, "pdpl_notification")
+
+    confidential = config["confidential"] or {}
+    clients = confidential.get("confidential_clients") or []
+    e.confidential_clients = len(clients)
+    e.confidential_confirmed = len([c for c in clients if c.get("confirmed")])
+
+    absence = config["absence"] or {}
+    e.absence_register_present = bool(absence.get("absences") is not None
+                                      or absence.get("owner"))
+    e.absence_owner = str(absence.get("owner") or "")
+
+    # The dispute path is published when staff have been told how to use
+    # it, which is the announcement and the policy — not when the code
+    # exists. `disputes.py` has worked for weeks and nobody has been told.
+    e.dispute_path_published = bool(
+        e.usage_policy_acknowledged and e.usage_policy_expected
+        and e.usage_policy_acknowledged >= e.usage_policy_expected)
+
+    logs = control_root / "logs"
+    if logs.is_dir():
+        e.dry_run_cycles = len(list(logs.glob("????-??-??.jsonl")))
+    pending = control_root / "outbox" / "pending-approval"
+    if pending.is_dir():
+        e.drafts_pending = len(list(pending.glob("*.json")))
+
+    if conn is not None:
+        try:
+            e.golden_pending = conn.execute(
+                "SELECT COUNT(*) FROM disputes WHERE state = 'PENDING'"
+            ).fetchone()[0]
+        except Exception:
+            pass
+    return e
+
+
+def _drafted(control_root: Path, stem: str) -> bool:
+    """A governance document exists as a draft.
+
+    Looked for in the repository's `docs/governance` as well as in
+    CONTROL_ROOT, because that is where they are written and a machine
+    that has not copied them has not thereby un-drafted them.
+    """
+    repo = Path(__file__).resolve().parent.parent.parent
+    for base in (Path(control_root) / "knowledge" / "policies",
+                 repo / "docs" / "governance"):
+        if (base / f"{stem}.md").is_file():
+            return True
+    return False

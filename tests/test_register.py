@@ -251,3 +251,48 @@ def test_approval_never_removes_what_was_already_there(files):
 
     live = yaml.safe_load(obligations_path.read_text(encoding="utf-8"))
     assert any(r["id"] == "OPS-EXISTING-001" for r in live["obligations"])
+
+
+# ---- the seam between the two halves ----------------------------------
+
+def test_a_not_established_due_is_refused_like_an_empty_one(tmp_path):
+    """The seam that would have let every dateless row through.
+
+    `register_proposal` writes `due: "NOT ESTABLISHED"` rather than a
+    blank, and a presence check calls that truthy. Every proposal with
+    no deadline at all would have been approved, and an approved row
+    that tracks nothing is worse than an unapproved one because it
+    looks like coverage.
+    """
+    proposals_path = tmp_path / "PROPOSED.yaml"
+    proposals_path.write_text(yaml.safe_dump({"obligations": [
+        {"id": "OPS-DRIVE-001", "class": 3, "name": "Progress report",
+         "owner": "a.elsayed@ubcsis.com", "cadence": "monthly",
+         "due": "NOT ESTABLISHED", "approved_by_ceo": None},
+    ]}, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    obligations_path = tmp_path / "obligations.yaml"
+    obligations_path.write_text("obligations: []\n", encoding="utf-8")
+
+    approved, skipped = approve(proposals_path, obligations_path,
+                                "ahmed@ubcsis.com")
+    assert approved == []
+    assert "no computable due date" in skipped[0]
+    live = yaml.safe_load(obligations_path.read_text(encoding="utf-8"))
+    assert live["obligations"] == []
+
+
+def test_a_real_due_from_the_drive_builder_is_approved(tmp_path):
+    """The other side of it: a proposal the engine can actually parse
+    goes through, so the refusal is a filter and not a wall."""
+    proposals_path = tmp_path / "PROPOSED.yaml"
+    proposals_path.write_text(yaml.safe_dump({"obligations": [
+        {"id": "OPS-DRIVE-002", "class": 3, "name": "Weekly progress",
+         "owner": "a.elsayed@ubcsis.com", "cadence": "weekly",
+         "due": "sunday 10:00", "approved_by_ceo": None},
+    ]}, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    obligations_path = tmp_path / "obligations.yaml"
+    obligations_path.write_text("obligations: []\n", encoding="utf-8")
+
+    approved, _ = approve(proposals_path, obligations_path,
+                          "ahmed@ubcsis.com")
+    assert approved == ["OPS-DRIVE-002"]
