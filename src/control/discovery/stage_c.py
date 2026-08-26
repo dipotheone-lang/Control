@@ -72,14 +72,31 @@ _TERM_PATTERNS = (
         r"validity period|صلاحية)")),
     ("LIQUIDATED_DAMAGES", re.compile(
         r"(?i)(liquidated damages|penalt(?:y|ies) for delay|غرامة تأخير)")),
+    # §2.2: "a claim not noticed within its window is generally
+    # forfeited" — the most expensive miss in the charter, so the
+    # phrasings this has to catch are worth being explicit about.
+    #
+    # The first version required the literal word "notice" and missed
+    # "shall be notified within 21 days", which is how the clause is
+    # normally written. It read as "no notice period in this contract",
+    # which is the silence §1.1 exists to prevent. `notif` now covers
+    # notice / notified / notify / notification, and the window may sit
+    # on either side of the trigger word.
     ("NOTICE_PERIOD", re.compile(
         r"(?i)(within\s+\(?\d{1,3}\)?\s*(?:calendar |working |business )?days?"
-        r".{0,40}(?:notice|claim|variation)|notice.{0,40}within\s+\(?\d{1,3}\)?"
-        r"\s*(?:calendar |working |business )?days?)")),
+        r".{0,60}(?:notif|claim|variation|إخطار|مطالبة)"
+        r"|(?:notif|claim|variation|إخطار|مطالبة).{0,60}within\s+\(?\d{1,3}\)?"
+        r"\s*(?:calendar |working |business )?days?"
+        r"|خلال\s+\(?\d{1,3}\)?\s*يوم)")),
     ("DEFECTS_LIABILITY", re.compile(
         r"(?i)(defects? liability period|maintenance period|فترة الضمان)")),
+    # `retention ` with a trailing space missed "Retention: 5% released
+    # 30 June 2027." — a colon is not a space — so the retention release
+    # date left the register entirely. §2.2 tracks retention releases by
+    # name; a word boundary catches the punctuation this is written with.
     ("RETENTION", re.compile(
-        r"(?i)(retention (?:money|amount|percentage)?|محتجزات)")),
+        r"(?i)(retention\b(?:\s+(?:money|amount|percentage|release))?"
+        r"|محتجزات)")),
     ("PAYMENT_TERMS", re.compile(
         r"(?i)(payment (?:terms|within)|net\s+\d{1,3}\s*days|شروط الدفع)")),
     ("ACCREDITATION", re.compile(
@@ -267,10 +284,39 @@ def _parse_date(fragment: str) -> str:
     return ""
 
 
+# A clause ends at a full stop, a semicolon or a line break. Dates do
+# not cross that boundary and neither may the pairing below: the format
+# "31.12.2026" is not in _DATE_PATTERNS and "0.5%" has no space after
+# the point, so neither is split by this.
+#
+# A colon is NOT a terminator: it introduces the clause rather than
+# ending it. Treating it as one clipped "Retention: 5% released 30 June
+# 2027" to nothing and lost the release date — the opposite error to
+# the one above, and the same cost.
+_SENTENCE_END = re.compile(r"[.;\n]\s|\n")
+
+# How close two matches must be to be reading the same clause.
+_CLAUSE_SPAN = 80
+
+
+def _clause_after(fragment: str) -> str:
+    """The rest of the term's own sentence, and no further."""
+    boundary = _SENTENCE_END.search(fragment)
+    return fragment[:boundary.start()] if boundary else fragment
+
+
+def _clause_before(fragment: str) -> str:
+    """The start of the term's own sentence, and no further back."""
+    last = None
+    for boundary in _SENTENCE_END.finditer(fragment):
+        last = boundary
+    return fragment[last.end():] if last else fragment
+
+
 def find_terms(text: str, source: str, window: int = 120) -> list[CommercialTerm]:
     """Locate commercial terms and the date belonging to each.
 
-    Two subtleties learned the hard way:
+    Three subtleties learned the hard way:
     - distinct matches must stay distinct. Two guarantees a line apart
       share a context window; deduplicating on that window merges them
       and loses one expiry entirely.
@@ -278,8 +324,20 @@ def find_terms(text: str, source: str, window: int = 120) -> list[CommercialTerm
       30/11/2026"). Taking the first date in the window attaches the
       neighbouring clause's date to this one, which is worse than
       reporting no date at all (§1.1).
+    - **preferring the following date is not enough on its own.** The
+      window is 120 characters and clauses are shorter than that, so it
+      reads into the neighbouring sentence in both directions. Found on
+      a test contract: an LD clause reading "0.5% per week, capped at
+      10%" — no date in it anywhere — came out of the register dated
+      31-Dec-2026, borrowed from the guarantee sentence before it; and
+      "Payment terms: 60 days from invoice date" was dated 30-Jun-2027,
+      which was the retention release. Both are fabricated dates in a
+      class 2 register, and §2.1 rates a confident wrong date worse than
+      no date. The window is therefore clipped at the clause boundary in
+      both directions: a term whose own sentence carries no date is
+      reported as undated, which is a finding rather than a fiction.
     """
-    terms: list[CommercialTerm] = []
+    found_terms: list[tuple[int, CommercialTerm]] = []
     seen_spans: set[tuple] = set()
     for kind, pattern in _TERM_PATTERNS:
         for match in pattern.finditer(text):
@@ -290,15 +348,35 @@ def find_terms(text: str, source: str, window: int = 120) -> list[CommercialTerm
 
             after = text[match.end():min(len(text), match.end() + window)]
             before = text[max(0, match.start() - window):match.start()]
-            found = _parse_date(after) or _parse_date(before)
+            found = (_parse_date(_clause_after(after))
+                     or _parse_date(_clause_before(before)))
 
             context = " ".join((before[-60:] + match.group(0) + after[:80]).split())
-            terms.append(CommercialTerm(
+            found_terms.append((match.start(), CommercialTerm(
                 kind=kind, source=source,
                 context=context[:240],
                 found_date=found,
-            ))
-    return terms
+            )))
+
+    # VALIDITY is a qualifier, not a term. "Performance bond valid until
+    # 31 December 2026" matches GUARANTEE_EXPIRY on the instrument and
+    # VALIDITY on the phrasing — one guarantee, two register rows, and
+    # the CEO alerted twice for one expiry. Where a VALIDITY match
+    # shares a clause and a date with a term that names what actually
+    # expires, the named term is the row and the qualifier is dropped.
+    # A validity standing on its own — a quotation, say — still counts,
+    # because there is nothing more specific to defer to.
+    named = [(start, t) for start, t in found_terms if t.kind != "VALIDITY"]
+    kept = []
+    for start, term in found_terms:
+        if term.kind == "VALIDITY" and any(
+                other.found_date == term.found_date
+                and abs(other_start - start) <= _CLAUSE_SPAN
+                for other_start, other in named):
+            continue
+        kept.append((start, term))
+    kept.sort(key=lambda pair: pair[0])
+    return [term for _, term in kept]
 
 
 def run_stage_c(root: Path, confidential_clients: list[str],

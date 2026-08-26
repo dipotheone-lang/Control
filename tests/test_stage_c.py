@@ -218,3 +218,93 @@ def test_a_scan_without_a_progress_callback_still_runs(tmp_path):
     (tmp_path / "a.txt").write_text("Bond valid until 30/11/2026.",
                                     encoding="utf-8")
     assert run_stage_c(tmp_path, [], []).terms
+
+
+# ---- the date belongs to the clause, or to nothing --------------------
+
+CONTRACT = """SUPPLY AGREEMENT
+Performance bond valid until 31 December 2026.
+Advance payment guarantee expires on 15 March 2027.
+Liquidated damages: 0.5% per week, capped at 10% of the contract value.
+Any claim shall be notified within 21 days of the event giving rise to it.
+Retention: 5% released 30 June 2027.
+Defects liability period ends 31 January 2028.
+Payment terms: 60 days from invoice date.
+"""
+
+
+def _by_kind(text=CONTRACT):
+    from control.discovery.stage_c import find_terms
+
+    out = {}
+    for term in find_terms(text, "Supply Agreement.txt"):
+        out.setdefault(term.kind, set()).add(term.found_date)
+    return out
+
+
+def test_every_term_carries_its_own_date_or_none():
+    """One assertion over a whole contract, because the failure mode is
+    a register that looks complete.
+
+    Run on a real supplier agreement, the extractor produced: an LD
+    clause reading "0.5% per week, capped at 10%" dated 31-Dec-2026,
+    borrowed from the guarantee sentence before it; "Payment terms: 60
+    days from invoice date" dated 30-Jun-2027, which was the retention
+    release; the retention release itself missing; and no notice period
+    at all, because the clause says "notified" and the pattern demanded
+    "notice". Two fabricated dates, two silent omissions, and a report
+    that read as a clean extraction.
+    """
+    assert _by_kind() == {
+        "GUARANTEE_EXPIRY": {"2026-12-31", "2027-03-15"},
+        "LIQUIDATED_DAMAGES": {""},
+        "NOTICE_PERIOD": {""},
+        "RETENTION": {"2027-06-30"},
+        "DEFECTS_LIABILITY": {"2028-01-31"},
+        "PAYMENT_TERMS": {""},
+    }
+
+
+def test_a_date_never_crosses_a_full_stop():
+    """The fabrication, isolated. §2.1 rates a confident wrong date
+    worse than no date."""
+    terms = _by_kind("Performance bond valid until 31 December 2026. "
+                     "Liquidated damages: 0.5% per week.")
+    assert terms["LIQUIDATED_DAMAGES"] == {""}
+    assert terms["GUARANTEE_EXPIRY"] == {"2026-12-31"}
+
+
+def test_a_colon_introduces_a_clause_rather_than_ending_it():
+    """The opposite error, and the same cost. Clipping at the colon
+    threw the retention release away entirely."""
+    assert _by_kind("Retention: 5% released 30 June 2027.")["RETENTION"] == {
+        "2027-06-30"}
+
+
+def test_a_claim_notified_within_a_window_is_found():
+    """§2.2: "a claim not noticed within its window is generally
+    forfeited" — the most expensive miss in the charter. "shall be
+    notified within 21 days" is how the clause is normally written, and
+    it was matching nothing."""
+    for phrasing in (
+        "Any claim shall be notified within 21 days of the event.",
+        "The Contractor shall give notice within 14 days of any variation.",
+        "Notification of a claim within (28) working days is required.",
+    ):
+        assert "NOTICE_PERIOD" in _by_kind(phrasing), phrasing
+
+
+def test_one_guarantee_is_one_register_row():
+    """"Performance bond valid until 31 December 2026" matches the
+    instrument and the phrasing both. Two rows is two CEO alerts for one
+    expiry."""
+    terms = _by_kind("Performance bond valid until 31 December 2026.")
+    assert "VALIDITY" not in terms
+    assert terms["GUARANTEE_EXPIRY"] == {"2026-12-31"}
+
+
+def test_a_validity_with_nothing_more_specific_still_counts():
+    """A quotation has no instrument to defer to, so dropping the
+    qualifier there would lose the only date in the document."""
+    assert _by_kind("This quotation is valid until 30 June 2026.") == {
+        "VALIDITY": {"2026-06-30"}}
