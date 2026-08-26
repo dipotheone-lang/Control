@@ -1567,6 +1567,29 @@ def cmd_register_obligations(args) -> int:
                   "the register, and an approval with no name attached is "
                   "not one.")
             return 1
+        # Where the register is has to be settled before anything is
+        # approved. On the live laptop this command was given a
+        # CONTROL_ROOT whose config/ had never been populated, and the
+        # CEO's one approval command answered with a stack trace. What
+        # he needed was the path it looked at and what is actually
+        # there.
+        if not obligations_path.is_file():
+            print(f"no obligation register at {obligations_path}")
+            config_dir = obligations_path.parent
+            if not config_dir.is_dir():
+                print(f"  {config_dir} does not exist either — this "
+                      "CONTROL_ROOT has no config directory, so it is not "
+                      "the folder the engine reads.")
+            else:
+                present = sorted(p.name for p in config_dir.glob("*.yaml"))
+                print(f"  {config_dir} exists and holds: "
+                      f"{', '.join(present) or 'no .yaml files'}")
+            print("  Point --control-root at the CONTROL folder whose "
+                  "config/ the engine is reading, or copy the register "
+                  "there. Nothing was approved (§1.1: an approval against "
+                  "a file that is not there is not an approval).")
+            return 1
+
         only = set(args.approve) or None
         approved, skipped = [], []
         # Two shapes of the same decision. A Stage D run writes proposals

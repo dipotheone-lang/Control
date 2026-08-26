@@ -323,8 +323,27 @@ def approve_in_place(obligations_path: Path, by: str,
     import re
 
     path = Path(obligations_path)
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    # A missing register is a thing to report, not to crash on. This
+    # traceback happened on the live laptop: `--control-root` named a
+    # CONTROL_ROOT whose config/ had never been populated, and the CEO's
+    # one approval command answered with a Python stack trace instead of
+    # naming the file it could not find.
+    if not path.is_file():
+        return [], [f"no register at {path} — nothing to approve there. "
+                    "The obligation register is a config file: check that "
+                    "--control-root points at the CONTROL folder whose "
+                    "config/ directory the engine is actually reading."]
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as error:
+        return [], [f"{path} is not readable as YAML ({error}) — refused "
+                    "rather than half-parsed, because a register read wrong "
+                    "would approve the wrong rows"]
     rows = list(data.get("obligations") or [])
+    if not rows:
+        return [], [f"{path} holds no obligations — nothing to approve. An "
+                    "empty register is an empty register, not a clear week "
+                    "(§1.1)."]
 
     wanted, skipped = set(), []
     for row in rows:
@@ -381,8 +400,12 @@ def approve(proposals_path: Path, obligations_path: Path, by: str,
     like coverage.
     """
     proposals = load_proposals(proposals_path)
-    live = yaml.safe_load(
-        Path(obligations_path).read_text(encoding="utf-8")) or {}
+    target = Path(obligations_path)
+    # An absent register is created rather than crashed on; the caller
+    # has already reported where it looked. Approving into a new file is
+    # the same decision as approving into an empty one.
+    live = (yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+            if target.is_file() else {})
     rows = list(live.get("obligations") or [])
     existing = {str(r.get("id")) for r in rows}
 

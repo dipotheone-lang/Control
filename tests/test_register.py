@@ -391,6 +391,35 @@ def test_approving_in_place_twice_does_not_restamp(tmp_path):
     assert "already approved by ahmed@ubcsis.com" in skipped[0]
 
 
+def test_a_missing_register_is_reported_not_crashed(tmp_path):
+    """This traceback happened on the live laptop.
+
+    `--control-root` named a CONTROL_ROOT whose config/ had never been
+    populated, and the CEO's one approval command answered with a
+    `FileNotFoundError` stack trace instead of naming the file it could
+    not find. The approval path has to survive being pointed at the
+    wrong folder, because being pointed at the wrong folder is the most
+    likely thing to go wrong with it.
+    """
+    from control.register import approve_in_place
+
+    approved, skipped = approve_in_place(
+        tmp_path / "nowhere" / "obligations.yaml", "ahmed@ubcsis.com")
+    assert approved == []
+    assert "no register at" in skipped[0]
+    assert "obligations.yaml" in skipped[0]
+
+
+def test_an_empty_register_says_so_rather_than_reporting_success(tmp_path):
+    from control.register import approve_in_place
+
+    path = tmp_path / "obligations.yaml"
+    path.write_text("obligations: []\n", encoding="utf-8")
+    approved, skipped = approve_in_place(path, "ahmed@ubcsis.com")
+    assert approved == []
+    assert "holds no obligations" in skipped[0]
+
+
 def test_a_real_due_from_the_drive_builder_is_approved(tmp_path):
     """The other side of it: a proposal the engine can actually parse
     goes through, so the refusal is a filter and not a wall."""
