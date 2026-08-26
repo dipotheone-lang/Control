@@ -308,3 +308,29 @@ def test_a_validity_with_nothing_more_specific_still_counts():
     qualifier there would lose the only date in the document."""
     assert _by_kind("This quotation is valid until 30 June 2026.") == {
         "VALIDITY": {"2026-06-30"}}
+
+
+def test_a_folder_that_does_not_exist_is_named_in_the_report():
+    """A five-folder scan where one name is wrong used to refuse
+    entirely, costing the whole run. Scanning the four that exist is the
+    right behaviour — but only if the report says it covered four, or it
+    reads as complete over ground it never searched (§1.1).
+    """
+    from control.discovery.stage_c import (
+        StageCResult, render_commercial_exposure,
+    )
+
+    text = render_commercial_exposure(
+        StageCResult(), not_scanned=[r"E:\UB\11. Vendor Registration Request"])
+    assert "1 folder(s) named for this scan do not exist" in text
+    assert "11. Vendor Registration Request" in text
+    assert "not evidence that they hold nothing" in text
+
+
+def test_a_complete_scan_claims_no_missing_folders():
+    from control.discovery.stage_c import (
+        StageCResult, render_commercial_exposure,
+    )
+
+    text = render_commercial_exposure(StageCResult(), not_scanned=[])
+    assert "do not exist and were not searched" not in text

@@ -391,10 +391,28 @@ def cmd_contracts(args) -> int:
     # without the all-or-nothing exposure.
     sources = [Path(s.strip()) for s in str(args.source).split(",") if s.strip()]
     missing = [s for s in sources if not s.is_dir()]
-    if missing:
-        for s in missing:
-            print(f"source folder not found: {s}")
+    sources = [s for s in sources if s.is_dir()]
+
+    # One folder named wrongly used to refuse the whole scan. On a
+    # five-folder run where four were fine that costs the whole hour and
+    # teaches the operator to drop folders from the list, which is the
+    # opposite of what a refusal is for. The scan now runs on what
+    # exists and carries the miss through to the report, so the output
+    # states its own incompleteness rather than looking complete.
+    for s in missing:
+        print(f"source folder not found: {s}")
+        parent, prefix = s.parent, s.name.split()[0] if s.name.split() else ""
+        if parent.is_dir() and prefix:
+            near = sorted(p.name for p in parent.iterdir()
+                          if p.is_dir() and p.name.startswith(prefix))
+            if near:
+                print("  did you mean: " + " | ".join(f"{n!r}" for n in near))
+    if not sources:
+        print("no source folder exists. Nothing scanned.")
         return 1
+    if missing:
+        print(f"scanning the {len(sources)} folder(s) that do exist; the "
+              f"{len(missing)} above are named in the report as not scanned.")
 
     clients, folders, projects = [], [], []
     config = control_root / "config" / "confidential.yaml"
@@ -520,7 +538,9 @@ def cmd_contracts(args) -> int:
 
     out = control_root / "discovery" / "COMMERCIAL-EXPOSURE.md"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render_commercial_exposure(result), encoding="utf-8")
+    out.write_text(
+        render_commercial_exposure(result, not_scanned=[str(m) for m in missing]),
+        encoding="utf-8")
 
     print(f"\ndocuments seen:      {len(result.documents)}")
     print(f"terms extracted:     {len(result.terms)}")

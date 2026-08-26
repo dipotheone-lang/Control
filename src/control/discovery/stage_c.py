@@ -688,7 +688,13 @@ def _process_one(path: Path, relative: str, confidential_clients: list[str],
     return payload
 
 
-def render_commercial_exposure(result: StageCResult, today: date | None = None) -> str:
+def render_commercial_exposure(result: StageCResult, today: date | None = None,
+                               not_scanned: list | None = None) -> str:
+    """`not_scanned` names folders the operator asked for that do not
+    exist. A folder named wrongly is the easiest way to end up with a
+    report that looks complete over ground it never covered, so the miss
+    is carried into the document rather than left in the console
+    scrollback the operator has already scrolled past (§1.1)."""
     today = today or datetime.now().date()
     dated = [t for t in result.terms if t.found_date]
     undated = [t for t in result.terms if not t.found_date]
@@ -754,6 +760,20 @@ def render_commercial_exposure(result: StageCResult, today: date | None = None) 
         "",
         "## What could not be read",
         "",
+    ]
+    if not_scanned:
+        lines += [
+            f"- **{len(not_scanned)} folder(s) named for this scan do not "
+            "exist and were not searched.** Nothing in them is in this "
+            "report, and their absence here is not evidence that they hold "
+            "nothing:",
+            "",
+        ]
+        for folder in not_scanned:
+            lines.append(f"  - `{folder}`")
+        lines.append("")
+
+    lines += [
         f"- **{len(result.blocked)} client-confidential document(s)** were not "
         "opened. Decision D-01 (§12.1) permits metadata only: no text "
         "extraction, no value posted to a register. D-05 covers contracts; "
