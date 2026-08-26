@@ -1,0 +1,71 @@
+# Governance acknowledgement register — charter §12.3, §12.4; mitigation M3
+#
+# Three of the Phase 1 gate conditions (§16) are met by a human act, not by
+# a document existing: the usage policy circulated AND acknowledged, the
+# IWR amended, the PDPL basis documented AND notified. Until this file
+# exists the gate can record that the drafts are written and nothing more,
+# so the row would sit at OPEN forever with no way to close it.
+#
+# Control never writes to this file. It reads it, counts what is recorded,
+# and reports the difference. A blank `date` is a person who has not
+# acknowledged — it is never read as consent (§12.4 exists precisely so
+# that nobody learns about the system by inference).
+#
+# `expected` is the number of people the document must reach. Where it is
+# larger than the rows listed, the gate reports the shortfall rather than
+# treating the shorter list as the whole company.
+
+documents:
+
+  usage_policy:
+    title: Control usage policy (§12.4)
+    # M3 of the execution order keeps the eleven signatures — not for legal
+    # sufficiency (D-44 makes email notification sufficient on its own) but
+    # because a signature is what makes someone read the clause about their
+    # right to dispute.
+    expected: 11
+    circulated: null            # ISO date the policy went out
+    adopted: null               # ISO date it took effect
+    acknowledged_by:
+      - email: ahmed@ubcsis.com
+        date: null
+      - email: ghareeb@ubcsis.com
+        date: null
+      - email: info@ubcsis.com
+        date: null
+      - email: accounts@ubcsis.com
+        date: null
+      - email: hadeer@ubcsis.com
+        date: null
+      - email: shymaa@ubcsis.com
+        date: null
+      - email: donia@ubcsis.com
+        date: null
+      - email: marketing@ubcsis.com
+        date: null
+      - email: hr@ubcsis.com
+        date: null
+      - email: a.elsayed@ubcsis.com
+        date: null
+      - email: hse@ubcsis.com
+        date: null
+
+  iwr:
+    title: Internal Work Regulations — Control clauses A–G (§12.3)
+    # D-42 of the execution order: the IWR under Law 12/2003 remains valid
+    # and no refiling is required, so adoption here is internal. D-48
+    # requires working hours 09:00-17:00 stated expressly (O-11).
+    expected: 11
+    adopted: null               # ISO date the amended IWR took effect
+    filed: NOT REQUIRED         # D-42
+    acknowledged_by: []
+
+  pdpl_notification:
+    title: PDPL 151/2020 processing notification (§12.2)
+    # D-44: notification by email, no signature required. So this document
+    # closes on `issued`, not on a count of signatures — recording it as
+    # eleven missing signatures would report a failure that does not exist.
+    expected: 0
+    issued: null                # ISO date the notification was sent
+    method: email               # D-44
+    acknowledged_by: []
