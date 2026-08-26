@@ -1611,6 +1611,23 @@ def cmd_register_obligations(args) -> int:
                   "exist and every row in obligations.yaml is already "
                   "approved or has no computable due date.")
             return 1
+        # §1.9: unlogged means it didn't happen. This is the single most
+        # consequential decision in the system — the approval that ends
+        # Phase 0 (§6) and puts obligations under the class 3 ladder —
+        # and it was leaving no hash-chained record at all. The register
+        # file itself is not the record: it is a config file, editable
+        # by anyone with the folder open, with no chain behind it.
+        if approved or skipped:
+            from .audit import AuditLog
+
+            AuditLog(control_root / "logs").append("register.approved", {
+                "by": args.by,
+                "approved": approved,
+                "skipped": skipped,
+                "register": str(obligations_path),
+                "requested": sorted(only) if only else "all",
+            })
+
         print(f"approved {len(approved)} obligation(s) as {args.by}:")
         for item in approved:
             print(f"  + {item}")
@@ -1619,6 +1636,8 @@ def cmd_register_obligations(args) -> int:
         if approved:
             print("\n§6: this is what ends Phase 0. These are now tracked, "
                   "and the class 3 ladder runs on them from the next cycle.")
+            print(f"Logged to the audit chain in {control_root / 'logs'} "
+                  "(§1.9). Verify with: python -m control verify")
         return 0
 
     # Built from the DRIVE, not from the mailboxes. Stage D against

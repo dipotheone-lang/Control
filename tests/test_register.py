@@ -12,6 +12,7 @@ Proposing is inference. Approving is a decision, it carries a name, and
 without it nothing is tracked.
 """
 
+import json
 from datetime import date
 from pathlib import Path
 
@@ -389,6 +390,53 @@ def test_approving_in_place_twice_does_not_restamp(tmp_path):
     approved, skipped = approve_in_place(obligations_path, "ghareeb@ubcsis.com")
     assert approved == []
     assert "already approved by ahmed@ubcsis.com" in skipped[0]
+
+
+def test_the_approval_that_ends_phase_0_is_hash_chained(tmp_path, capsys):
+    """§1.9: unlogged means it didn't happen.
+
+    The approval that ends Phase 0 and puts obligations under the class
+    3 ladder was leaving no record in the audit chain. The register file
+    is not that record — it is a config file, editable by anyone with
+    the folder open, with no chain behind it. If the question later
+    becomes "who approved these, and when", a YAML file cannot answer
+    it and a hash-chained log can.
+    """
+    import argparse
+
+    from control.__main__ import cmd_register_obligations
+    from control.audit import AuditLog
+
+    control_root = tmp_path / "CONTROL"
+    (control_root / "config").mkdir(parents=True)
+    (control_root / "config" / "obligations.yaml").write_text(
+        "obligations:\n"
+        "  - id: OPS-TO-001\n"
+        "    class: 3\n"
+        "    name: Weekly Site Progress Report\n"
+        "    owner: shymaa@ubcsis.com\n"
+        "    cadence: weekly\n"
+        "    due: sunday 10:00\n"
+        "    approved_by_ceo: null\n", encoding="utf-8")
+
+    code = cmd_register_obligations(argparse.Namespace(
+        control_root=str(control_root), ub_root=None, today=None,
+        approve=[], by="ahmed@ubcsis.com"))
+    assert code == 0
+
+    log = AuditLog(control_root / "logs")
+    ok, detail = log.verify()
+    assert ok, detail
+
+    entries = [
+        json.loads(line)
+        for path in sorted((control_root / "logs").glob("*.jsonl"))
+        for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    approval = [e for e in entries if e["event"] == "register.approved"]
+    assert len(approval) == 1
+    assert approval[0]["data"]["by"] == "ahmed@ubcsis.com"
+    assert approval[0]["data"]["approved"] == ["OPS-TO-001"]
 
 
 def test_a_missing_register_is_reported_not_crashed(tmp_path):
