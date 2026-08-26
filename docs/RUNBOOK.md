@@ -1,5 +1,7 @@
 # Control — the runbook
 
+> **Where the build is right now, and the next command to run: `docs/RESUME-HERE.md`.** This runbook is how to run each thing; that file is where we are.
+
 Everything you need to run, in order, from a machine with nothing on it.
 
 Runs on your laptop against `E:\UBCSIS Co Date Jan 2026`. **Nothing in
