@@ -391,8 +391,16 @@ def test_the_repo_config_loads_and_reports_exactly_what_is_missing(conn):
     assert result.approved == 0
     assert {t.item_id for t in result.tracked} == {
         "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-CIT"}
+    # This used to assert "obligations.yaml is empty". It no longer is:
+    # the starter register assigned from the archive on 26-Aug-2026 ships
+    # six class 3 rows. None of them is approved, so none is tracked —
+    # the register now says six specific things are waiting on a name
+    # rather than one general thing being absent, which is the whole
+    # difference between a gap and a proposal (§6).
     text = " ".join(result.gaps)
-    assert "obligations.yaml is empty" in text
+    assert "not approved by the CEO" in text
+    assert sum("not approved by the CEO" in gap for gap in result.gaps) == 6
+    assert "OPS-FA-001" in text
     assert "not advisor-verified" in text
     assert "no public holidays on file" in text
 

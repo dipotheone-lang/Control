@@ -117,10 +117,42 @@ def _horizon_section(horizon: list[HorizonItem], as_of: date) -> list[str]:
     return lines
 
 
-def _open_items_section(open_items: list[OpenItem]) -> list[str]:
+def _open_items_section(open_items: list[OpenItem],
+                        tracked: list | None = None,
+                        as_of: date | None = None) -> list[str]:
+    """§11 item 2, plus what an empty list actually means.
+
+    "None on record" was the whole section when nothing was overdue, and
+    it reads as a clear week whether the register holds six obligations
+    or none. Those are opposite facts. The starter register approved on
+    26-Aug-2026 made the difference live: six class 3 obligations were
+    tracked with real deadlines and this section still said nothing,
+    which is the absence-looking-like-compliance failure the charter is
+    built to prevent — pointing at Control's own reporting this time.
+
+    So an empty list now says which of the two it is: how many
+    obligations are tracked and when the next one falls, or that none is
+    tracked at all.
+    """
     lines = ["2. OPEN ITEMS BY CLASS"]
     if not open_items:
-        lines.append("   None on record.")
+        upcoming = sorted(
+            (t for t in (tracked or []) if getattr(t, "obligation_class", 3) >= 3),
+            key=lambda t: t.due)
+        if not upcoming:
+            lines.append(
+                "   Nothing outstanding, and nothing tracked either. No class "
+                "3 obligation is in the approved register (§6), so this line "
+                "is an empty register rather than a clear week.")
+        else:
+            nearest = upcoming[0]
+            when = f"{nearest.due:%d-%b-%Y}"
+            if as_of:
+                when += f" (T-{(nearest.due - as_of).days})"
+            lines.append(
+                f"   Nothing outstanding. {len(upcoming)} class 3 obligation(s) "
+                f"are tracked and none has fallen due; the next is "
+                f"{nearest.name} — owner {nearest.owner} — {when}.")
         return lines
     for item in sorted(open_items, key=lambda x: (x.obligation_class, -x.days_outstanding)):
         lines.append(
@@ -547,13 +579,14 @@ def weekly_report(
     open_decisions: list[str],
     control_root: Path,
     cc_metric: dict | None = None,
+    tracked: list | None = None,
 ) -> dict:
     since = datetime.combine(as_of - timedelta(days=7), datetime.min.time())
 
     sections: list[str] = []
     sections += _horizon_section(horizon, as_of)
     sections.append("")
-    sections += _open_items_section(open_items)
+    sections += _open_items_section(open_items, tracked, as_of)
     sections.append("")
     sections += _sla_section(conn, cc_metric)
     sections.append("")

@@ -1,24 +1,195 @@
-# Obligation register — charter §2
-# EMPTY BY DESIGN: the register is populated from Phase 0 Stage D
-# (PROPOSED-OBLIGATION-REGISTER.yaml) after CEO approval — that approval is
-# what ends Phase 0 (§6). Class 1 statutory items live in
-# config/statutory-calendar.yaml.
+# Obligation register — charter §2, class 3 (operational)
+#
+# STARTER REGISTER, assigned by Control from the archive — 26-Aug-2026.
+#
+# The CEO's instruction of 26-Aug-2026: *"you assign as per archives and past
+# experience and will improve on the go while running."* This file is that
+# assignment. It is written unapproved — every row carries
+# `approved_by_ceo: null` and `build_obligations` refuses every row without it
+# (§6), so nothing here is tracked until one command stamps it:
+#
+#     python -m control register --approve --by ahmed@ubcsis.com
+#
+# WHAT THE EVIDENCE SUPPORTS, AND WHAT IT DOES NOT (§1.1)
+#
+# Stage D on 26-Aug-2026 found: GHOST 23, DEAD 13, SHADOW 2, ORPHAN 2,
+# FORMLESS 0, LIVE 0. Not one document series on the drive is both current and
+# on a controlled form. So no row below can claim to be a reading of current
+# practice, and none of them does.
+#
+# Each row separates three things that are usually collapsed into one:
+#
+#   `evidence`    — what the archive actually shows. Traceable.
+#   `date_basis`  — where the due date came from. Every row below says
+#                   `assigned_by_control`: NOT ONE OF THESE DEADLINES WAS
+#                   OBSERVED. The cadence is the manual's or the archive's;
+#                   the day of the month is Control's, chosen to spread the
+#                   load across the month rather than read off anything.
+#   `open_question` — what a human has to correct, and it is the same
+#                   question on every row.
+#
+# A wrong deadline alerts confidently on the wrong day, which §2.1 rates worse
+# than no deadline. These are live anyway, on the CEO's instruction, because a
+# register that is approximately right and correctable beats an empty one that
+# tracks nothing — but the approximation is recorded on the row rather than
+# hidden behind it. Correcting a date is editing one line and re-running.
+#
+# The five form-coded rows come from the company's own management system form
+# register: the form exists and is required, and Stage D found no document
+# series answering it (GHOST). Tracking them is what turns "nobody files this"
+# from an invisible fact into a dated finding. The revision is not recorded
+# anywhere Control can read, so C2 reports a gap rather than inventing one.
+#
+# Class 1 statutory items live in config/statutory-calendar.yaml. Class 2
+# commercial items live in the class 2 registers (§2.2), not here.
 #
 # The register is a living document (§14.3): recurring UNSCHEDULED_SUBMISSION
 # patterns become candidate obligations (Tier B); obligations unfulfilled for
 # three consecutive periods with no escalation resolution become retirement
 # candidates (Tier B).
 
-obligations: []
-# Entry shape:
-# - id: OPS-WPR-001
-#   class: 3                      # 1 statutory · 2 commercial · 3 operational · 4 informational
-#   name: Weekly progress report
-#   owner: a.elsayed@ubcsis.com
-#   form: <form code + revision>
-#   cadence: weekly               # observed cadence from Stage D
-#   due: sunday 10:00
-#   governing_clause: <manual, clause>
-#   confidence: HIGH              # HIGH >=12 regular / MEDIUM 4-11 / LOW <4
-#   source: PHASE0-STAGE-D
-#   approved_by_ceo: null
+obligations:
+
+  - id: OPS-TO-001
+    class: 3
+    name: Weekly Site Progress Report
+    owner: shymaa@ubcsis.com
+    form: F-CSO-23
+    cadence: weekly
+    due: sunday 10:00
+    approved_by_ceo: null
+    source: PHASE0-STAGE-D
+    confidence: MEDIUM
+    provenance: assigned_by_control
+    date_basis: assigned_by_control
+    evidence: >-
+      Form F-CSO-23 is registered in the management system and Stage D found no
+      document series answering it (GHOST, 26-Aug-2026). The owner is from the
+      archive rather than the form: shymaa@ubcsis.com filed the progress-report
+      series in 1. Invoices/2021 In and 1. Invoices/2022 In (OPS-TO-001 to
+      OPS-TO-005, 49 documents, Jan-2021 to Nov-2022), which stopped.
+    open_question: >-
+      Sunday 10:00 was assigned by Control, not observed. Is the weekly
+      progress report still expected, from whom, and by when on the day?
+
+  - id: OPS-TO-002
+    class: 3
+    name: Monthly Project Report
+    owner: a.elsayed@ubcsis.com
+    form: F-CSO-24
+    cadence: monthly
+    due: day 5 17:00
+    approved_by_ceo: null
+    source: PHASE0-STAGE-D
+    confidence: LOW
+    provenance: assigned_by_control
+    date_basis: assigned_by_control
+    evidence: >-
+      Form F-CSO-24 is registered in the management system and Stage D found no
+      document series answering it (GHOST, 26-Aug-2026). Owner assigned from
+      the role, not from the archive: Ahmed Elsayed is Senior Site Engineer /
+      Acting PM (§3). No document on the drive is attributed to him.
+    open_question: >-
+      Day 5 at 17:00 was assigned by Control, not observed, and so was the
+      owner. Confirm both, or retire the form.
+
+  - id: OPS-HSE-001
+    class: 3
+    name: Monthly HSE Audit Checklist
+    owner: hse@ubcsis.com
+    form: F-HSE-28
+    cadence: monthly
+    due: day 7 17:00
+    approved_by_ceo: null
+    source: PHASE0-STAGE-D
+    confidence: LOW
+    provenance: assigned_by_control
+    date_basis: assigned_by_control
+    evidence: >-
+      Form F-HSE-28 is registered in the management system and Stage D found no
+      document series answering it (GHOST, 26-Aug-2026). Owner assigned from
+      the role: Mostafa Hassan is Safety Officer (§3). Note §7.3 S3 — an
+      unbroken absence of HSE records on a live industrial site is an
+      under-reporting signal, which is the reason to track this one rather than
+      a reason to assume it is being done.
+    open_question: >-
+      Day 7 at 17:00 was assigned by Control, not observed. Is F-HSE-28 filed
+      anywhere Control cannot see — on paper, or in hse@ — rather than not at
+      all?
+
+  - id: OPS-HRA-001
+    class: 3
+    name: Monthly Payroll Register
+    owner: hr@ubcsis.com
+    form: F-HRA-08
+    cadence: monthly
+    due: day 25 17:00
+    approved_by_ceo: null
+    source: PHASE0-STAGE-D
+    confidence: MEDIUM
+    provenance: assigned_by_control
+    date_basis: assigned_by_control
+    evidence: >-
+      Form F-HRA-08 is registered in the management system and Stage D found no
+      series answering it by name (GHOST, 26-Aug-2026). The function is
+      evidenced even though the form is not: hr@ubcsis.com filed
+      "مرتبات الاداره اغسطس" and "رصيد اجازات 2024" in
+      9. HR Department/1. Payroll (17 documents, Feb-2024 to Jul-2025), which
+      Stage D classified DEAD.
+    open_question: >-
+      Day 25 at 17:00 was assigned by Control, not observed. Is the payroll
+      register the same document as the Arabic payroll series already on the
+      drive, and did that series stop or move?
+
+  - id: OPS-PROC-001
+    class: 3
+    name: Monthly Subcontractor Performance Report
+    owner: info@ubcsis.com
+    form: F-CSO-09
+    cadence: monthly
+    due: day 10 17:00
+    approved_by_ceo: null
+    source: PHASE0-STAGE-D
+    confidence: LOW
+    provenance: assigned_by_control
+    date_basis: assigned_by_control
+    evidence: >-
+      Form F-CSO-09 is registered in the management system and Stage D found no
+      document series answering it (GHOST, 26-Aug-2026). Owner assigned from
+      the role: Ahmed Hassan holds procurement (§3.2). This row is a
+      compensating control as much as a report — §3.2 records that one person
+      originates the revenue, sets the price, chooses the supplier and approves
+      the cost, and subcontractor performance is the one document in that cycle
+      written by the person who selected the subcontractor.
+    open_question: >-
+      Day 10 at 17:00 was assigned by Control, not observed, and so was the
+      owner. Should this sit with procurement at all, given §3.2?
+
+  - id: OPS-FA-001
+    class: 3
+    name: Monthly finance ledger (ميزان مدفوعات / ledger)
+    owner: accounts@ubcsis.com
+    form: ""
+    cadence: monthly
+    due: day 12 17:00
+    approved_by_ceo: null
+    source: PHASE0-STAGE-D
+    confidence: HIGH
+    provenance: assigned_by_control
+    date_basis: assigned_by_control
+    evidence: >-
+      The only series on the drive that is both recurring and current. Stage D,
+      26-Aug-2026: OPS-FA-002 "ميزان مدفوعات 2025شهرى", 15 documents in
+      8. Finance/1. Expenses/Y2025, May-2025 to Aug-2026, median gap 32 days;
+      and OPS-FA-003 "ledger 2025", 10 documents in the same tree,
+      Oct-2025 to Aug-2026, median gap 32 days. Both ORPHAN — recurring with no
+      controlled form and no manual clause behind them. OPS-FA-006 is the same
+      name as OPS-FA-002 filed in a second location (SHADOW), and is treated
+      here as a copy rather than a second obligation.
+    open_question: >-
+      Three things, and only the cadence is observed. (1) Day 12 at 17:00 was
+      assigned by Control. (2) Are "ميزان مدفوعات" and "ledger" one monthly
+      obligation or two? This row assumes one. (3) There is no controlled form
+      and no manual clause — Stage J.4 recommends investigate, so either
+      register the layout in use as a form or record the clause that requires
+      it.

@@ -281,6 +281,116 @@ def test_a_not_established_due_is_refused_like_an_empty_one(tmp_path):
     assert live["obligations"] == []
 
 
+def test_the_shipped_starter_register_is_approvable_and_tracks(tmp_path):
+    """The register that ships in `config/obligations.yaml`.
+
+    The CEO asked for a system that is up and running, not for six rows
+    to hand-edit. That makes this the test that matters: does the file
+    Control assigned from the archive actually come out the other end as
+    tracked obligations when one command stamps it?
+
+    It runs against the real file rather than a fixture, because a
+    starter register that parses in a test and not in `config/` is the
+    same as no starter register.
+    """
+    import shutil
+
+    from control.loader import build_obligations
+    from control.register import approve_in_place
+
+    root = Path(__file__).resolve().parents[1]
+    shipped = root / "config" / "obligations.yaml"
+    obligations_path = tmp_path / "obligations.yaml"
+    shutil.copy(shipped, obligations_path)
+
+    before = yaml.safe_load(obligations_path.read_text(encoding="utf-8"))
+    assert before["obligations"], "the starter register is empty"
+    assert all(row["approved_by_ceo"] is None for row in before["obligations"]), \
+        "a row ships pre-approved — §6 makes that approval the CEO's act"
+
+    specs, tracked, gaps = build_obligations(before, {"people": []}, TODAY)
+    assert tracked == [], "unapproved rows are tracked"
+
+    approved, skipped = approve_in_place(obligations_path, "ahmed@ubcsis.com")
+    assert len(approved) == len(before["obligations"])
+    assert skipped == []
+
+    after = yaml.safe_load(obligations_path.read_text(encoding="utf-8"))
+    specs, tracked, gaps = build_obligations(after, {"people": []}, TODAY)
+    assert len(tracked) == len(after["obligations"])
+
+
+def test_approving_in_place_keeps_the_comments(tmp_path):
+    """A register that loses the record of its own provenance the first
+    time it is approved is the §1.1 failure, arriving by a helpful door.
+
+    Every date in the starter register was assigned by Control rather
+    than observed, and the header is where that is written down.
+    `yaml.safe_dump` drops every comment in a file, so the approval path
+    edits lines instead.
+    """
+    from control.register import approve_in_place
+
+    obligations_path = tmp_path / "obligations.yaml"
+    obligations_path.write_text(
+        "# NOT ONE OF THESE DEADLINES WAS OBSERVED\n"
+        "obligations:\n"
+        "  - id: OPS-TO-001\n"
+        "    class: 3\n"
+        "    name: Weekly Site Progress Report\n"
+        "    owner: shymaa@ubcsis.com\n"
+        "    cadence: weekly\n"
+        "    due: sunday 10:00\n"
+        "    approved_by_ceo: null\n", encoding="utf-8")
+
+    approve_in_place(obligations_path, "ahmed@ubcsis.com")
+
+    text = obligations_path.read_text(encoding="utf-8")
+    assert "# NOT ONE OF THESE DEADLINES WAS OBSERVED" in text
+    assert "approved_by_ceo: ahmed@ubcsis.com" in text
+
+
+def test_approving_in_place_leaves_a_dateless_row_unapproved(tmp_path):
+    from control.register import approve_in_place
+
+    obligations_path = tmp_path / "obligations.yaml"
+    obligations_path.write_text(
+        "obligations:\n"
+        "  - id: OPS-DRIVE-001\n"
+        "    class: 3\n"
+        "    name: Progress report\n"
+        "    owner: a.elsayed@ubcsis.com\n"
+        "    cadence: monthly\n"
+        "    due: NOT ESTABLISHED\n"
+        "    approved_by_ceo: null\n", encoding="utf-8")
+
+    approved, skipped = approve_in_place(obligations_path, "ahmed@ubcsis.com")
+    assert approved == []
+    assert "no computable due date" in skipped[0]
+    assert "approved_by_ceo: null" in obligations_path.read_text(
+        encoding="utf-8")
+
+
+def test_approving_in_place_twice_does_not_restamp(tmp_path):
+    from control.register import approve_in_place
+
+    obligations_path = tmp_path / "obligations.yaml"
+    obligations_path.write_text(
+        "obligations:\n"
+        "  - id: OPS-TO-001\n"
+        "    class: 3\n"
+        "    name: Weekly Site Progress Report\n"
+        "    owner: shymaa@ubcsis.com\n"
+        "    cadence: weekly\n"
+        "    due: sunday 10:00\n"
+        "    approved_by_ceo: null\n", encoding="utf-8")
+
+    approve_in_place(obligations_path, "ahmed@ubcsis.com")
+    approved, skipped = approve_in_place(obligations_path, "ghareeb@ubcsis.com")
+    assert approved == []
+    assert "already approved by ahmed@ubcsis.com" in skipped[0]
+
+
 def test_a_real_due_from_the_drive_builder_is_approved(tmp_path):
     """The other side of it: a proposal the engine can actually parse
     goes through, so the refusal is a filter and not a wall."""

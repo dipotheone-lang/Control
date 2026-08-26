@@ -280,6 +280,96 @@ def load_proposals(path: Path) -> list[dict]:
     return list(data.get("obligations") or [])
 
 
+def _approvable(row: dict) -> tuple[bool, str]:
+    """(can this row be tracked, why not). Shared by both approval paths.
+
+    The due expression is validated, not merely checked for emptiness.
+    `register_proposal` writes "NOT ESTABLISHED" rather than a blank,
+    which is truthy — so a presence check would approve every row that
+    has no deadline at all, and an approved row that tracks nothing is
+    worse than an unapproved one because it looks like coverage.
+    """
+    from .loader import parse_due
+
+    due, problem = parse_due(str(row.get("due") or ""),
+                             str(row.get("cadence") or ""), date.today())
+    if due is not None:
+        return True, ""
+    # The row's own recorded reason first: "arrives weekly but on no
+    # consistent day" tells the reader what to do about it, where "no due
+    # expression" only tells them it is missing.
+    return False, (row.get("open_question") or problem or "reason not recorded")
+
+
+def approve_in_place(obligations_path: Path, by: str,
+                     only: set | None = None) -> tuple[list[str], list[str]]:
+    """Stamp unapproved rows that are already in `obligations.yaml`.
+
+    `approve()` moves rows from a Stage D proposals file. This is the
+    other shape of the same decision: a register written straight into
+    `obligations.yaml` — the starter register assigned from the archive
+    on 26-Aug-2026 — sits there with `approved_by_ceo: null`, tracked by
+    nothing, until a human puts a name on it. Without this path the CEO
+    would have to hand-edit six rows to end Phase 0, which is the
+    homework this register exists to remove.
+
+    **The file is edited line by line rather than re-serialised**, and
+    that is deliberate. `obligations.yaml` carries the header that says
+    which of these dates were observed and which were assigned by
+    Control — `yaml.safe_dump` would silently drop every comment in it,
+    and a register that loses the record of its own provenance the first
+    time it is approved is exactly the failure §1.1 is about.
+    """
+    import re
+
+    path = Path(obligations_path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    rows = list(data.get("obligations") or [])
+
+    wanted, skipped = set(), []
+    for row in rows:
+        obligation_id = str(row.get("id") or "")
+        if only and obligation_id not in only:
+            continue
+        if row.get("approved_by_ceo"):
+            skipped.append(f"{obligation_id}: already approved by "
+                           f"{row['approved_by_ceo']}")
+            continue
+        ok, why = _approvable(row)
+        if not ok:
+            skipped.append(f"{obligation_id}: no computable due date — {why}")
+            continue
+        wanted.add(obligation_id)
+
+    if not wanted:
+        return [], skipped
+
+    identifier = re.compile(r"^\s*-\s+id:\s*(\S+)\s*$")
+    pending = re.compile(r"^(\s*)approved_by_ceo:\s*(null|~|)\s*$")
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    current, approved = "", []
+    for index, line in enumerate(lines):
+        found = identifier.match(line)
+        if found:
+            current = found.group(1).strip("\"'")
+            continue
+        stamp = pending.match(line)
+        if stamp and current in wanted:
+            lines[index] = f"{stamp.group(1)}approved_by_ceo: {by}"
+            approved.append(current)
+            wanted.discard(current)
+
+    for missed in sorted(wanted):
+        skipped.append(f"{missed}: no `approved_by_ceo:` line to stamp — "
+                       "the row was not written by Control, so it is left "
+                       "alone rather than rewritten")
+
+    if approved:
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return approved, skipped
+
+
 def approve(proposals_path: Path, obligations_path: Path, by: str,
             only: set | None = None) -> tuple[list[str], list[str]]:
     """Move approved proposals into the live register. Never removes.
@@ -304,25 +394,9 @@ def approve(proposals_path: Path, obligations_path: Path, by: str,
         if obligation_id in existing:
             skipped.append(f"{obligation_id}: already in the register")
             continue
-        # The due expression is validated, not merely checked for
-        # emptiness. `register_proposal` writes "NOT ESTABLISHED" rather
-        # than a blank, which is truthy — so a presence check would have
-        # approved every row that has no deadline at all, and an
-        # approved row that tracks nothing is worse than an unapproved
-        # one because it looks like coverage.
-        from .loader import parse_due
-
-        due, problem = parse_due(str(row.get("due") or ""),
-                                 str(row.get("cadence") or ""), date.today())
-        if due is None:
-            # The proposal's own recorded reason first: "arrives weekly
-            # but on no consistent day" tells the reader what to do
-            # about it, where "no due expression" only tells them it is
-            # missing.
-            reason = (row.get("open_question") or problem
-                      or "reason not recorded")
-            skipped.append(f"{obligation_id}: no computable due date — "
-                           f"{reason}")
+        ok, why = _approvable(row)
+        if not ok:
+            skipped.append(f"{obligation_id}: no computable due date — {why}")
             continue
         rows.append({**row, "approved_by_ceo": by})
         approved.append(obligation_id)

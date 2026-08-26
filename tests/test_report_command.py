@@ -74,7 +74,12 @@ def test_every_loader_gap_reaches_the_page(root, capsys):
     only what was found would read as assurance over unseen ground."""
     run(root)
     out = capsys.readouterr().out
-    assert "obligations.yaml is empty" in out
+    # Was "obligations.yaml is empty" until the starter register shipped
+    # on 26-Aug-2026. The gap did not close, it got specific: six named
+    # rows are waiting on the CEO's name instead of a register being
+    # absent. Both are things Control is not doing, and both belong on
+    # the page.
+    assert "not approved by the CEO" in out
     assert "not advisor-verified" in out
     assert "only class carrying fines" in out
 

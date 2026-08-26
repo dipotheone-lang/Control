@@ -1168,6 +1168,7 @@ def cmd_report(args) -> int:
         rendered = weekly_report(
             conn, as_of=as_of, config_dir=control_root / "config",
             horizon=horizon, open_items=open_items, cc_metric=cc_metric,
+            tracked=loaded.tracked,
             open_decisions=loaded.gaps, control_root=control_root)
     finally:
         conn.close()
@@ -1561,18 +1562,32 @@ def cmd_register_obligations(args) -> int:
     obligations_path = control_root / "config" / "obligations.yaml"
 
     if args.approve is not None:
-        if not proposals_path.is_file():
-            print(f"nothing to approve — {proposals_path.name} does not "
-                  "exist. Run this command without --approve first.")
-            return 1
         if not args.by:
             print("--by is required. §6 ends Phase 0 when the CEO approves "
                   "the register, and an approval with no name attached is "
                   "not one.")
             return 1
         only = set(args.approve) or None
-        approved, skipped = reg.approve(
-            proposals_path, obligations_path, args.by, only)
+        approved, skipped = [], []
+        # Two shapes of the same decision. A Stage D run writes proposals
+        # to discovery/ and they are moved across; the starter register
+        # assigned from the archive on 26-Aug-2026 was written straight
+        # into obligations.yaml and is stamped where it sits. Both are
+        # run, because which one is present depends on whether Stage D
+        # has been re-run on this machine, and neither is the CEO's
+        # problem.
+        if proposals_path.is_file():
+            approved, skipped = reg.approve(
+                proposals_path, obligations_path, args.by, only)
+        in_place, also_skipped = reg.approve_in_place(
+            obligations_path, args.by, only)
+        approved += in_place
+        skipped += also_skipped
+        if not proposals_path.is_file() and not approved and not skipped:
+            print(f"nothing to approve — {proposals_path.name} does not "
+                  "exist and every row in obligations.yaml is already "
+                  "approved or has no computable due date.")
+            return 1
         print(f"approved {len(approved)} obligation(s) as {args.by}:")
         for item in approved:
             print(f"  + {item}")

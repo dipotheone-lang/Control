@@ -99,6 +99,49 @@ def test_open_decisions_and_open_items(conn, tmp_path):
     assert "OPEN: O-02" in r["body"] and "OPEN: O-03" in r["body"]
 
 
+def test_nothing_outstanding_says_which_kind_of_nothing_it_is(conn, tmp_path):
+    """Six tracked obligations and zero tracked obligations both used to
+    print "None on record", and they are opposite facts.
+
+    This went live the day the starter register was approved: six class 3
+    obligations carrying real deadlines, and a report that said nothing
+    about them. An empty section that reads as a clear week is the
+    absence-looking-like-compliance failure §11 exists to prevent,
+    aimed at Control's own reporting.
+    """
+    from dataclasses import dataclass
+
+    @dataclass
+    class Tracked:
+        item_id: str
+        obligation_class: int
+        name: str
+        owner: str
+        due: date
+
+    tracked = [
+        Tracked("OPS-HRA-001", 3, "Monthly Payroll Register",
+                "hr@ubcsis.com", date(2026, 9, 25)),
+        Tracked("OPS-TO-001", 3, "Weekly Site Progress Report",
+                "shymaa@ubcsis.com", date(2026, 8, 16)),
+    ]
+    r = weekly_report(conn, as_of=AS_OF, horizon=[], open_items=[],
+                      open_decisions=[], control_root=tmp_path,
+                      tracked=tracked)
+    body = r["body"]
+    assert "2 class 3 obligation(s) are tracked" in body
+    assert "Weekly Site Progress Report" in body     # the nearest, not the first
+    assert "shymaa@ubcsis.com" in body
+    assert "16-Aug-2026 (T-3)" in body
+
+
+def test_nothing_tracked_is_reported_as_an_empty_register(conn, tmp_path):
+    r = weekly_report(conn, as_of=AS_OF, horizon=[], open_items=[],
+                      open_decisions=[], control_root=tmp_path, tracked=[])
+    assert "nothing tracked either" in r["body"]
+    assert "empty register rather than a clear week" in r["body"]
+
+
 def test_xlsx_export_written(conn, tmp_path):
     from pathlib import Path
 
