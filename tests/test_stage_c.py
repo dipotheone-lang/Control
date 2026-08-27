@@ -334,3 +334,71 @@ def test_a_complete_scan_claims_no_missing_folders():
 
     text = render_commercial_exposure(StageCResult(), not_scanned=[])
     assert "do not exist and were not searched" not in text
+
+
+# ---- how contract text actually arrives -------------------------------
+
+def test_a_clause_wrapped_across_lines_still_finds_its_date():
+    """The regression that got to production, and why the suite missed it.
+
+    Every contract in this file until now was written one tidy sentence
+    per line with a full stop at the end. Real documents do not arrive
+    that way: PDF extraction and OCR both emit a newline per rendered
+    line, so a clause wraps mid-sentence. Treating that newline as a
+    clause boundary produced **468 undated terms out of 470** on the
+    first real run, over 957 documents — a register with two dates in
+    it, reporting itself as "470 terms extracted". A §1.1 failure does
+    not get worse than an empty result that announces a full one.
+    """
+    terms = _by_kind("CONTRACT UB-2026-014\n"
+                     "The performance bond shall remain valid until\n"
+                     "31 December 2026 and shall be released thereafter\n")
+    assert terms["GUARANTEE_EXPIRY"] == {"2026-12-31"}
+
+
+def test_a_date_two_rows_down_a_table_is_not_borrowed():
+    """The other side of the same knob. One wrap is a wrapped clause;
+    two is a different row, and a register row is worse for being
+    confidently wrong than for being absent (§2.1)."""
+    assert _by_kind("Performance bond\n"
+                    "Supplier: Delta Steel\n"
+                    "Signed: 31 December 2026\n")["GUARANTEE_EXPIRY"] == {""}
+
+
+def test_a_paragraph_break_still_ends_the_clause():
+    assert _by_kind("Performance bond details follow.\n\n"
+                    "31 December 2026 is the audit date.\n"
+                    )["GUARANTEE_EXPIRY"] == {""}
+
+
+def test_the_whole_contract_survives_being_line_wrapped():
+    """The same agreement as `test_every_term_carries_its_own_date_or_none`,
+    re-flowed the way a PDF hands it over. The answers must not change
+    because the line breaks moved."""
+    wrapped = CONTRACT.replace(" capped", "\ncapped").replace(
+        " released", "\nreleased").replace(" period ends", "\nperiod ends")
+    assert _by_kind(wrapped) == _by_kind(CONTRACT)
+
+
+@pytest.mark.parametrize("text,kind,expected", [
+    ("performance\nbond valid until 31 December 2026", "GUARANTEE_EXPIRY",
+     "2026-12-31"),
+    ("The defects liability\nperiod ends 31 January 2028", "DEFECTS_LIABILITY",
+     "2028-01-31"),
+    ("liquidated\ndamages of 0.5% per week", "LIQUIDATED_DAMAGES", ""),
+    ("payment\nterms: net 60 days", "PAYMENT_TERMS", ""),
+    ("vendor\nregistration renewed 30 June 2027", "ACCREDITATION",
+     "2027-06-30"),
+    ("valid\nuntil 30/11/2026", "VALIDITY", "2026-11-30"),
+])
+def test_a_term_phrase_broken_by_a_line_wrap_is_still_found(text, kind,
+                                                            expected):
+    """Not the date this time — the term itself.
+
+    "defects liability period" stopped matching the moment a PDF broke
+    the line between "liability" and "period", losing the whole term.
+    The patterns are written with plain spaces because they read as the
+    phrases they are; `_phrase` turns each into `\\s+` at compile time
+    so a pattern added later cannot forget.
+    """
+    assert _by_kind(text).get(kind) == {expected}

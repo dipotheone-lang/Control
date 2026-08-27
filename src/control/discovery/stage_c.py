@@ -62,16 +62,33 @@ _DATE_PATTERNS = (
     re.compile(r"\b(\d{1,2})[\s-]([A-Za-z]{3,9})[\s-](\d{4})\b"),
 )
 
+
+def _phrase(source: str) -> "re.Pattern":
+    """Compile a term pattern so a phrase survives being line-wrapped.
+
+    Every literal space becomes `\\s+`. Written with plain spaces the
+    patterns read as the phrases they are, and "defects liability
+    period" then matched nothing the moment a PDF broke the line between
+    "liability" and "period" — losing the whole term, not just its date.
+    Contract text arrives wrapped; the patterns have to expect it.
+
+    Safe here because no pattern below has a space inside a character
+    class, and doing it at compile time means a pattern added later
+    cannot forget.
+    """
+    return re.compile("(?i)" + source.replace(" ", r"\s+"))
+
+
 # Commercial terms worth a register row. Each is (kind, pattern).
 _TERM_PATTERNS = (
-    ("GUARANTEE_EXPIRY", re.compile(
-        r"(?i)(letter of guarantee|bank guarantee|performance bond|advance "
+    ("GUARANTEE_EXPIRY", _phrase(
+        r"(letter of guarantee|bank guarantee|performance bond|advance "
         r"payment guarantee|bid bond|خطاب ضمان)")),
-    ("VALIDITY", re.compile(
-        r"(?i)(valid (?:until|till|through|up to)|expiry date|expires on|"
+    ("VALIDITY", _phrase(
+        r"(valid (?:until|till|through|up to)|expiry date|expires on|"
         r"validity period|صلاحية)")),
-    ("LIQUIDATED_DAMAGES", re.compile(
-        r"(?i)(liquidated damages|penalt(?:y|ies) for delay|غرامة تأخير)")),
+    ("LIQUIDATED_DAMAGES", _phrase(
+        r"(liquidated damages|penalt(?:y|ies) for delay|غرامة تأخير)")),
     # §2.2: "a claim not noticed within its window is generally
     # forfeited" — the most expensive miss in the charter, so the
     # phrasings this has to catch are worth being explicit about.
@@ -82,25 +99,25 @@ _TERM_PATTERNS = (
     # which is the silence §1.1 exists to prevent. `notif` now covers
     # notice / notified / notify / notification, and the window may sit
     # on either side of the trigger word.
-    ("NOTICE_PERIOD", re.compile(
-        r"(?i)(within\s+\(?\d{1,3}\)?\s*(?:calendar |working |business )?days?"
+    ("NOTICE_PERIOD", _phrase(
+        r"(within\s+\(?\d{1,3}\)?\s*(?:calendar |working |business )?days?"
         r".{0,60}(?:notif|claim|variation|إخطار|مطالبة)"
         r"|(?:notif|claim|variation|إخطار|مطالبة).{0,60}within\s+\(?\d{1,3}\)?"
         r"\s*(?:calendar |working |business )?days?"
         r"|خلال\s+\(?\d{1,3}\)?\s*يوم)")),
-    ("DEFECTS_LIABILITY", re.compile(
-        r"(?i)(defects? liability period|maintenance period|فترة الضمان)")),
+    ("DEFECTS_LIABILITY", _phrase(
+        r"(defects? liability period|maintenance period|فترة الضمان)")),
     # `retention ` with a trailing space missed "Retention: 5% released
     # 30 June 2027." — a colon is not a space — so the retention release
     # date left the register entirely. §2.2 tracks retention releases by
     # name; a word boundary catches the punctuation this is written with.
-    ("RETENTION", re.compile(
-        r"(?i)(retention\b(?:\s+(?:money|amount|percentage|release))?"
+    ("RETENTION", _phrase(
+        r"(retention\b(?:\s+(?:money|amount|percentage|release))?"
         r"|محتجزات)")),
-    ("PAYMENT_TERMS", re.compile(
-        r"(?i)(payment (?:terms|within)|net\s+\d{1,3}\s*days|شروط الدفع)")),
-    ("ACCREDITATION", re.compile(
-        r"(?i)(prequalification|pre-qualification|vendor registration|"
+    ("PAYMENT_TERMS", _phrase(
+        r"(payment (?:terms|within)|net\s+\d{1,3}\s*days|شروط الدفع)")),
+    ("ACCREDITATION", _phrase(
+        r"(prequalification|pre-qualification|vendor registration|"
         r"supplier registration|accreditation|ISO\s?\d{4,5})")),
 )
 
@@ -293,24 +310,39 @@ def _parse_date(fragment: str) -> str:
 # ending it. Treating it as one clipped "Retention: 5% released 30 June
 # 2027" to nothing and lost the release date — the opposite error to
 # the one above, and the same cost.
-_SENTENCE_END = re.compile(r"[.;\n]\s|\n")
+#
+# **Nor is a single line break.** Contract text does not arrive as
+# sentences: PDF extraction and OCR both emit a newline per rendered
+# line, so "the performance bond shall remain valid until\n31 December
+# 2026" is one clause wearing a line wrap. Treating that newline as a
+# boundary produced 468 undated terms out of 470 on the first real run
+# over 957 documents — an empty register that reported itself as 470
+# terms extracted, which is the worst shape a §1.1 failure can take.
+#
+# A blank line is a paragraph break and does end a clause. A single
+# newline is crossed at most once, so a wrapped clause still finds its
+# date while a term never reaches two rows down a table.
+_HARD_BOUNDARY = re.compile(r"[.;]\s|\n\s*\n")
+_MAX_WRAPS = 1
 
 # How close two matches must be to be reading the same clause.
 _CLAUSE_SPAN = 80
 
 
 def _clause_after(fragment: str) -> str:
-    """The rest of the term's own sentence, and no further."""
-    boundary = _SENTENCE_END.search(fragment)
-    return fragment[:boundary.start()] if boundary else fragment
+    """The rest of the term's own clause, and no further."""
+    boundary = _HARD_BOUNDARY.search(fragment)
+    text = fragment[:boundary.start()] if boundary else fragment
+    return "\n".join(text.split("\n")[:_MAX_WRAPS + 1])
 
 
 def _clause_before(fragment: str) -> str:
-    """The start of the term's own sentence, and no further back."""
+    """The start of the term's own clause, and no further back."""
     last = None
-    for boundary in _SENTENCE_END.finditer(fragment):
+    for boundary in _HARD_BOUNDARY.finditer(fragment):
         last = boundary
-    return fragment[last.end():] if last else fragment
+    text = fragment[last.end():] if last else fragment
+    return "\n".join(text.split("\n")[-(_MAX_WRAPS + 1):])
 
 
 def find_terms(text: str, source: str, window: int = 120) -> list[CommercialTerm]:
