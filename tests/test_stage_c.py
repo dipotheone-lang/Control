@@ -402,3 +402,40 @@ def test_a_term_phrase_broken_by_a_line_wrap_is_still_found(text, kind,
     so a pattern added later cannot forget.
     """
     assert _by_kind(text).get(kind) == {expected}
+
+
+def test_the_cache_key_moves_when_extraction_logic_changes():
+    """The cache served 957 of 957 documents from a superseded engine.
+
+    `ruleset_fingerprint` keyed on the confidentiality inputs and the
+    OCR floor — the rules that decide whether a document may be read —
+    but not on the rules that read it. So a fix to the term patterns and
+    the clause boundary changed nothing on re-run: every document came
+    back from cache carrying the old answers, and the summary reported a
+    successful scan. A cache that silently serves results from
+    superseded logic is worse than no cache, because the operator has
+    every reason to believe the fix ran.
+    """
+    import control.discovery.stage_c as sc
+
+    args = (["Siemens Energy"], [], [], False, False, 60.0)
+    before = sc.ruleset_fingerprint(*args)
+
+    saved = sc._MAX_WRAPS
+    try:
+        sc._MAX_WRAPS = saved + 1
+        assert sc.ruleset_fingerprint(*args) != before
+    finally:
+        sc._MAX_WRAPS = saved
+    assert sc.ruleset_fingerprint(*args) == before
+
+
+def test_the_cache_key_still_moves_when_the_confidential_list_grows():
+    """The property the fingerprint existed for in the first place, kept
+    intact: a client added by CEO decision must not replay as
+    non-confidential with its clause text unredacted (§12.1)."""
+    import control.discovery.stage_c as sc
+
+    assert (sc.ruleset_fingerprint(["Siemens Energy"], [], [], False, False, 60.0)
+            != sc.ruleset_fingerprint(["Siemens Energy", "KNAUF"], [], [],
+                                      False, False, 60.0))

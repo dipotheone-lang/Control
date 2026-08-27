@@ -510,8 +510,36 @@ def ruleset_fingerprint(confidential_clients: list[str],
         f"d05={int(bool(permit_confidential_dates))}",
         f"ocr={int(bool(ocr_on))}",
         f"floor={floor if floor is not None else ''}",
+        f"extraction={_extraction_fingerprint()}",
     ])
     return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
+def _extraction_fingerprint() -> str:
+    """Identity of the RULES THAT READ the document, not just the ones
+    that decide whether it may be read.
+
+    The fingerprint above was keyed on the confidentiality inputs and
+    the OCR floor. Extraction logic was not in it — so a fix to the term
+    patterns or the clause boundary changed nothing on re-run: 957 of
+    957 documents came back from cache and the corrected engine never
+    touched a single one. A cache that silently serves results from
+    superseded logic is worse than no cache, because the operator has
+    every reason to believe the fix ran.
+
+    Every pattern and boundary constant is hashed, so any edit to how a
+    term or a date is found invalidates exactly the documents whose
+    answer could change — and a rule added later cannot forget to
+    register itself.
+    """
+    material = "|".join([
+        *(f"{kind}={pattern.pattern}" for kind, pattern in _TERM_PATTERNS),
+        *(p.pattern for p in _DATE_PATTERNS),
+        _HARD_BOUNDARY.pattern,
+        f"wraps={_MAX_WRAPS}",
+        f"clause={_CLAUSE_SPAN}",
+    ])
+    return hashlib.sha256(material.encode()).hexdigest()[:12]
 
 
 def _cache_key(path: Path, relative: str, ruleset: str = "") -> str:
