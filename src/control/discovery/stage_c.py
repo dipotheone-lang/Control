@@ -45,7 +45,7 @@ stays honest about the shape of its own holes (§1.1).
 import hashlib
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import date, datetime
 from pathlib import Path
 
@@ -129,6 +129,14 @@ class CommercialTerm:
     context: str                # short quote, the citation (§1.2)
     found_date: str = ""        # ISO date if one sits near the term
     page_or_para: str = ""
+    # The phrase that actually matched, not the window around it. A
+    # context window spans neighbouring clauses by design — it is the
+    # citation — so reading the instrument type out of it picked up the
+    # advance payment guarantee in the next sentence and labelled a
+    # performance bond with it. Redacted with everything else on a
+    # confidential document (D-05), which is why an instrument type is
+    # correctly unrecoverable there rather than guessed.
+    term_text: str = ""
 
 
 @dataclass
@@ -388,6 +396,7 @@ def find_terms(text: str, source: str, window: int = 120) -> list[CommercialTerm
                 kind=kind, source=source,
                 context=context[:240],
                 found_date=found,
+                term_text=match.group(0)[:80],
             )))
 
     # VALIDITY is a qualifier, not a term. "Performance bond valid until
@@ -538,6 +547,12 @@ def _extraction_fingerprint() -> str:
         _HARD_BOUNDARY.pattern,
         f"wraps={_MAX_WRAPS}",
         f"clause={_CLAUSE_SPAN}",
+        # The shape of what is cached, not only the rules that fill it.
+        # Adding a field to CommercialTerm makes every existing entry
+        # short of it, and a replayed term missing `term_text` loses its
+        # instrument type silently — which is the same staleness this
+        # fingerprint exists to stop, arriving from the other side.
+        "fields=" + ",".join(f.name for f in fields(CommercialTerm)),
     ])
     return hashlib.sha256(material.encode()).hexdigest()[:12]
 
@@ -592,7 +607,8 @@ def _replay(result: StageCResult, payload: dict) -> None:
     terms = [
         CommercialTerm(kind=t["kind"], source=t["source"], context=t["context"],
                        found_date=t.get("found_date", ""),
-                       page_or_para=t.get("page_or_para", ""))
+                       page_or_para=t.get("page_or_para", ""),
+                       term_text=t.get("term_text", ""))
         for t in payload.get("terms", [])
     ]
     record = DocumentRecord(
@@ -735,7 +751,8 @@ def _process_one(path: Path, relative: str, confidential_clients: list[str],
             CommercialTerm(
                 kind=t.kind, source=t.source,
                 context="[REDACTED — D-05: date extracted, clause text not retained]",
-                found_date=t.found_date, page_or_para=t.page_or_para)
+                found_date=t.found_date, page_or_para=t.page_or_para,
+                term_text="")
             for t in terms if t.found_date
         ]
     payload.update(
@@ -743,7 +760,8 @@ def _process_one(path: Path, relative: str, confidential_clients: list[str],
         note="dates extracted under D-05; clause text not retained"
         if confidential else "",
         terms=[{"kind": t.kind, "source": t.source, "context": t.context,
-                "found_date": t.found_date, "page_or_para": t.page_or_para}
+                "found_date": t.found_date, "page_or_para": t.page_or_para,
+                "term_text": t.term_text}
                for t in terms])
     return payload
 

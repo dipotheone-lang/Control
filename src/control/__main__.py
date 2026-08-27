@@ -542,6 +542,23 @@ def cmd_contracts(args) -> int:
         render_commercial_exposure(result, not_scanned=[str(m) for m in missing]),
         encoding="utf-8")
 
+    # The wire from the report to the thing that actually alerts. §2.2
+    # schedules guarantees at 60/30/14/7 days off the class 2 registers,
+    # which are populated by `registers --import-file` from a YAML
+    # nothing produced — so until now a guarantee expiry Stage C found
+    # sat in a markdown file and alerted on nothing. Proposing is
+    # inference and happens here; importing is a separate deliberate act
+    # and that act is the approval (§1.1).
+    from .discovery import class2_proposal
+
+    today = date.today()
+    proposal = class2_proposal.propose(result.terms, today)
+    proposed_yaml = control_root / "discovery" / "PROPOSED-CLASS2-REGISTERS.yaml"
+    proposed_yaml.write_text(class2_proposal.to_yaml(proposal, today),
+                             encoding="utf-8")
+    (control_root / "discovery" / "PROPOSED-CLASS2-REGISTERS.md").write_text(
+        class2_proposal.render(proposal, today), encoding="utf-8")
+
     print(f"\ndocuments seen:      {len(result.documents)}")
     print(f"terms extracted:     {len(result.terms)}")
     print(f"confidential, unread: {len(result.blocked)}  (D-01)")
@@ -574,10 +591,19 @@ def cmd_contracts(args) -> int:
     dated = [t for t in result.terms if t.found_date]
     if dated:
         soonest = sorted(dated, key=lambda t: t.found_date)[:5]
-        print("\nnearest dated terms:")
+        print(f"\nnearest dated terms ({len(dated)} of {len(result.terms)} "
+              "terms carry a date):")
         for term in soonest:
             print(f"  {term.found_date}  {term.kind:20} {term.source[:50]}")
     print(f"\nwritten: {out}")
+    print(f"class 2 proposals: {proposal.count} row(s) ready to import, "
+          f"{len(proposal.blocked)} term(s) need a person")
+    if proposal.count:
+        print("  review, then import — importing is what makes them alert:")
+        print(f"    python -m control registers --control-root "
+              f"\"{args.control_root}\" --import-file \"{proposed_yaml}\"")
+    print("  why the rest could not be proposed: "
+          f"{control_root / 'discovery' / 'PROPOSED-CLASS2-REGISTERS.md'}")
     return 0
 
 
