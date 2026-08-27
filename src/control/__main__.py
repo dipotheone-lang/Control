@@ -533,6 +533,7 @@ def cmd_contracts(args) -> int:
         # hours the first time.
         result.ocr_confidences.extend(part.ocr_confidences)
         result.from_cache += part.from_cache
+        result.re_extracted += part.re_extracted
         print(f"    {len(part.documents)} documents, {len(part.terms)} terms, "
               f"{len(part.blocked)} confidential, {len(part.unreadable)} unreadable")
 
@@ -567,6 +568,13 @@ def cmd_contracts(args) -> int:
     print(f"unreadable/scanned:   {len(result.unreadable)}  (OCR needed)")
     if result.from_cache:
         print(f"reused from cache:    {result.from_cache}")
+    if result.re_extracted:
+        # Counted apart from `from_cache` because they are not the same
+        # claim: one says nothing was redone, the other says only the
+        # expensive half was skipped. Reading "reused from cache: 957"
+        # after a fix is what hid a whole broken run this morning.
+        print(f"  of which re-read under the current term patterns: "
+              f"{result.re_extracted} (text cached, document not reopened)")
     if result.ocr_attempted:
         print(f"\nOCR: {len(result.ocr_attempted)} attempted, "
               f"{len(result.ocr_read)} trusted, "

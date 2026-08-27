@@ -169,6 +169,11 @@ class StageCResult:
     ocr_confidences: list = field(default_factory=list)
     ocr_failed: list = field(default_factory=list)
     from_cache: int = 0
+    # Documents whose text was cached and whose terms were read again
+    # under changed patterns. Counted apart from `from_cache` because
+    # they are not the same claim: one says nothing was redone, the other
+    # says the expensive half was not.
+    re_extracted: int = 0
 
 
 # Words that identify an industry, not a counterparty. A client name
@@ -444,6 +449,7 @@ def run_stage_c(root: Path, confidential_clients: list[str],
     excluded = [Path(e).resolve() for e in (exclude or [])]
     result = StageCResult()
     cache = Path(cache_dir) if cache_dir else None
+    extraction = extraction_fingerprint()
     ruleset = ruleset_fingerprint(
         confidential_clients, confidential_folders, confidential_projects,
         permit_confidential_dates, ocr is not None, ocr_floor)
@@ -479,6 +485,21 @@ def run_stage_c(root: Path, confidential_clients: list[str],
         # next invocation converges instead of starting over.
         key = _cache_key(path, relative, ruleset)
         payload = _cache_read(cache, key)
+        if payload is not None and payload.get("extraction") != extraction:
+            # The document need not be reopened just because the term
+            # patterns changed. An outcome that does not depend on them —
+            # blocked, unreadable — stands as it is; one that does is
+            # re-extracted from the cached text. Only a confidential
+            # document, whose text is never retained (D-14), goes back to
+            # the file.
+            if payload.get("outcome") != "terms":
+                payload["extraction"] = extraction
+                _cache_write(cache, key, payload)
+            else:
+                payload = _re_extract(payload, relative)
+                if payload is not None:
+                    _cache_write(cache, key, payload)
+                    result.re_extracted += 1
         if payload is None:
             payload = _process_one(
                 path, relative, confidential_clients, confidential_folders,
@@ -519,14 +540,20 @@ def ruleset_fingerprint(confidential_clients: list[str],
         f"d05={int(bool(permit_confidential_dates))}",
         f"ocr={int(bool(ocr_on))}",
         f"floor={floor if floor is not None else ''}",
-        f"extraction={_extraction_fingerprint()}",
     ])
     return hashlib.sha256(material.encode()).hexdigest()[:16]
 
 
-def _extraction_fingerprint() -> str:
-    """Identity of the RULES THAT READ the document, not just the ones
-    that decide whether it may be read.
+def extraction_fingerprint() -> str:
+    """Identity of the rules that READ a document, kept separate from
+    the rules that decide whether it may be read at all.
+
+    Separate because they cost different amounts to redo. The read
+    fingerprint above governs whether a document must be opened and
+    OCR'd again — an hour of work over this estate. This one governs
+    only how the text is then searched, which is milliseconds. Folding
+    them together meant every fix to a term pattern re-OCR'd 957
+    documents.
 
     The fingerprint above was keyed on the confidentiality inputs and
     the OCR floor. Extraction logic was not in it — so a fix to the term
@@ -599,6 +626,27 @@ def _cache_write(cache_dir: Path | None, key: str, payload: dict) -> None:
             json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass                            # caching is an optimisation, never a gate
+
+
+def _re_extract(payload: dict, relative: str) -> dict | None:
+    """Redo term extraction from cached text, without reopening the file.
+
+    Returns None when the document has to be read again: a confidential
+    one, whose text is never retained (D-14), or an outcome from before
+    the text was cached at all.
+    """
+    text = payload.get("text")
+    if payload.get("outcome") != "terms" or not text:
+        return None
+    terms = find_terms(text, relative)
+    refreshed = dict(payload)
+    refreshed["extraction"] = extraction_fingerprint()
+    refreshed["terms"] = [
+        {"kind": t.kind, "source": t.source, "context": t.context,
+         "found_date": t.found_date, "page_or_para": t.page_or_para,
+         "term_text": t.term_text}
+        for t in terms]
+    return refreshed
 
 
 def _replay(result: StageCResult, payload: dict) -> None:
@@ -759,6 +807,14 @@ def _process_one(path: Path, relative: str, confidential_clients: list[str],
         outcome="terms", readable=True, d05=bool(confidential),
         note="dates extracted under D-05; clause text not retained"
         if confidential else "",
+        extraction=extraction_fingerprint(),
+        # D-14: for a client-confidential document the OCR text buffer is
+        # never retained. So the text is cached for ordinary documents —
+        # which lets a later change to the term patterns re-extract in
+        # milliseconds instead of re-OCRing — and never for confidential
+        # ones, which re-read every time. That asymmetry is the decision
+        # working, not an oversight.
+        text=None if confidential else text,
         terms=[{"kind": t.kind, "source": t.source, "context": t.context,
                 "found_date": t.found_date, "page_or_para": t.page_or_para,
                 "term_text": t.term_text}

@@ -404,30 +404,77 @@ def test_a_term_phrase_broken_by_a_line_wrap_is_still_found(text, kind,
     assert _by_kind(text).get(kind) == {expected}
 
 
-def test_the_cache_key_moves_when_extraction_logic_changes():
+def test_a_term_pattern_change_re_extracts_without_reopening_the_file(
+        tmp_path, monkeypatch):
     """The cache served 957 of 957 documents from a superseded engine.
 
-    `ruleset_fingerprint` keyed on the confidentiality inputs and the
-    OCR floor — the rules that decide whether a document may be read —
-    but not on the rules that read it. So a fix to the term patterns and
-    the clause boundary changed nothing on re-run: every document came
-    back from cache carrying the old answers, and the summary reported a
-    successful scan. A cache that silently serves results from
-    superseded logic is worse than no cache, because the operator has
-    every reason to believe the fix ran.
+    Keying the cache on extraction logic fixed the staleness and bought a
+    second problem: every fix to a term pattern re-OCR'd the whole
+    estate, an hour of work to redo milliseconds of it. So the two
+    fingerprints are separate — one governs whether the document must be
+    opened again, the other only how its text is searched.
     """
     import control.discovery.stage_c as sc
 
-    args = (["Siemens Energy"], [], [], False, False, 60.0)
-    before = sc.ruleset_fingerprint(*args)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "bond.txt").write_text(
+        "Performance bond valid until 30/11/2026.\n", encoding="utf-8")
+    cache = tmp_path / "cache"
+
+    first = sc.run_stage_c(tmp_path, [], [], cache_dir=cache)
+    assert first.terms and first.from_cache == 0
+
+    opened = []
+    real = sc.extract_text
+    monkeypatch.setattr(sc, "extract_text",
+                        lambda *a, **k: (opened.append(a[0]), real(*a, **k))[1])
 
     saved = sc._MAX_WRAPS
     try:
         sc._MAX_WRAPS = saved + 1
-        assert sc.ruleset_fingerprint(*args) != before
+        second = sc.run_stage_c(tmp_path, [], [], cache_dir=cache)
     finally:
         sc._MAX_WRAPS = saved
-    assert sc.ruleset_fingerprint(*args) == before
+
+    assert second.re_extracted == 1, "the terms were not read again"
+    assert opened == [], "the document was reopened to redo milliseconds of work"
+    assert {t.found_date for t in second.terms} == {"2026-11-30"}
+
+
+def test_a_confidential_document_is_read_again_rather_than_cached(
+        tmp_path, monkeypatch):
+    """D-14: for a client-confidential document the OCR text buffer is
+    never retained. So it cannot be re-extracted from cache and goes back
+    to the file — the decision working, not an oversight."""
+    import control.discovery.stage_c as sc
+
+    (tmp_path / "KNAUF").mkdir()
+    (tmp_path / "KNAUF" / "agreement.txt").write_text(
+        "The performance bond is valid until 30/11/2026.\n", encoding="utf-8")
+    cache = tmp_path / "cache"
+
+    sc.run_stage_c(tmp_path, CLIENTS, FOLDERS, permit_confidential_dates=True,
+                   cache_dir=cache)
+
+    opened = []
+    real = sc.extract_text
+    monkeypatch.setattr(sc, "extract_text",
+                        lambda *a, **k: (opened.append(a[0]), real(*a, **k))[1])
+
+    saved = sc._MAX_WRAPS
+    try:
+        sc._MAX_WRAPS = saved + 1
+        again = sc.run_stage_c(tmp_path, CLIENTS, FOLDERS,
+                               permit_confidential_dates=True, cache_dir=cache)
+    finally:
+        sc._MAX_WRAPS = saved
+
+    assert opened, "a confidential document was replayed from retained text"
+    assert again.re_extracted == 0
+    # And no text was written to the cache for it.
+    for entry in cache.glob("*.json"):
+        import json
+        assert json.loads(entry.read_text(encoding="utf-8")).get("text") is None
 
 
 def test_the_cache_key_still_moves_when_the_confidential_list_grows():
