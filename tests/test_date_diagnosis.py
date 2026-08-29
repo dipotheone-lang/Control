@@ -37,17 +37,34 @@ def test_terms_in_documents_with_no_date_are_counted_apart(tmp_path):
     assert result.terms_undated_in_dated_documents == 0
 
 
-def test_a_date_shape_the_engine_cannot_parse_is_reported(tmp_path):
-    """`31.12.2027` is a date to every reader in Egypt and matches none
-    of the three patterns, which know `/`, `-` and Latin month names."""
+def test_the_dotted_date_this_diagnostic_found_now_parses(tmp_path):
+    """What the measurement was for.
+
+    Over 957 documents it counted 159 occurrences of `NN.NN.NNNN` that no
+    pattern parsed — more than every recognised format except
+    `NN/NN/NNNN` at 172. `31.12.2027` is a date to every reader in Egypt,
+    and each one was a guarantee expiry the register never saw.
+    """
     directory = cache(tmp_path, [
         ("Letter of guarantee valid until 31.12.2027.",
+         [{"kind": "GUARANTEE_EXPIRY", "found_date": "2027-12-31"}]),
+    ])
+    result = diagnose(directory)
+    assert result.parsed == 1
+    assert result.parsed_shapes["NN.NN.NNNN"] == 1
+    assert result.unparsed == 0
+
+
+def test_a_shape_the_engine_still_cannot_parse_is_reported(tmp_path):
+    """The diagnostic has to keep working after its own first finding is
+    fixed, or the next unreadable format is invisible."""
+    directory = cache(tmp_path, [
+        ("Guarantee valid until 31 ديسمبر 2027.",
          [{"kind": "GUARANTEE_EXPIRY", "found_date": ""}]),
     ])
     result = diagnose(directory)
     assert result.unparsed == 1
-    assert result.unparsed_shapes["NN.NN.NNNN"] == 1
-    assert result.parsed == 0
+    assert any("ع" in shape for shape in result.unparsed_shapes)
 
 
 def test_the_value_never_leaves_the_document(tmp_path):

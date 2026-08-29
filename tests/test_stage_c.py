@@ -486,3 +486,57 @@ def test_the_cache_key_still_moves_when_the_confidential_list_grows():
     assert (sc.ruleset_fingerprint(["Siemens Energy"], [], [], False, False, 60.0)
             != sc.ruleset_fingerprint(["Siemens Energy", "KNAUF"], [], [],
                                       False, False, 60.0))
+
+
+# ---- what this estate actually writes ---------------------------------
+
+@pytest.mark.parametrize("text,expected", [
+    # 159 occurrences over 957 documents, parsed by nothing until now —
+    # more than every recognised format except NN/NN/NNNN at 172.
+    ("Letter of guarantee valid until 31.12.2027.", "2027-12-31"),
+    ("Bank guarantee valid until 15.03.2028.", "2028-03-15"),
+    # Still day-first, and still validated: a version string that looks
+    # like this fails on the calendar rather than entering a register.
+    ("Performance bond valid until 31/12/2027.", "2027-12-31"),
+])
+def test_a_dotted_date_is_read(text, expected):
+    assert _by_kind(text)["GUARANTEE_EXPIRY"] == {expected}
+
+
+def test_a_number_that_is_not_a_date_stays_undated():
+    from control.discovery.stage_c import _parse_date
+
+    for not_a_date in ("10.15.2026", "0.5", "1.2.3", "12 Section 2021"):
+        assert _parse_date(not_a_date) == "", not_a_date
+
+
+def test_an_abbreviated_month_with_a_stop_is_read():
+    from control.discovery.stage_c import _parse_date
+
+    assert _parse_date("12 Sept. 2021") == "2021-09-12"
+
+
+def test_a_reference_number_does_not_end_the_clause():
+    """Why both dated terms in a 957-document run were VALIDITY rather
+    than GUARANTEE_EXPIRY.
+
+    An instrument is named with its reference — "Letter of Guarantee No.
+    5512 valid until 31.12.2027" — and reading the stop in "No." as a
+    sentence end truncated the clause before its own expiry. The
+    guarantee then had no date, so it proposed no register row, while
+    the VALIDITY match on the same sentence kept the date and named no
+    instrument.
+    """
+    assert _by_kind("Letter of guarantee no. 5512 valid until 31.12.2027."
+                    )["GUARANTEE_EXPIRY"] == {"2027-12-31"}
+    assert _by_kind("Performance Bond Ref. UB/2026/14 expires 15.03.2028."
+                    )["GUARANTEE_EXPIRY"] == {"2028-03-15"}
+
+
+def test_a_real_sentence_end_still_ends_the_clause():
+    """The exclusion is narrow on purpose. Widening it would undo the
+    boundary that stops a date crossing into the clause next door."""
+    terms = _by_kind("Performance bond valid until 31 December 2026. "
+                     "Liquidated damages: 0.5% per week.")
+    assert terms["LIQUIDATED_DAMAGES"] == {""}
+    assert terms["GUARANTEE_EXPIRY"] == {"2026-12-31"}

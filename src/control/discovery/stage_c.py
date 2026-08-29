@@ -56,10 +56,25 @@ SCANNED_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun",
            "jul", "aug", "sep", "oct", "nov", "dec")
 
+# The separator class includes the full stop because this estate writes
+# dates that way. Measured, not assumed: `diagnose-dates` over 957
+# documents found 159 occurrences of `NN.NN.NNNN` that no pattern
+# parsed — more than every recognised format except `NN/NN/NNNN` at 172.
+# Each one was a date a person reads at a glance and the register never
+# saw, and that gap is most of why 525 commercial terms yielded two
+# dated ones.
+#
+# Day-first, like the slash form: Egyptian practice, and `_parse_date`
+# validates the result, so a version string that happens to look like
+# this fails on the calendar rather than entering a register.
 _DATE_PATTERNS = (
-    re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b"),
+    re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b"),
     re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b"),
-    re.compile(r"\b(\d{1,2})[\s-]([A-Za-z]{3,9})[\s-](\d{4})\b"),
+    # The optional stop lets an abbreviated month through: `12 Sept. 2021`
+    # is written that way and was rejected on the punctuation alone. The
+    # month itself is matched on its first three letters, so the
+    # abbreviation was never the problem.
+    re.compile(r"\b(\d{1,2})[\s-]([A-Za-z]{3,9})\.?[\s-](\d{4})\b"),
 )
 
 
@@ -335,8 +350,56 @@ def _parse_date(fragment: str) -> str:
 # A blank line is a paragraph break and does end a clause. A single
 # newline is crossed at most once, so a wrapped clause still finds its
 # date while a term never reaches two rows down a table.
-_HARD_BOUNDARY = re.compile(r"[.;]\s|\n\s*\n")
+# **Nor is the full stop in an abbreviation.** "Letter of Guarantee No.
+# 5512 valid until 31.12.2027" is one clause, and reading "No." as a
+# sentence end truncated it before its own date — which is why both
+# dated terms in a 957-document run were VALIDITY rather than
+# GUARANTEE_EXPIRY: the instrument is named with a reference, the
+# reference carries an abbreviation, and the expiry fell off the end.
+#
+# Two exclusions, both narrow enough to name. A stop after a known
+# abbreviation is not a boundary, and neither is one followed by a
+# digit — a number continuing a reference is not a new sentence.
+_ABBREVIATIONS = frozenset((
+    "no", "nos", "ref", "inv", "art", "cl", "para", "sec", "ch", "fig",
+    "ltd", "co", "inc", "vs", "etc", "approx", "min", "max", "dept",
+    "mr", "mrs", "ms", "dr", "eng", "st", "ave", "rev", "acct", "attn",
+))
+_BOUNDARY = re.compile(r"([.;])(\s+)|\n\s*\n")
 _MAX_WRAPS = 1
+
+
+class _HardBoundary:
+    """`_BOUNDARY` with the abbreviation exclusions applied.
+
+    Kept behind the same `search`/`finditer` surface the clause helpers
+    already use, so the exclusion cannot be applied in one direction and
+    forgotten in the other — that asymmetry is how the retention release
+    was lost once already.
+    """
+
+    pattern = _BOUNDARY.pattern + "|abbrev:" + ",".join(sorted(_ABBREVIATIONS))
+
+    @staticmethod
+    def _is_boundary(fragment: str, match) -> bool:
+        if match.group(1) is None:        # a blank line always ends a clause
+            return True
+        before = re.search(r"([^\W\d_]+)$", fragment[:match.start()])
+        if before and before.group(1).lower() in _ABBREVIATIONS:
+            return False
+        after = fragment[match.end():match.end() + 1]
+        return not after.isdigit()
+
+    def finditer(self, fragment: str):
+        for match in _BOUNDARY.finditer(fragment):
+            if self._is_boundary(fragment, match):
+                yield match
+
+    def search(self, fragment: str):
+        return next(self.finditer(fragment), None)
+
+
+_HARD_BOUNDARY = _HardBoundary()
 
 # How close two matches must be to be reading the same clause.
 _CLAUSE_SPAN = 80
