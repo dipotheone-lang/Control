@@ -169,6 +169,14 @@ def propose(terms, today: date) -> Proposal:
             "expiry_date": term.found_date,
             "project_ref": _project(term.source),
             "status": "OPEN",
+            # Left blank on purpose. §2.2 names a renewal owner for
+            # accreditations and none for instruments, so there is no
+            # rule to read one from — and the register used to fill an
+            # empty owner with a hardcoded address, which made every
+            # unchased guarantee read as assigned (§1.1). Blank here is
+            # a field to fill before importing; `registers` reports it
+            # as unowned if it is not.
+            "owner": "",
             # §5.2: every row records where it came from. These are read
             # out of historical documents on the drive, not received
             # live, and the distinction is the difference between a fact
@@ -228,6 +236,11 @@ def to_yaml(proposal: Proposal, today: date) -> str:
         "#",
         "#   python -m control registers --import-file <this file>",
         "#",
+        "# Fill in `owner` before importing. It is blank because nothing",
+        "# in the documents says who chases a guarantee, and a deadline",
+        "# with no owner alerts at nobody — `registers` lists those as",
+        "# unowned rather than inventing a name for them (§1.1).",
+        "#",
         "# Review before importing. Every row alerts once imported — §2.2",
         "# schedules guarantees at 60 / 30 / 14 / 7 days — and the register",
         "# is append-only (§5.2), so a wrong row is corrected by another",
@@ -267,11 +280,16 @@ def render(proposal: Proposal, today: date) -> str:
 
     for register, rows in (proposal.rows or {}).items():
         lines += [f"## Ready to import — {register} ({len(rows)})", "",
-                  "| expiry | type | reference | project |",
-                  "|---|---|---|---|"]
+                  "| expiry | type | reference | project | owner |",
+                  "|---|---|---|---|---|"]
         for row in rows:
             lines.append(f"| {row['expiry_date']} | {row['instrument_type']} | "
-                         f"{row['instrument_ref']} | {row.get('project_ref', '')} |")
+                         f"{row['instrument_ref']} | {row.get('project_ref') or ''} "
+                         f"| {row.get('owner') or '**unassigned**'} |")
+        lines += ["", "Every owner above is blank: nothing in a contract says "
+                  "who chases its guarantee. Fill them in the YAML before "
+                  "importing, or the alert fires at nobody and `registers` "
+                  "reports the row as unowned (§1.1).", ""]
         lines.append("")
 
     if not proposal.rows:

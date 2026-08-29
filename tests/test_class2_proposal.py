@@ -178,3 +178,17 @@ def test_every_proposed_row_reaches_the_horizon(tmp_path):
         conn.close()
 
     assert due == {"2026-12-31", "2027-03-15", "2027-11-30"}
+
+
+def test_no_owner_is_invented_for_a_guarantee():
+    """§2.2 names a renewal owner for accreditations and none for
+    instruments, so there is no rule to read one from. The register used
+    to fill an empty owner with a hardcoded address, which made every
+    unchased guarantee read as assigned to a named person — and §3.2
+    makes that pointed, because the address was the segregation-of-duties
+    concentration."""
+    rows = propose([term()], TODAY).rows["instruments"]
+    assert rows[0]["owner"] == ""
+    text = render(propose([term()], TODAY), TODAY)
+    assert "unassigned" in text
+    assert "Fill them in the YAML before importing" in text

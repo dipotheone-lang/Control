@@ -285,7 +285,22 @@ def cmd_registers(args) -> int:
             marker = "OVERDUE" if days < 0 else f"T-{days}"
             print(f"  {deadline.item.due:%d-%b-%Y}  {marker:>8}  "
                   f"[{deadline.register}] {deadline.item.name[:60]}")
-            print(f"{'':32}owner: {deadline.item.owner}")
+            # An empty owner used to be filled with a hardcoded address,
+            # so a guarantee nobody was chasing read as assigned to a
+            # named person (§1.1). It now reads as the gap it is.
+            print(f"{'':32}owner: "
+                  f"{deadline.item.owner or 'NOT ASSIGNED — nobody is chasing this'}")
+
+        unowned_rows = reg.unowned(conn)
+        if unowned_rows:
+            print(f"\nON THE REGISTER, NOBODY AGAINST IT — {len(unowned_rows)} rows")
+            print("  These carry a date and no owner, so the alert fires at")
+            print("  nobody. Until this file was corrected they were shown as")
+            print("  owned by a hardcoded address, which is worse than silence:")
+            print("  it read as assigned (§1.1).\n")
+            for row in unowned_rows:
+                print(f"  {row['kind']:14} {row['ref'][:50]:50} "
+                      f"missing {row['missing']}")
 
         if undated_rows:
             print(f"\nON THE REGISTER, ALERTING ON NOTHING — {len(undated_rows)} rows")

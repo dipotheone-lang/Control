@@ -109,9 +109,22 @@ class RegisterDeadline:
 
 
 def _item(item_id: str, name: str, owner: str, due: date, schedule) -> TrackedItem:
+    """A class 2 deadline. The owner is whatever the register holds.
+
+    It used to fall back to a hardcoded address when the column was
+    empty, which put a named individual against every unowned guarantee
+    and tender in the CEO's report — a fabricated fact in the one place
+    §11 says every number must trace to a row (§1.1). §3.2 made it
+    pointed: that address is the segregation-of-duties concentration, so
+    the invented assignments landed on the person whose load the charter
+    is trying to measure.
+
+    An empty owner now stays empty and surfaces through `unowned` as
+    what it is — a deadline nobody is chasing.
+    """
     return TrackedItem(
         item_id=item_id, obligation_class=2, name=name,
-        owner=owner or "info@ubcsis.com", due=due, schedule=schedule,
+        owner=owner or "", due=due, schedule=schedule,
     )
 
 
@@ -120,7 +133,8 @@ def tender_deadlines(conn) -> list[RegisterDeadline]:
     for row in current(conn, "registers_tenders", "tender_ref"):
         if row.get("status") in ("CLOSED", "NO_BID"):
             continue
-        ref, owner = row["tender_ref"], row.get("owner", "")
+        ref, owner = row["tender_ref"], (row.get("owner") or "")
+        client = row.get("client") or ""
         for field, label, schedule in (
             ("bid_decision_due", "bid/no-bid decision", CLASS2_SCHEDULE),
             ("clarification_deadline", "clarification deadline", TENDER_SCHEDULE),
@@ -134,7 +148,7 @@ def tender_deadlines(conn) -> list[RegisterDeadline]:
             out.append(RegisterDeadline(
                 item=_item(f"TND-{ref}-{field}",
                            f"{label} — {row.get('title') or ref} "
-                           f"({row.get('client', '')})", owner, due, schedule),
+                           f"({client})", owner, due, schedule),
                 register="tenders",
                 detail=f"{ref}: {label}",
             ))
@@ -151,9 +165,10 @@ def instrument_deadlines(conn) -> list[RegisterDeadline]:
         if expiry:
             out.append(RegisterDeadline(
                 item=_item(f"INS-{ref}-expiry",
-                           f"{row['instrument_type']} expiry — {ref} "
-                           f"({row.get('beneficiary', '')})",
-                           row.get("owner", ""), expiry, INSTRUMENT_SCHEDULE),
+                           f"{row['instrument_type']} expiry — {ref}"
+                           + (f" ({row['beneficiary']})"
+                              if row.get("beneficiary") else ""),
+                           (row.get("owner") or ""), expiry, INSTRUMENT_SCHEDULE),
                 register="instruments",
                 detail=f"{ref}: expiry",
             ))
@@ -163,7 +178,7 @@ def instrument_deadlines(conn) -> list[RegisterDeadline]:
             out.append(RegisterDeadline(
                 item=_item(f"INS-{ref}-release",
                            f"{row['instrument_type']} release due — {ref}",
-                           row.get("owner", ""), release, INSTRUMENT_SCHEDULE),
+                           (row.get("owner") or ""), release, INSTRUMENT_SCHEDULE),
                 register="instruments",
                 detail=f"{ref}: release",
             ))
@@ -181,7 +196,7 @@ def accreditation_deadlines(conn) -> list[RegisterDeadline]:
         out.append(RegisterDeadline(
             item=_item(f"ACC-{row['client']}",
                        f"Accreditation expiry — {row['client']}",
-                       row.get("renewal_owner", ""), expiry,
+                       (row.get("renewal_owner") or ""), expiry,
                        ACCREDITATION_SCHEDULE),
             register="accreditations",
             detail=f"{row['client']}: prequalification expiry",
@@ -197,12 +212,13 @@ def quotation_deadlines(conn) -> list[RegisterDeadline]:
         valid_until = _as_date(row.get("valid_until"))
         if not valid_until:
             continue
-        direction = row.get("direction", "ISSUED")
+        direction = row.get("direction") or "ISSUED"
+        counterparty = row.get("counterparty") or ""
         out.append(RegisterDeadline(
             item=_item(f"QTE-{row['quote_ref']}",
                        f"Quotation validity expiry ({direction.lower()}) — "
-                       f"{row['quote_ref']} {row.get('counterparty', '')}",
-                       row.get("owner", ""), valid_until, CLASS2_SCHEDULE),
+                       f"{row['quote_ref']} {counterparty}".strip(),
+                       (row.get("owner") or ""), valid_until, CLASS2_SCHEDULE),
             register="quotations",
             detail=f"{row['quote_ref']}: validity expiry",
         ))
@@ -219,7 +235,8 @@ def contract_deadlines(conn) -> list[RegisterDeadline]:
     """
     out: list[RegisterDeadline] = []
     for row in current(conn, "registers_contracts", "contract_ref"):
-        ref, owner = row["contract_ref"], row.get("owner", "")
+        ref, owner = row["contract_ref"], (row.get("owner") or "")
+        client = row.get("client") or ""
         for field, label in (("end_date", "contract end"),
                              ("dlp_end_date", "defects liability period end")):
             due = _as_date(row.get(field))
@@ -227,7 +244,7 @@ def contract_deadlines(conn) -> list[RegisterDeadline]:
                 continue
             out.append(RegisterDeadline(
                 item=_item(f"CTR-{ref}-{field}",
-                           f"{label} — {ref} ({row.get('client', '')})",
+                           f"{label} — {ref} ({client})",
                            owner, due, CLASS2_SCHEDULE),
                 register="contracts",
                 detail=f"{ref}: {label}",
@@ -279,9 +296,38 @@ def undated(conn) -> list[dict]:
                     "kind": kind,
                     "ref": row.get(key, ""),
                     "missing": date_column,
-                    "status": row.get("status", ""),
+                    "status": (row.get("status") or ""),
                     "owner": row.get("renewal_owner") or row.get("owner") or "",
                 })
+    return rows
+
+
+# Register, key column, owner column, and what the row is.
+_UNOWNED = (
+    ("registers_instruments", "instrument_ref", "owner", "instrument"),
+    ("registers_accreditations", "client", "renewal_owner", "accreditation"),
+    ("registers_tenders", "tender_ref", "owner", "tender"),
+    ("registers_quotations", "quote_ref", "owner", "quotation"),
+    ("registers_contracts", "contract_ref", "owner", "contract"),
+)
+
+
+def unowned(conn) -> list[dict]:
+    """Register rows with a date and nobody against it.
+
+    The companion to `undated`, and it exists because the alternative
+    was worse than silence: an empty owner used to be filled with a
+    hardcoded address, so a guarantee nobody was chasing appeared in the
+    CEO's report assigned to a named person. A deadline with no owner
+    alerts into nothing; that is a finding, and §1.1 says it has to look
+    like one.
+    """
+    rows: list[dict] = []
+    for table, key, owner_column, kind in _UNOWNED:
+        for row in current(conn, table, key):
+            if not row.get(owner_column):
+                rows.append({"kind": kind, "ref": row.get(key) or "",
+                             "missing": owner_column})
     return rows
 
 
@@ -294,8 +340,8 @@ def notice_periods(conn) -> list[dict]:
         if row.get("notice_period_days"):
             rows.append({
                 "contract_ref": row["contract_ref"],
-                "client": row.get("client", ""),
+                "client": (row.get("client") or ""),
                 "notice_period_days": row["notice_period_days"],
-                "owner": row.get("owner", ""),
+                "owner": (row.get("owner") or ""),
             })
     return rows

@@ -132,3 +132,55 @@ def test_deadlines_feed_the_enforcement_engine(conn):
     actions = enforcer.plan_class12(deadline.item, TODAY)   # T-2
     assert actions and actions[0].dedupe_key.endswith(":T-2")
     assert actions[0].never_suppress is True
+
+
+def test_an_unowned_deadline_is_not_given_a_name(tmp_path):
+    """The fabricated owner, and why it mattered more than it looked.
+
+    `_item` fell back to a hardcoded address whenever the owner column
+    was empty, so a guarantee nobody was chasing appeared in the CEO's
+    weekly report with a named individual against it — invented fact in
+    the one place §11 requires every number to trace to a row. §3.2 made
+    it worse: that address is the segregation-of-duties concentration,
+    so the invented assignments landed on the person whose load the
+    charter exists to measure.
+    """
+    from datetime import date
+
+    from control.db import init_db
+    from control.registers import add_instrument, horizon, unowned
+
+    conn = init_db(tmp_path / "control.db")
+    try:
+        add_instrument(conn, instrument_ref="LG-1", instrument_type="BID_BOND",
+                       expiry_date="2026-09-10", source="BACKFILL")
+        conn.commit()
+        deadlines = horizon(conn, date(2026, 8, 29), days=60)
+        assert deadlines and deadlines[0].item.owner == ""
+        gaps = unowned(conn)
+        assert [g["ref"] for g in gaps] == ["LG-1"]
+        assert gaps[0]["missing"] == "owner"
+    finally:
+        conn.close()
+
+
+def test_a_null_column_does_not_render_as_the_string_none(tmp_path):
+    """`dict.get(key, "")` returns the stored value when the key exists,
+    and a sqlite row carries every column — so a NULL beneficiary came
+    back as None and printed as "(None)" in the CEO's report."""
+    from datetime import date
+
+    from control.db import init_db
+    from control.registers import add_instrument, horizon
+
+    conn = init_db(tmp_path / "control.db")
+    try:
+        add_instrument(conn, instrument_ref="LG-2",
+                       instrument_type="LETTER_OF_GUARANTEE",
+                       expiry_date="2026-09-10", source="BACKFILL")
+        conn.commit()
+        name = horizon(conn, date(2026, 8, 29), days=60)[0].item.name
+        assert "None" not in name
+        assert name.endswith("LG-2")
+    finally:
+        conn.close()
