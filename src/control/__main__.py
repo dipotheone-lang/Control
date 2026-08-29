@@ -1288,6 +1288,21 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_diagnose_dates(args) -> int:
+    """Why terms carry no date — measured, not guessed (§1.1).
+
+    Two scans produced 525 terms and 2 dated ones, and two fixes made on
+    reasoning alone did not move it. This counts what is in the cached
+    text so the next change answers evidence.
+    """
+    from .discovery import date_diagnosis
+
+    cache = Path(args.control_root) / "data" / "stage-c-cache"
+    result = date_diagnosis.diagnose(cache)
+    print(date_diagnosis.render(result))
+    return 0
+
+
 def cmd_terms(args) -> int:
     """§5.5 — the work queue for what OCR could not reach."""
     from .db import connect
@@ -2667,6 +2682,13 @@ def main(argv: list[str] | None = None) -> int:
     terms.add_argument("--today", default="", help="ISO date, for testing")
     terms.set_defaults(fn=cmd_terms)
 
+    diagnose = sub.add_parser(
+        "diagnose-dates",
+        help="why Stage C terms carry no date — counts what the documents "
+             "actually write, from cached text (no re-read, no OCR)")
+    diagnose.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    diagnose.set_defaults(fn=cmd_diagnose_dates)
+
     manuals = sub.add_parser(
         "manuals",
         help="Stage C: find the governing manuals, for CEO confirmation")
@@ -2718,7 +2740,7 @@ def main(argv: list[str] | None = None) -> int:
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "analyse", "init", "contracts", "registers",
                          "classify", "classify-scan", "backup", "manuals",
-                         "terms", "golden", "disputes")
+                         "terms", "golden", "disputes", "diagnose-dates")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
