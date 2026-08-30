@@ -1483,7 +1483,8 @@ def cmd_status(args) -> int:
 
     control_root = Path(args.control_root)
     today = date.fromisoformat(args.today) if args.today else date.today()
-    report = st.render(st.build(control_root, today), today)
+    report = st.render(
+        st.build(control_root, today, getattr(args, "scope", "FULL")), today)
     print(report)
 
     out = control_root / "reports" / f"status-{today:%Y-%m-%d}.txt"
@@ -3082,6 +3083,8 @@ def main(argv: list[str] | None = None) -> int:
         help="one page of what the runs actually found — reads what is on "
              "disk, scans nothing")
     status.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    status.add_argument("--scope",
+                        default=os.environ.get("OPERATING_SCOPE", "FULL"))
     status.add_argument("--today", default="", help="ISO date, for testing")
     status.set_defaults(fn=cmd_status)
 

@@ -24,6 +24,14 @@ setlocal
 title Control - statutory horizon
 cd /d "%~dp0"
 
+rem UTF-8 in the console. The page is bilingual and charter section 4
+rem requires both languages in full - on the default Windows codepage the
+rem Arabic half renders as mojibake, so half the page is unreadable in the
+rem one place somebody actually reads it. The saved file is UTF-8 either
+rem way; this is only about the screen. If the console font has no Arabic
+rem glyphs, open the saved file instead - the path is printed at the end.
+chcp 65001 >nul 2>&1
+
 rem /scheduled: no prompts and nothing opened. A scheduled task that ends
 rem on `pause` waits forever with nobody there to press a key.
 set "INTERACTIVE=1"

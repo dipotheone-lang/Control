@@ -98,3 +98,35 @@ def test_it_recommends_nothing(tmp_path):
     text = render(build(root(tmp_path), TODAY), TODAY).lower()
     for word in ("recommend", "you should", "we should", "suggest"):
         assert word not in text
+
+
+def test_out_of_scope_sections_are_labelled_not_dropped(tmp_path):
+    """The page the narrowing was decided on has to survive it.
+
+    Dropping the out-of-scope sections would be the same mistake in a new
+    place: "no guarantees in the register" and "guarantees are not this
+    system's job any more" are different facts, and showing only the
+    second would hide an exposure that has not moved (§3.2).
+    """
+    text = render(build(root(tmp_path), TODAY, "STATUTORY_ONLY"), TODAY)
+
+    assert "CLASS 1 — STATUTORY" in text
+    assert "OUT OF SCOPE (D-15), still reported" in text
+    # Still measured: the section reports its state under the label
+    # rather than being replaced by the label.
+    assert "no run has reached it — this is absent, not empty" in text
+    assert "narrowing the software does not narrow the risk" in text
+
+
+def test_class_1_is_never_labelled_out_of_scope(tmp_path):
+    """It is the one thing the narrowed scope operates on."""
+    text = render(build(root(tmp_path), TODAY, "STATUTORY_ONLY"), TODAY)
+    heading = next(line for line in text.splitlines()
+                   if line.startswith("CLASS 1"))
+    assert "OUT OF SCOPE" not in heading
+
+
+def test_the_full_scope_labels_nothing(tmp_path):
+    text = render(build(root(tmp_path), TODAY), TODAY)
+    assert "OUT OF SCOPE" not in text
+    assert "OPERATING_SCOPE" not in text

@@ -33,6 +33,7 @@ class Line:
 @dataclass
 class Status:
     sections: list = field(default_factory=list)   # (title, [Line])
+    scope: str = "FULL"
 
     def add(self, title: str, lines: list) -> None:
         self.sections.append((title, lines))
@@ -220,20 +221,51 @@ def _mailbox(control_root: Path) -> list[Line]:
     ]
 
 
-def build(control_root: Path, today: date) -> Status:
+def build(control_root: Path, today: date, scope: str = "FULL") -> Status:
+    # This page was what the narrowing decision was taken on, so it has
+    # to survive the decision: every section below still reports, and
+    # the ones outside the scope are labelled rather than dropped.
+    #
+    # Dropping them would be the same mistake in a new place. "No
+    # guarantees in the register" and "guarantees are not this system's
+    # job any more" are different facts, and a page that showed only the
+    # second would hide the exposure that has not gone anywhere — §3.2
+    # says narrowing the software does not narrow the risk.
+    from .scope_statutory import CLASS2_REGISTERS, CLASS3_LADDER, MAILBOX_READ
+    from .scope_statutory import permits as scope_permits
+
+    def label(title: str, capability: str) -> str:
+        if scope_permits(scope, capability):
+            return title
+        return f"{title}   — OUT OF SCOPE (D-15), still reported"
+
     status = Status()
     status.add("CLASS 1 — STATUTORY (§2.1)", _statutory(control_root))
-    status.add("CLASS 2 — COMMERCIAL REGISTERS (§2.2)", _registers(control_root))
-    status.add("CLASS 3 — THE OBLIGATION REGISTER (§6)", _obligations(control_root))
-    status.add("WHAT THE CONTRACT SCAN FOUND (§6 Stage C)", _stage_c(control_root))
-    status.add("MAILBOX (§3.1a)", _mailbox(control_root))
-    status.add("GOVERNANCE — THE PHASE 2 PRE-CONDITIONS (§12)",
-               _governance(control_root))
+    status.add(label("CLASS 2 — COMMERCIAL REGISTERS (§2.2)", CLASS2_REGISTERS),
+               _registers(control_root))
+    status.add(label("CLASS 3 — THE OBLIGATION REGISTER (§6)", CLASS3_LADDER),
+               _obligations(control_root))
+    status.add(label("WHAT THE CONTRACT SCAN FOUND (§6 Stage C)",
+                     CLASS2_REGISTERS), _stage_c(control_root))
+    status.add(label("MAILBOX (§3.1a)", MAILBOX_READ), _mailbox(control_root))
+    status.add(label("GOVERNANCE — THE PHASE 2 PRE-CONDITIONS (§12)",
+                     MAILBOX_READ), _governance(control_root))
+    status.scope = scope
     return status
 
 
 def render(status: Status, today: date) -> str:
     lines = [f"WHERE CONTROL ACTUALLY IS — {today:%d-%b-%Y}", ""]
+    scope = getattr(status, "scope", "FULL")
+    if str(scope).strip().upper() != "FULL":
+        lines += [
+            "OPERATING_SCOPE=STATUTORY_ONLY (D-15). Class 1 is what Control",
+            "operates on; the sections marked out of scope are still measured",
+            "and still reported, because the exposure they describe has not",
+            "gone anywhere — narrowing the software does not narrow the risk",
+            "(§3.2). They are what widening would have to re-open.",
+            "",
+        ]
     for title, entries in status.sections:
         lines += [title, ""]
         for entry in entries:

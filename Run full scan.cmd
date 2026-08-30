@@ -16,6 +16,11 @@ setlocal
 title Control - full run
 cd /d "%~dp0"
 
+rem UTF-8 in the console: Arabic filenames and citations are normal in
+rem this output (charter section 4), and the default Windows codepage
+rem renders them as mojibake. Files are written UTF-8 either way.
+chcp 65001 >nul 2>&1
+
 rem /scheduled: no prompts, no opened documents. A scheduled task that
 rem ends on `pause` waits forever with nobody there to press a key, and
 rem one that opens documents on an unattended machine leaves them open.
