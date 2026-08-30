@@ -80,12 +80,30 @@ Gate state at the last run:
 
 ---
 
-## The next action — one command
+## The next action — double-click, no terminal
 
-Everything a machine can do now runs in one command. Open classic
-Outlook and leave it signed in, then:
+Open classic Outlook, leave it signed in, then double-click
+**`Run Control.cmd`** in the repository folder.
 
-    python -m control phase1 --control-root "C:\Users\Lape Top Suez\Documents\Control" --ub-root "E:\UBCSIS Co Date Jan 2026" --ocr
+Once per machine first: **`First-time setup.cmd`**, which installs
+dependencies, creates the database and audit chain, and sets
+`CONTROL_ROOT` and `UB_ROOT` for the user — which is what lets every
+later run need no paths typed at all.
+
+`scripts\Install-DailyRun.cmd` registers a Windows scheduled task so it
+refreshes every morning by itself. That is a discovery convenience and
+**not Phase 2**: D-08 refuses this transport in SUPERVISED and LIVE
+because a route needing a powered laptop with Outlook open cannot hold a
+schedule, and a missed class 1 alert is the charter's most expensive
+failure.
+
+`.cmd` rather than `.ps1` on purpose — a PowerShell script can be
+refused by the machine's execution policy, and a runner that needs a
+policy change before it starts is not one you can hand to somebody.
+
+The equivalent typed by hand, if a terminal is ever wanted:
+
+    python -m control phase1 --ocr
 
 Nine steps: config, mailbox scan, Stage D register proposal, extraction
 brief, advisor brief, **Stage C contracts**, **golden-set cases**, a full
