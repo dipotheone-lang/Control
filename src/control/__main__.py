@@ -1111,6 +1111,9 @@ def cmd_cycle(args) -> int:
     does not permit."""
     import yaml
 
+    from .scope_statutory import CLASS3_LADDER
+    from .scope_statutory import permits as scope_permits
+
     from .backup import ensure_daily_backup
     from .cycle import run_cycle
     from .db import connect
@@ -1147,6 +1150,16 @@ def cmd_cycle(args) -> int:
         print(f"\nobligations approved and tracked: {loaded.approved}")
         print(f"tracked deadlines: {len(tracked)} "
               f"(class 2 from the registers: {len(class2)})")
+        # Loaded is not the same as enforced. Under a narrowed scope the
+        # ladder runs for class 1 alone, so a count of everything loaded
+        # reads as coverage the run does not have — the same overstatement
+        # §1.1 forbids, arriving as a true number under a wrong label.
+        if not scope_permits(getattr(report, "scope", "FULL"), CLASS3_LADDER):
+            alerting = sum(1 for t in tracked if t.obligation_class == 1)
+            print(f"of those, alerting in this scope: {alerting} "
+                  f"(class 1 only — D-15). The other "
+                  f"{len(tracked) - alerting} are loaded and watched by "
+                  "nothing.")
         if loaded.gaps:
             print(f"\nGAPS — {len(loaded.gaps)}. Each is a thing Control "
                   "is NOT doing:\n")
@@ -1177,6 +1190,12 @@ def cmd_cycle(args) -> int:
     print(f"sent:             {len(result.sent)}")
     print(f"drafted:          {len(result.drafted)}")
     print(f"duplicates held:  {result.skipped_duplicates}")
+    # What the sweep did not do. `processed: 0` above is true of a
+    # mailbox that was empty and of one that was never opened, and those
+    # are opposite facts (§1.1) — so the reason is printed beside the
+    # count rather than left in the audit log where nobody reads it.
+    for gap in result.gaps:
+        print(f"\nNOT DONE: {gap}")
     if result.quarantined:
         print(f"quarantined:      {len(result.quarantined)} — reported, never opened")
     if result.security_events:
@@ -1247,6 +1266,18 @@ def _role(people: dict, tier: int, marker: str = "") -> str:
 def _transport_for(report, args):
     """Outlook in DISCOVERY/DRY_RUN, Graph beyond — D-08 already refused
     an illegal combination at startup, so this only picks."""
+    from .scope_statutory import MAILBOX_READ
+    from .scope_statutory import permits as scope_permits
+
+    if not scope_permits(getattr(report, "scope", "FULL"), MAILBOX_READ):
+        # Before the route is read, because both real transports sign
+        # into a mailbox when they are constructed. A scope enforced
+        # only at the fetch would have opened the mailbox and then
+        # declined to look in it, and it is the opening that §12.2 is
+        # about (D-15).
+        from .transport import NullTransport
+
+        return NullTransport()
     route = str((report.config["transport"] or {}).get("route") or "graph").lower()
     if route == "outlook_com":
         from .outlook import OutlookTransport

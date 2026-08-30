@@ -145,6 +145,42 @@ class MockTransport(MailTransport):
         self.processed.append(message_id)
 
 
+class NullTransport(MailTransport):
+    """No mailbox at all — for `OPERATING_SCOPE=STATUTORY_ONLY` (D-15).
+
+    The basis for operating without the §12 pre-conditions is that no
+    mailbox is read. `OutlookTransport` and `GraphTransport` both open
+    one when they are constructed, so a scope enforced only at the fetch
+    would still have signed into the mailbox before deciding not to look
+    — which is the thing §12.2 is about, not the looking afterwards.
+
+    It is also what lets the class 1 deadline engine run at all today.
+    Without it the cycle needed a transport to exist before it would
+    plan anything, so a machine with no Graph and no Outlook planned no
+    statutory alerts — the one job this scope was narrowed to.
+
+    Sending raises rather than returning quietly. In SUPERVISED §10 has
+    class 1 alerts sending, and a transport that swallowed a send would
+    turn a delivered alert into a silent one, which is exactly the
+    failure D-08 refuses a laptop transport over.
+    """
+
+    def fetch_unprocessed(self) -> list["FetchedMessage"]:
+        return []
+
+    def send(self, recipients, cc, subject, body) -> str:
+        raise HaltError(
+            "no transport is configured, so nothing can be sent. Under "
+            "OPERATING_SCOPE=STATUTORY_ONLY (D-15) Control computes the "
+            "class 1 horizon and drafts; delivery needs Graph (D-08 — a "
+            "transport depending on a powered laptop cannot carry a "
+            "class 1 alert). Provision Graph, or run in DRY_RUN where "
+            "§10 drafts rather than sends.")
+
+    def mark_processed(self, message_id: str) -> None:
+        return None
+
+
 class GraphTransport(MailTransport):
     """App-only Microsoft Graph access to the control mailbox.
 

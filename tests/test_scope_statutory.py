@@ -184,3 +184,86 @@ def test_the_withholding_is_written_to_the_audit_chain(env):
     assert any(e["event"] == "scope.mailbox_read_withheld" for e in entries)
     assert any(e["event"] == "startup"
                and e["data"].get("scope") == STATUTORY_ONLY for e in entries)
+
+
+# ---- the transport itself ---------------------------------------------
+#
+# The three tests above cover what the cycle does with a transport it is
+# handed. They passed while the command that builds one still opened a
+# mailbox: `OutlookTransport` and `GraphTransport` both sign in when they
+# are constructed, so a scope enforced only at the fetch had already done
+# the thing §12.2 governs before deciding not to look.
+
+def test_the_narrowed_scope_gets_a_transport_with_no_mailbox():
+    """`_transport_for` must not construct a real transport at all.
+
+    Not 'must not fetch' — must not connect. Opening the mailbox is the
+    processing; reading a message afterwards is a second act.
+    """
+    from types import SimpleNamespace
+
+    from control.__main__ import _transport_for
+    from control.transport import NullTransport
+
+    report = SimpleNamespace(
+        scope=STATUTORY_ONLY,
+        # An Outlook route, which is what the machine actually carries.
+        # If the scope were checked after the route, this is the branch
+        # that would have signed into the mailbox.
+        config={"transport": {"route": "outlook_com"},
+                "mailbox-scope": {"control_mailbox": "control@ubcsis.com"}})
+    transport = _transport_for(report, SimpleNamespace(allow_send=False))
+
+    assert isinstance(transport, NullTransport)
+    assert transport.fetch_unprocessed() == []
+
+
+def test_the_null_transport_refuses_to_send_rather_than_swallowing_it():
+    """A transport that returned quietly would turn a delivered class 1
+    alert into a silent one — the failure D-08 refuses a laptop
+    transport over, arriving from inside."""
+    from control.transport import NullTransport
+
+    with pytest.raises(HaltError) as excinfo:
+        NullTransport().send([CFO], [], "subject", "body")
+    assert "Graph" in str(excinfo.value)
+
+
+def test_a_class_1_alert_with_nowhere_to_go_halts_rather_than_vanishes(env):
+    """SUPERVISED sends class 1 alerts (§10). With no Graph there is
+    nowhere to send them, and the run stops saying so.
+
+    Before D-15 the cycle needed a transport to exist before it planned
+    anything, so a machine with neither Graph nor Outlook planned no
+    statutory alerts at all — the one job this scope was narrowed to,
+    not done, and reported as a clean run.
+    """
+    from control.transport import NullTransport
+
+    startup, control_root = env
+    with pytest.raises(HaltError) as excinfo:
+        run_cycle(startup, NullTransport(), control_root, specs={},
+                  tracked_items=[_vat()], enforcer=_enforcer(),
+                  today=date(2026, 8, 13), ceo=CEO, cfo=CFO)
+    assert "nothing can be sent" in str(excinfo.value)
+
+
+def test_the_same_run_drafts_instead_of_halting_in_dry_run(tmp_path):
+    """§10 drafts in DRY_RUN, so the identical run completes and the
+    alert lands in outbox/pending-approval — which is what the machine
+    can do today, before Graph."""
+    from control.transport import NullTransport
+
+    ub_root = tmp_path / "UB"
+    control_root = ub_root / "CONTROL"
+    (control_root / "data").mkdir(parents=True)
+    (control_root / "logs").mkdir()
+    shutil.copytree(REPO_CONFIG, control_root / "config")
+    startup = run_startup(control_root, ub_root, "DRY_RUN", "OBSERVE", 1,
+                          "2026-08-13", scope=STATUTORY_ONLY)
+
+    report = run_cycle(startup, NullTransport(), control_root, specs={},
+                       tracked_items=[_vat()], enforcer=_enforcer(),
+                       today=date(2026, 8, 13), ceo=CEO, cfo=CFO)
+    assert report.drafted, "no class 1 draft was produced"
+    assert not report.sent

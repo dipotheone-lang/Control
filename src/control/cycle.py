@@ -208,12 +208,13 @@ def run_cycle(
 
     try:
         # ---- inbound ----------------------------------------------------
-        # Refused rather than skipped under a narrowed scope, and refused
-        # here rather than where the transport is built: the same object
-        # carries reading and sending, and a statutory-only run must
-        # still deliver its class 1 alerts. Reading is what the §12
-        # pre-conditions govern; sending a tax deadline to the CFO is
-        # not (D-15).
+        # Refused rather than skipped under a narrowed scope. The caller
+        # also hands this run a `NullTransport`, which has no mailbox to
+        # open — the two are not redundant. That one keeps Control from
+        # signing in at all, which is what §12.2 governs; this one is
+        # what puts the refusal in the run's own output, because a sweep
+        # reporting `processed: 0` looks identical whether the mailbox
+        # was empty or was never opened (D-15, §1.1).
         processed_ids: list[str] = []
         may_read = scope_permits(getattr(startup, "scope", "FULL"),
                                  MAILBOX_READ)
