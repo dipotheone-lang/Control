@@ -71,7 +71,20 @@ echo    Mailbox scan, drive scan, contract terms, registers, golden-set
 echo    cases, a full dry run, the reports, and the gate. This takes a
 echo    while - OCR on scanned contracts is most of it.
 echo.
-python -m control phase1 --ocr
+
+rem A transcript, because the summary that matters is at the end of a run
+rem that scrolls for hours, and a console buffer is not a record. Tee
+rem rather than redirect: a run showing nothing for an hour is
+rem indistinguishable from one that has hung.
+rem
+rem PowerShell only as a subprocess with -Command, never as a script
+rem file, so the machine's execution policy is not involved.
+set "LOGDIR=%CONTROL_ROOT%\reports\runs"
+if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
+for /f %%d in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd_HHmm"') do set "STAMP=%%d"
+set "LOG=%LOGDIR%\run-%STAMP%.txt"
+
+powershell -NoProfile -Command "python -m control phase1 --ocr 2>&1 | Tee-Object -FilePath '%LOG%'"
 
 echo.
 echo ===========================================================================
@@ -90,6 +103,9 @@ if defined INTERACTIVE (
   )
 )
 
+echo.
+echo   Full transcript of this run:
+echo     %LOG%
 echo.
 echo   The gate above names every open item and the one person who can
 echo   close it. Control closes none of them by design (section 16):

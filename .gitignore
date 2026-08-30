@@ -17,6 +17,12 @@ logs/**
 !logs/.gitkeep
 !logs/README.md
 
+# Run transcripts. They carry mailbox scan output — senders, subjects,
+# counts — which is the §12.2 personal data the rest of this file keeps
+# out of git.
+reports/runs/**
+!reports/runs/.gitkeep
+
 # Phase 0 output — the same rule, and the hole this file used to have.
 #
 # On the live laptop CONTROL_ROOT *is* the repo checkout, so Stage A-J
