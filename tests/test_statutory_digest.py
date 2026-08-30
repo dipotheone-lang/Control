@@ -102,3 +102,66 @@ def test_it_agrees_with_the_engine_about_what_is_tracked():
     tracked, _ = build_statutory(calendar(rows), TODAY)
     digest = build(calendar(rows), TODAY, horizon_days=3650)
     assert {r.item_id for r in digest.rows} == {t.item_id for t in tracked}
+
+
+# ---- the missing dates ------------------------------------------------
+
+PENDING = {"id": "STAT-REG", "name": "Commercial register renewal",
+           "owner": "accounts@ubcsis.com", "preparer": "hadeer@ubcsis.com",
+           "rule": "UNVERIFIED — renewal dates pending (Mohamed Ali)",
+           "open_question": "renewal dates x 3"}
+
+BY_DESIGN = {"id": "STAT-ETA-REJ", "name": "ETA rejection clearance",
+             "rule": "7 days from rejection", "mechanism": "event_window"}
+
+
+def test_a_rule_waiting_on_an_answer_is_separated_from_one_that_is_not():
+    """The split that decides whether the page gets acted on: a rule
+    somebody can answer today, and a rule waiting on something else."""
+    from control.statutory_digest import missing_dates
+
+    answerable, unanswerable = missing_dates(
+        calendar([VAT, PENDING, BY_DESIGN]), TODAY)
+    assert [r["id"] for r in answerable] == ["STAT-REG"]
+    assert [r["id"] for r in unanswerable] == ["STAT-ETA-REJ"]
+
+
+def test_the_question_and_the_holder_are_quoted_not_inferred():
+    """§1.1 and §14.2 Tier C. Control asks; it does not parse a name out
+    of prose and it does not propose a statutory date."""
+    from control.statutory_digest import render_missing
+
+    text = render_missing(calendar([VAT, PENDING]), TODAY)
+    assert "renewal dates x 3" in text
+    # The holder reaches the page only inside the register's own line.
+    assert "rule: UNVERIFIED — renewal dates pending (Mohamed Ali)" in text
+    assert "does not propose a" in text and "date" in text
+    assert "hadeer@ubcsis.com" in text
+
+
+def test_the_mechanism_separates_by_design_from_simply_unset():
+    """Without it the list blurs an obligation with no deadline by
+    design and one waiting on a date nobody has set."""
+    from control.statutory_digest import render_missing
+
+    text = render_missing(calendar([BY_DESIGN]), TODAY)
+    assert "mechanism: event_window" in text
+    assert "chased by" in text and "nothing" in text
+
+
+def test_a_rule_with_no_mechanism_recorded_says_so_rather_than_blank():
+    from control.statutory_digest import render_missing
+
+    text = render_missing(
+        calendar([{"id": "STAT-X", "name": "X", "rule": "UNVERIFIED — pending"}]),
+        TODAY)
+    assert "mechanism: NOT RECORDED" in text
+
+
+def test_the_missing_page_is_bilingual():
+    from control.statutory_digest import render_missing
+
+    text = render_missing(calendar([PENDING]), TODAY)
+    assert "الفئة 1 — التواريخ الناقصة" in text
+    assert "النص العربي هو النص المعتمد" in text
+    assert "٢٠٢٦" not in text

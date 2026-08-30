@@ -81,6 +81,13 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem The other half of the picture, written but not printed. The horizon
+rem says how many rules fire no countdown; this says what each one is
+rem waiting on and who holds the answer. Printing both every morning
+rem would bury the one that changes daily, so this is a file to open on
+rem the day somebody chases them.
+python -m control statutory --missing --control-root "%CONTROL_ROOT%" >nul 2>&1
+
 echo.
 echo ===========================================================================
 echo   Not one of these dates has been confirmed by a tax advisor (O-03).
@@ -97,6 +104,12 @@ rem inside a parenthesised block and read in the same block expands to
 rem what it held before the block started, which here would be nothing.
 for /f %%d in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') do set "TODAY=%%d"
 if defined INTERACTIVE call :open "%CONTROL_ROOT%\reports\statutory-%TODAY%.txt"
+
+echo   Today's pages:
+echo     %CONTROL_ROOT%\reports\statutory-%TODAY%.txt
+echo     %CONTROL_ROOT%\reports\statutory-missing-%TODAY%.txt
+echo        ^- what each silent rule is waiting on, and who holds the answer.
+echo.
 
 if defined INTERACTIVE pause
 endlocal

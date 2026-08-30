@@ -170,6 +170,14 @@ def render(digest: Digest, today: date, horizon_days: int = 30) -> str:
         lines.append(f"  - {note}")
     if digest.notes:
         lines.append("")
+    if digest.silent_count:
+        # A gap with no next step is a complaint. This one has a next
+        # step, and it is a page rather than a project.
+        lines += [
+            "  What each of those is waiting on, and who holds the answer:",
+            "      python -m control statutory --missing",
+            "",
+        ]
 
     lines += [
         "────────────────────────────────────────",
@@ -209,6 +217,157 @@ def render(digest: Digest, today: date, horizon_days: int = 30) -> str:
         ]
     lines += [
         "",
+        "════════════════════════════════════════",
+        "CONTROL | Automated Compliance System | United Brothers Co.",
+        "كنترول | نظام الالتزام الآلي | شركة الإخوة المتحدة",
+        "",
+        "This page is produced from the statutory calendar. It sends nothing",
+        "and reads no mailbox (D-15). النص العربي هو النص المعتمد.",
+    ]
+    return "\n".join(lines)
+
+
+# ---- the missing dates -------------------------------------------------
+#
+# 8 of the 12 class 1 rules fire no countdown, and 4 of those are waiting
+# on a date somebody in the company already holds — renewal dates off the
+# certificates, the payroll quarterly cycle. That is the largest gap left
+# inside the only class this scope operates on, and it is a page, not a
+# scan.
+#
+# Nothing here is inferred. Every field printed is a field in
+# `statutory-calendar.yaml`: the question is `open_question` verbatim,
+# the holder is whatever the `rule` line says, and `answered_by` decides
+# who is being asked. Control does not parse a name out of prose and it
+# does not guess a date — §14.2 puts statutory deadlines in Tier C,
+# never applied by the system, and this asks rather than proposes.
+
+
+def missing_dates(statutory_config: dict | None, today: date) -> tuple:
+    """(answerable, unanswerable) — rules with no usable date.
+
+    Split on whether the register records a question against the rule.
+    A rule with an `open_question` is waiting on an answer somebody can
+    give; one without is waiting on something else, and saying which is
+    which is the difference between a page that gets acted on and a list
+    that gets skimmed.
+    """
+    from .loader import parse_due
+
+    answerable, unanswerable = [], []
+    for row in (statutory_config or {}).get("obligations") or []:
+        due, _ = parse_due(str(row.get("rule") or ""),
+                           str(row.get("cadence") or ""), today)
+        if due is not None:
+            continue
+        (answerable if row.get("open_question") else unanswerable).append(row)
+    return answerable, unanswerable
+
+
+def render_missing(statutory_config: dict | None, today: date) -> str:
+    answerable, unanswerable = missing_dates(statutory_config, today)
+    total = len((statutory_config or {}).get("obligations") or [])
+    silent = len(answerable) + len(unanswerable)
+
+    lines = [
+        f"CLASS 1 — THE DATES THAT ARE MISSING — {today:%d-%b-%Y}",
+        "",
+        f"{silent} of {total} statutory obligations fire no countdown. Class 1",
+        "is the only class carrying fines, so this is the highest-priority",
+        "gap in the system (§1.1, O-03).",
+        "",
+        f"{len(answerable)} of them are waiting on an answer somebody already",
+        "holds. Each is one line in config/statutory-calendar.yaml.",
+        "",
+    ]
+
+    for row in answerable:
+        obligation_id = str(row.get("id") or "")
+        lines += [
+            f"  {obligation_id} — {row.get('name') or obligation_id}",
+            f"      question:  {row.get('open_question')}",
+            f"      register:  rule: {row.get('rule')}",
+        ]
+        if row.get("answered_by"):
+            lines.append(f"      answered by: {row['answered_by']}")
+        lines += [
+            f"      owner:     {row.get('owner') or 'NOT PROVIDED'}"
+            f"   preparer: {row.get('preparer') or 'NOT PROVIDED'}",
+            f"      to close:  replace the `rule:` line for {obligation_id} "
+            "with the date or",
+            "                 cadence, and re-run. Nothing else changes.",
+            "",
+        ]
+
+    if unanswerable:
+        lines += [
+            f"{len(unanswerable)} are silent for a different reason, and no "
+            "question is",
+            "recorded against them. They are listed so nobody reads their "
+            "silence",
+            "as somebody handling them:",
+            "",
+        ]
+        for row in unanswerable:
+            lines.append(f"  {row.get('id')} — {row.get('name')}")
+            lines.append(f"      register:  rule: {row.get('rule')}")
+            # The mechanism separates three situations this list would
+            # otherwise blur: an obligation with no deadline by design,
+            # one counted from an event that has not happened, and one
+            # simply waiting on a date nobody has set.
+            lines.append(f"      mechanism: {row.get('mechanism') or 'NOT RECORDED'}"
+                         + ("   (mechanism_available: unknown)"
+                            if row.get("mechanism_available") == "unknown"
+                            else ""))
+            if row.get("note"):
+                lines.append(f"      note:      {' '.join(str(row['note']).split())}")
+            lines.append("")
+        lines += [
+            "  A rule with no usable date and no `open_question` is chased by",
+            "  nothing. Where that is by design the mechanism above says so.",
+            "  Where the rule still reads as pending, the missing question is",
+            "  itself the gap — and adding one is a register edit, not a",
+            "  statutory decision.",
+            "",
+        ]
+
+    lines += [
+        "Every line above is quoted from config/statutory-calendar.yaml.",
+        "Control does not infer a holder from prose and does not propose a",
+        "date: §14.2 puts statutory deadlines in Tier C, never applied by",
+        "the system. This asks.",
+        "",
+        "────────────────────────────────────────",
+        f"الفئة 1 — التواريخ الناقصة — {_arabic_date(today)}",
+        "",
+        f"عدد {silent} من أصل {total} من الالتزامات القانونية لا يوجد لها عد "
+        "تنازلي.",
+        "الفئة 1 هي الفئة الوحيدة التي تترتب عليها غرامات، وهذه أعلى الفجوات "
+        "أولوية في النظام.",
+        "",
+        f"منها عدد {len(answerable)} في انتظار إجابة متوفرة لدى أحد العاملين "
+        "بالشركة:",
+        "",
+    ]
+    for row in answerable:
+        # The question text is quoted, not translated. It is a value in
+        # the register, and §4 keeps register values in Latin script
+        # inside Arabic text for exactly this reason — a translated
+        # question and the field it refers to would stop matching.
+        lines += [
+            f"  {row.get('id')} — {row.get('name')}",
+            f"      المطلوب: {row.get('open_question')}",
+            f"      المسؤول: {row.get('owner') or 'غير محدد'}",
+            "",
+        ]
+    if unanswerable:
+        lines += [
+            f"وعدد {len(unanswerable)} صامتة لأسباب أخرى ولم يُسجَّل بشأنها "
+            "سؤال محدد، وهي مدرجة",
+            "أعلاه حتى لا يُفهم صمتها على أنه متابعة جارية.",
+            "",
+        ]
+    lines += [
         "════════════════════════════════════════",
         "CONTROL | Automated Compliance System | United Brothers Co.",
         "كنترول | نظام الالتزام الآلي | شركة الإخوة المتحدة",

@@ -151,6 +151,7 @@ wider system.
 | Command | What it answers |
 |---|---|
 | `statutory` | **The one in scope.** What is due in class 1, who owns it, and what is counting down to nothing |
+| `statutory --missing` | The 8 silent class 1 rules, what each waits on, who holds it. 3 are one line in `statutory-calendar.yaml` |
 | `status` | Where the build actually is, read off disk — absent and zero told apart on every line |
 | `doctor` | Is this machine ready — and **does Outlook actually answer**, with which mailboxes in the profile |
 | `contracts --ocr --confidential-dates` | Guarantee expiries, notice periods, accreditations → `COMMERCIAL-EXPOSURE.md` and `PROPOSED-CLASS2-REGISTERS.yaml` |
