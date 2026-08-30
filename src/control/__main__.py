@@ -1387,6 +1387,28 @@ def cmd_diagnose_dates(args) -> int:
     return 0
 
 
+def cmd_status(args) -> int:
+    """One page of what the runs actually found.
+
+    Everything here already exists in the register, the database, the
+    Stage C cache and the config. Scattered across six outputs it cannot
+    be weighed, and the question of whether to continue this project
+    should not rest on a summary of a summary.
+    """
+    from . import status as st
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    report = st.render(st.build(control_root, today), today)
+    print(report)
+
+    out = control_root / "reports" / f"status-{today:%Y-%m-%d}.txt"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(report, encoding="utf-8")
+    print(f"\nwritten: {out}")
+    return 0
+
+
 def cmd_ocr_floor(args) -> int:
     """What each OCR confidence floor would admit — §5.5, §14.4.
 
@@ -2960,6 +2982,14 @@ def main(argv: list[str] | None = None) -> int:
     diagnose.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     diagnose.set_defaults(fn=cmd_diagnose_dates)
 
+    status = sub.add_parser(
+        "status",
+        help="one page of what the runs actually found — reads what is on "
+             "disk, scans nothing")
+    status.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    status.add_argument("--today", default="", help="ISO date, for testing")
+    status.set_defaults(fn=cmd_status)
+
     floor = sub.add_parser(
         "ocr-floor",
         help="§5.5: what each OCR confidence floor would admit, from this "
@@ -3031,7 +3061,7 @@ def main(argv: list[str] | None = None) -> int:
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "analyse", "init", "contracts", "registers",
                          "classify", "classify-scan", "backup", "manuals",
-                         "terms", "golden", "disputes", "diagnose-dates", "authority", "ocr-floor")
+                         "terms", "golden", "disputes", "diagnose-dates", "authority", "ocr-floor", "status")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
