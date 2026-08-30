@@ -206,12 +206,19 @@ def test_every_rule_awaiting_a_date_carries_a_question():
 
 
 def test_the_routing_field_is_not_read_as_the_holder_of_the_date():
-    """`answered_by` routes the obligation's subject away from the tax
-    advisor. On STAT-PDPL-REGS the subject is counsel's and the date is
-    an internal scheduling choice, so printing it as "answered by" under
-    a missing date said the wrong thing."""
+    """`answered_by` routes an obligation's subject away from the tax
+    advisor brief. Printed as "answered by" under a missing date it said
+    the wrong thing — on STAT-PDPL-REGS the subject was counsel's while
+    the date was an internal scheduling choice, so the page read as
+    though counsel had to be asked for a calendar entry.
+
+    Written against a fixture rather than the live register: which live
+    rows are still open changes as they are answered, and a test that
+    drifts with the data is testing the data.
+    """
     from control.statutory_digest import render_missing
 
-    text = render_missing(_live_calendar(), TODAY)
+    row = dict(PENDING, answered_by="counsel")
+    text = render_missing(calendar([row]), TODAY)
     assert "subject sits with counsel, not the tax advisor" in text
     assert "answered by:" not in text
