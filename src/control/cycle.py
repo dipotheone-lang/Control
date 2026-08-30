@@ -213,7 +213,7 @@ def run_cycle(
         # carries reading and sending, and a statutory-only run must
         # still deliver its class 1 alerts. Reading is what the §12
         # pre-conditions govern; sending a tax deadline to the CFO is
-        # not (proposed D-15).
+        # not (D-15).
         processed_ids: list[str] = []
         may_read = scope_permits(getattr(startup, "scope", "FULL"),
                                  MAILBOX_READ)

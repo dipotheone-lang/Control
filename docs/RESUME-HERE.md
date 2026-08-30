@@ -7,15 +7,26 @@
 > tested, and now out of scope. Nothing is deleted; widening means closing
 > the §12 pre-conditions and moving the scope back.
 >
-> **What is left to operate, and none of it is code:**
-> 1. The tax advisor confirms the twelve statutory rules —
->    `discovery/TAX-ADVISOR-BRIEF.md` is generated and waiting. O-03 is
->    now the only thing between here and operation.
-> 2. Graph provisioned — `scripts/provision-graph.ps1`. D-08 is enforced
->    in code and refuses Outlook in SUPERVISED.
+> **It is running now.** Double-click `Run Control.cmd` — the statutory
+> horizon, on screen in seconds, no mailbox and no Outlook. That is the
+> narrowed scope's whole operating output and it needs nothing from
+> anybody first.
 >
-> Then: `python -m control cycle --scope STATUTORY_ONLY`, and switch
-> `RUN_MODE` to SUPERVISED so alerts send rather than draft.
+> **Two things still separate a page from an alert, and neither is code:**
+> 1. **O-03 — the tax advisor confirms the twelve rules.**
+>    `discovery/TAX-ADVISOR-BRIEF.md` is generated and waiting. The dates
+>    alert today and say `[UNVERIFIED]` on every line, which is §2.1's
+>    chartered behaviour — erring early beats silence. Nobody qualified
+>    has checked them, and time passing does not check them.
+> 2. **Graph provisioned** — `scripts/provision-graph.ps1`. D-08 is
+>    enforced in code and refuses Outlook in SUPERVISED, because a
+>    transport needing a powered laptop cannot carry a class 1 alert.
+>
+> Until Graph, the horizon is a page somebody reads, not an alert
+> somebody receives. `scripts\Install-DailyRun.cmd` puts it on screen
+> every morning — that is a habit, not a control. Once Graph is
+> provisioned: `python -m control cycle --scope STATUTORY_ONLY` with
+> `RUN_MODE=SUPERVISED`, and the alerts send.
 
 `docs/RUNBOOK.md` says how to run each thing. This file says **where the
 build actually is and what the next action is**, so a new session — a
@@ -99,40 +110,48 @@ Gate state at the last run:
 
 ## The next action — double-click, no terminal
 
-Open classic Outlook, leave it signed in, then double-click
-**`Run Control.cmd`** in the repository folder.
+Double-click **`Run Control.cmd`** in the repository folder. It reads
+`config/statutory-calendar.yaml` and nothing else — no mailbox, no drive
+scan, no OCR — so Outlook can be closed and E: unplugged, and it takes
+seconds rather than hours.
+
+It prints the class 1 horizon for the next 30 days in both languages,
+saves it to `reports\statutory-YYYY-MM-DD.txt`, and says what the
+narrowed scope is *not* doing. That last part is deliberate: a page
+listing two deadlines and nothing else reads like a quiet company unless
+the reader is told what was never looked at.
 
 Once per machine first: **`First-time setup.cmd`**, which installs
 dependencies, creates the database and audit chain, and sets
-`CONTROL_ROOT` and `UB_ROOT` for the user — which is what lets every
-later run need no paths typed at all.
+`CONTROL_ROOT` and `UB_ROOT` for the user.
 
-`scripts\Install-DailyRun.cmd` registers a Windows scheduled task so it
-refreshes every morning by itself. That is a discovery convenience and
-**not Phase 2**: D-08 refuses this transport in SUPERVISED and LIVE
-because a route needing a powered laptop with Outlook open cannot hold a
-schedule, and a missed class 1 alert is the charter's most expensive
-failure.
+`scripts\Install-DailyRun.cmd` registers a Windows scheduled task so the
+horizon is on screen every morning by itself. **That is a habit, not a
+control** — the page appears on this machine; it does not reach anybody.
+D-08 refuses the Outlook route in SUPERVISED and LIVE because a
+transport needing a powered laptop cannot hold a schedule, and a missed
+class 1 alert is the charter's most expensive failure.
 
 `.cmd` rather than `.ps1` on purpose — a PowerShell script can be
 refused by the machine's execution policy, and a runner that needs a
 policy change before it starts is not one you can hand to somebody.
 
-The equivalent typed by hand, if a terminal is ever wanted:
+Typed by hand, if a terminal is ever wanted:
 
-    python -m control phase1 --ocr
+    python -m control statutory
 
-Nine steps: config, mailbox scan, Stage D register proposal, extraction
-brief, advisor brief, **Stage C contracts**, **golden-set cases**, a full
-DRY_RUN cycle, the weekly report, the gap register, and the gate. Each is
-skipped rather than fatal when its input is absent, and the summary says
-which. It ends by printing the gate, which names every open item and the
-one person who can close it.
+**`Run full scan.cmd`** is the previous runner, unchanged: the nine-step
+`phase1 --ocr` pass over mailbox, drive and contracts. It is out of scope
+under D-15 and kept because widening means closing the §12
+pre-conditions, not rebuilding. Everything below this line describes that
+wider system.
 
 ### The commands worth knowing separately
 
 | Command | What it answers |
 |---|---|
+| `statutory` | **The one in scope.** What is due in class 1, who owns it, and what is counting down to nothing |
+| `status` | Where the build actually is, read off disk — absent and zero told apart on every line |
 | `doctor` | Is this machine ready — and **does Outlook actually answer**, with which mailboxes in the profile |
 | `contracts --ocr --confidential-dates` | Guarantee expiries, notice periods, accreditations → `COMMERCIAL-EXPOSURE.md` and `PROPOSED-CLASS2-REGISTERS.yaml` |
 | `registers --import-file` | Turns those proposals into rows that actually alert (60/30/14/7 days) |

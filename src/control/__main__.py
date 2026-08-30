@@ -53,7 +53,7 @@ def _common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--scope",
                         default=os.environ.get("OPERATING_SCOPE", "FULL"),
                         help="FULL (the charter as written) or "
-                             "STATUTORY_ONLY (proposed D-15: class 1 only, "
+                             "STATUTORY_ONLY (D-15: class 1 only, "
                              "no mailbox read)")
     parser.add_argument("--learning-mode",
                         default=os.environ.get("LEARNING_MODE", "OBSERVE"))
@@ -1411,6 +1411,7 @@ def cmd_statutory(args) -> int:
     """
     from . import statutory_digest as sd
     from .config import load_config
+    from .scope_statutory import summary
 
     control_root = Path(args.control_root)
     today = date.fromisoformat(args.today) if args.today else date.today()
@@ -1419,6 +1420,18 @@ def cmd_statutory(args) -> int:
     digest = sd.build(config["statutory-calendar"], today, args.days)
     page = sd.render(digest, today, args.days)
     print(page)
+
+    # This command does not go through `_startup`, which is what prints
+    # the scope everywhere else. Under D-15 it is the one command a
+    # person runs daily, so it is the one that most needs to say what it
+    # is not doing — a page listing two deadlines and nothing else reads
+    # like a quiet company unless the reader is told what was never
+    # looked at.
+    scope = getattr(args, "scope", "FULL")
+    if str(scope).strip().upper() != "FULL":
+        print()
+        for line in summary(scope):
+            print(line)
 
     out = control_root / "reports" / f"statutory-{today:%Y-%m-%d}.txt"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -3027,6 +3040,8 @@ def main(argv: list[str] | None = None) -> int:
         help="the class 1 horizon as a readable page (D-15) — sends "
              "nothing, reads no mailbox")
     statutory.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    statutory.add_argument("--scope",
+                           default=os.environ.get("OPERATING_SCOPE", "FULL"))
     statutory.add_argument("--days", type=int, default=30)
     statutory.add_argument("--today", default="", help="ISO date, for testing")
     statutory.set_defaults(fn=cmd_statutory)

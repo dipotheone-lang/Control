@@ -38,7 +38,7 @@ class StartupReport:
     # on a normal run; non-empty means the code was newer than the
     # database and the difference has just been applied (§5.2).
     schema_added: tuple = ()
-    # What Control is permitted to do this run (proposed D-15). FULL is
+    # What Control is permitted to do this run (D-15). FULL is
     # the charter as written; STATUTORY_ONLY refuses every capability
     # that would read a mailbox or evaluate a person's work.
     scope: str = "FULL"

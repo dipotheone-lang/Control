@@ -1,4 +1,4 @@
-"""Statutory-only operation — proposed decision D-15.
+"""Statutory-only operation — decision D-15.
 
 The CEO narrowed the project on 30-Aug-2026 after reading the status
 page: no mailbox scan had ever completed on the operating machine, 130

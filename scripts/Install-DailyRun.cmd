@@ -2,15 +2,19 @@
 rem ===========================================================================
 rem  Control - run itself every morning.
 rem
-rem  Registers a Windows scheduled task so the scan, the registers, the
-rem  reports and the gate refresh without anyone opening a terminal.
+rem  Registers a Windows scheduled task so the statutory horizon is on
+rem  screen every morning without anyone opening a terminal.
 rem
 rem  WHAT THIS IS NOT. It does not make Control live, and it does not
-rem  satisfy Phase 2. Decision D-08 is explicit that a transport needing a
-rem  powered laptop with Outlook open cannot hold a schedule - a missed
-rem  class 1 alert is the charter's most expensive failure - and refuses
-rem  this route at startup in SUPERVISED and LIVE. This is a discovery and
-rem  dry-run convenience. Graph must be provisioned before Phase 2.
+rem  satisfy Phase 2. The scheduled run produces a page on this machine;
+rem  it does not deliver an alert to anybody. Decision D-08 is explicit
+rem  that a transport needing a powered laptop cannot carry a class 1
+rem  alert - the charter's most expensive failure - and refuses that
+rem  route at startup in SUPERVISED and LIVE. Graph must be provisioned
+rem  before anything sends on a schedule.
+rem
+rem  So this is a habit, not a control: it puts the horizon in front of
+rem  somebody daily. If nobody reads the page, nothing has been alerted.
 rem
 rem  The run sends nothing, in any mode (section 10).
 rem ===========================================================================
@@ -24,10 +28,11 @@ set "AT=07:00"
 echo Registering "%TASK%" to run every day at %AT%.
 echo   It runs: "%CD%\Run Control.cmd" /scheduled
 echo.
-echo   Outlook must be open and signed in for the mailbox step to work.
-echo   When it is not, that step is skipped and the run says so - it does
-echo   not fail silently and it does not record an absence from a partial
-echo   sweep (section 5.1).
+echo   That reads config\statutory-calendar.yaml and nothing else. No
+echo   mailbox, no drive scan, no OCR (decision D-15), so it does not
+echo   need Outlook open or E: plugged in, and it takes seconds.
+echo.
+echo   It writes reports\statutory-YYYY-MM-DD.txt and stops there.
 echo.
 
 schtasks /Create /TN "%TASK%" /TR "\"%CD%\Run Control.cmd\" /scheduled" /SC DAILY /ST %AT% /F

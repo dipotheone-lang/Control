@@ -1,4 +1,4 @@
-"""Statutory-only operation — proposed decision D-15.
+"""Statutory-only operation — decision D-15.
 
 The CEO narrowed the project on 30-Aug-2026 after reading the status
 page. Control operates on class 1 statutory obligations and reads no
@@ -105,7 +105,7 @@ def assert_scope_permits(scope: str, capability: str) -> None:
         return
     raise HaltError(
         f"OPERATING_SCOPE=STATUTORY_ONLY does not permit {capability}: "
-        f"this {_WITHHELD[capability]}. Proposed decision D-15 narrowed "
+        f"this {_WITHHELD[capability]}. Decision D-15 narrowed "
         "Control to class 1 statutory obligations. Nothing is deleted — "
         "widening means closing the §12 pre-conditions and moving the "
         "scope back.")
@@ -116,7 +116,7 @@ def summary(scope: str) -> list[str]:
     if normalise(scope) == FULL:
         return ["OPERATING_SCOPE=FULL — the charter as written."]
     return [
-        "OPERATING_SCOPE=STATUTORY_ONLY (proposed D-15)",
+        "OPERATING_SCOPE=STATUTORY_ONLY (D-15, charter v4.11)",
         "  Doing:     class 1 statutory deadlines — §0's first priority,",
         "             'no statutory deadline is missed'.",
         "  Not doing: report chasing, external SLA, verdicts, anomaly and",
