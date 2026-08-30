@@ -555,7 +555,9 @@ def cmd_contracts(args) -> int:
     out = control_root / "discovery" / "COMMERCIAL-EXPOSURE.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
-        render_commercial_exposure(result, not_scanned=[str(m) for m in missing]),
+        render_commercial_exposure(result,
+                                   not_scanned=[str(m) for m in missing],
+                                   scanned=[str(s) for s in sources]),
         encoding="utf-8")
 
     # The wire from the report to the thing that actually alerts. §2.2

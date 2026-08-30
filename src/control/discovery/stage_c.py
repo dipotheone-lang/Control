@@ -886,7 +886,8 @@ def _process_one(path: Path, relative: str, confidential_clients: list[str],
 
 
 def render_commercial_exposure(result: StageCResult, today: date | None = None,
-                               not_scanned: list | None = None) -> str:
+                               not_scanned: list | None = None,
+                               scanned: list | None = None) -> str:
     """`not_scanned` names folders the operator asked for that do not
     exist. A folder named wrongly is the easiest way to end up with a
     report that looks complete over ground it never covered, so the miss
@@ -958,6 +959,17 @@ def render_commercial_exposure(result: StageCResult, today: date | None = None,
         "## What could not be read",
         "",
     ]
+    if scanned:
+        lines += [
+            f"- **This report covers {len(scanned)} folder(s).** A scan of "
+            "part of the drive is not a reading of the drive, and the folders "
+            "left out are not evidence that they hold nothing:",
+            "",
+        ]
+        for folder in scanned:
+            lines.append(f"  - `{folder}`")
+        lines.append("")
+
     if not_scanned:
         lines += [
             f"- **{len(not_scanned)} folder(s) named for this scan do not "

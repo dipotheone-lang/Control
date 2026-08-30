@@ -540,3 +540,24 @@ def test_a_real_sentence_end_still_ends_the_clause():
                      "Liquidated damages: 0.5% per week.")
     assert terms["LIQUIDATED_DAMAGES"] == {""}
     assert terms["GUARANTEE_EXPIRY"] == {"2026-12-31"}
+
+
+def test_the_report_names_the_folders_it_covered():
+    """A scan of part of the drive is not a reading of the drive.
+
+    Splitting a long scan by folder is the right way to get the legal
+    folders answered without waiting on 801 construction files — but a
+    report that does not say which folders it covered reads as complete
+    over ground it never touched, which is the failure this whole
+    document is written against (§1.1).
+    """
+    from control.discovery.stage_c import (
+        StageCResult, render_commercial_exposure,
+    )
+
+    text = render_commercial_exposure(
+        StageCResult(), scanned=[r"E:\UB\6. Clients Legal Documents",
+                                 r"E:\UB\7. Suppliers Legal Documents"])
+    assert "This report covers 2 folder(s)" in text
+    assert "6. Clients Legal Documents" in text
+    assert "not evidence that they hold nothing" in text
