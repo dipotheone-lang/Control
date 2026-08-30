@@ -1401,6 +1401,32 @@ def cmd_diagnose_dates(args) -> int:
     return 0
 
 
+def cmd_statutory(args) -> int:
+    """The class 1 horizon as a page — D-15, §2.1, §4.
+
+    The operating output of the narrowed scope. It needs neither Graph
+    nor the tax advisor: Graph is only required to send, and §2.1 has
+    unverified rules alerting early provided they are marked as
+    unverified rather than presented as confirmed.
+    """
+    from . import statutory_digest as sd
+    from .config import load_config
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    config = load_config(control_root / "config")
+
+    digest = sd.build(config["statutory-calendar"], today, args.days)
+    page = sd.render(digest, today, args.days)
+    print(page)
+
+    out = control_root / "reports" / f"statutory-{today:%Y-%m-%d}.txt"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(page, encoding="utf-8")
+    print(f"\nwritten: {out}")
+    return 0
+
+
 def cmd_status(args) -> int:
     """One page of what the runs actually found.
 
@@ -2996,6 +3022,15 @@ def main(argv: list[str] | None = None) -> int:
     diagnose.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     diagnose.set_defaults(fn=cmd_diagnose_dates)
 
+    statutory = sub.add_parser(
+        "statutory",
+        help="the class 1 horizon as a readable page (D-15) — sends "
+             "nothing, reads no mailbox")
+    statutory.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    statutory.add_argument("--days", type=int, default=30)
+    statutory.add_argument("--today", default="", help="ISO date, for testing")
+    statutory.set_defaults(fn=cmd_statutory)
+
     status = sub.add_parser(
         "status",
         help="one page of what the runs actually found — reads what is on "
@@ -3075,7 +3110,7 @@ def main(argv: list[str] | None = None) -> int:
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "analyse", "init", "contracts", "registers",
                          "classify", "classify-scan", "backup", "manuals",
-                         "terms", "golden", "disputes", "diagnose-dates", "authority", "ocr-floor", "status")
+                         "terms", "golden", "disputes", "diagnose-dates", "authority", "ocr-floor", "status", "statutory")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
