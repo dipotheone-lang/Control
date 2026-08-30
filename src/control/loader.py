@@ -143,6 +143,23 @@ _ANNUAL_DATE = re.compile(
 _LEAD_DAYS = re.compile(r"[-−]\s*(\d{1,2})\s*working days?")
 
 
+def _next_quarterly(anchor_month: int, day: int, today: date) -> date:
+    """The next occurrence of `day` in the quarterly cycle `anchor_month`.
+
+    "1 October, quarterly" means 1 Jan, 1 Apr, 1 Jul, 1 Oct — the anchor
+    names one of the four, and the other three follow from it. The
+    anchor's own year is irrelevant; only its position in the cycle is.
+    """
+    months = sorted({(anchor_month - 1 + step * 3) % 12 + 1
+                     for step in range(4)})
+    for year in (today.year, today.year + 1):
+        for month in months:
+            candidate = date(year, month, day)
+            if candidate >= today:
+                return candidate
+    raise AssertionError("a quarterly cycle always has a next occurrence")
+
+
 def _last_day(year: int, month: int) -> date:
     if month == 12:
         return date(year, 12, 31)
@@ -198,6 +215,19 @@ def parse_due(expression: str, cadence: str, today: date) -> tuple[datetime | No
         day = int(annual.group(1) or annual.group(4))
         name = (annual.group(2) or annual.group(3))
         month = _MONTHS_BY_NAME[name]
+        # A named date with a quarterly cadence is the one unambiguous
+        # way to write a quarterly deadline: the date is the anchor and
+        # the cadence steps it by three months. "day 1, quarterly" is not
+        # — it never says which three months — and is refused below.
+        if cadence == "quarterly":
+            if not 1 <= day <= 28:
+                return None, (
+                    f"quarterly anchor {expression!r} — only day 1..28 is "
+                    "unambiguous, because a quarterly cycle lands in months "
+                    "of different lengths and a skipped quarter is a missed "
+                    "class 1 deadline")
+            target = _next_quarterly(month, day, today)
+            return _apply_lead(datetime.combine(target, at), text)
         if cadence and cadence not in ("annual", "annually", "yearly", ""):
             return None, (f"cadence {cadence!r} with a fixed calendar date "
                           f"{expression!r} — ambiguous, not guessed")
@@ -235,7 +265,21 @@ def parse_due(expression: str, cadence: str, today: date) -> tuple[datetime | No
         if not 1 <= number <= 28:
             return None, (f"day-of-month {number} — only 1..28 is unambiguous "
                           "across every month")
-        if cadence not in ("monthly", "quarterly", "annual", "annually", ""):
+        # A bare day-of-month says which day and never which month, so it
+        # only means anything monthly. This branch used to accept
+        # quarterly and annual too and then compute the next occurrence
+        # by MONTH — so a quarterly rule fired twelve times a year and an
+        # annual one fired twelve times a year, both silently, and both
+        # looking like a working countdown. Nothing in the live register
+        # exercised it yet; the payroll quarters would have been the
+        # first (§1.1).
+        if cadence in ("quarterly", "annual", "annually", "yearly"):
+            return None, (
+                f"{expression!r} with cadence {cadence!r} — a bare "
+                "day-of-month says which day and never which month. Write "
+                "the anchor as a named date instead ('1 October'), which "
+                f"the {cadence} cadence then steps")
+        if cadence not in ("monthly", ""):
             return None, f"cadence {cadence!r} with a day-of-month expression"
         year, month = today.year, today.month
         if today.day > number:

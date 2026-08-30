@@ -92,3 +92,65 @@ def test_the_repo_config_reports_the_gap_honestly():
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     lines = holiday_calendar_status(data, date(2026, 8, 16))
     assert lines and "empty" in lines[0]
+
+
+# ---- quarterly (added 30-Aug-2026) ------------------------------------
+#
+# Found while trying to answer STAT-PDPL-REGS's open question. The
+# register had no way to express a quarterly deadline, and the way that
+# looked correct was silently wrong.
+
+def test_a_named_date_with_a_quarterly_cadence_steps_by_three_months():
+    """"1 October, quarterly" means 1 Jan, 1 Apr, 1 Jul, 1 Oct. The
+    anchor names one of the four; the other three follow from it."""
+    from control.loader import parse_due
+
+    def due_on(today):
+        due, problem = parse_due("1 October", "quarterly", today)
+        assert due is not None, problem
+        return due.date()
+
+    assert due_on(date(2026, 8, 30)) == date(2026, 10, 1)
+    assert due_on(date(2026, 10, 1)) == date(2026, 10, 1)   # today counts
+    assert due_on(date(2026, 10, 2)) == date(2027, 1, 1)    # rolls the year
+    assert due_on(date(2027, 3, 1)) == date(2027, 4, 1)
+
+
+def test_a_bare_day_of_month_is_refused_for_a_quarterly_cadence():
+    """It used to be accepted and then computed by MONTH, so a quarterly
+    rule fired twelve times a year while looking like a working
+    countdown. Nothing in the live register exercised it; the payroll
+    quarters would have been the first (§1.1)."""
+    from control.loader import parse_due
+
+    due, problem = parse_due("day 1", "quarterly", date(2026, 8, 30))
+    assert due is None
+    assert "never which month" in problem
+    assert "'1 October'" in problem, "the message must name the working form"
+
+
+def test_a_bare_day_of_month_is_refused_for_an_annual_cadence():
+    from control.loader import parse_due
+
+    due, problem = parse_due("day 1", "annual", date(2026, 8, 30))
+    assert due is None
+    assert "never which month" in problem
+
+
+def test_the_monthly_shapes_are_untouched():
+    from control.loader import parse_due
+
+    assert parse_due("day 20", "monthly", date(2026, 8, 30))[0].date() \
+        == date(2026, 9, 20)
+    assert parse_due("31 March", "annual", date(2026, 8, 30))[0].date() \
+        == date(2027, 3, 31)
+
+
+def test_a_quarterly_anchor_past_day_28_is_refused():
+    """A quarterly cycle lands in months of different lengths, and a
+    skipped quarter is a missed class 1 deadline."""
+    from control.loader import parse_due
+
+    due, problem = parse_due("31 October", "quarterly", date(2026, 8, 30))
+    assert due is None
+    assert "day 1..28" in problem
