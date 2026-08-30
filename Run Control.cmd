@@ -88,6 +88,10 @@ rem would bury the one that changes daily, so this is a file to open on
 rem the day somebody chases them.
 python -m control statutory --missing --control-root "%CONTROL_ROOT%" >nul 2>&1
 
+rem And the same gaps written as messages to forward. Control drafts and
+rem never sends (section 10) - these go out from the CEO, not the system.
+python -m control statutory --ask --control-root "%CONTROL_ROOT%" >nul 2>&1
+
 echo.
 echo == 3 of 3: the run ==
 echo    The horizon above is the page. This is the record: the deadline
@@ -133,6 +137,8 @@ echo   Today's pages:
 echo     %CONTROL_ROOT%\reports\statutory-%TODAY%.txt
 echo     %CONTROL_ROOT%\reports\statutory-missing-%TODAY%.txt
 echo        ^- what each silent rule is waiting on, and who holds the answer.
+echo     %CONTROL_ROOT%\reports\statutory-ask-%TODAY%.txt
+echo        ^- the same gaps as messages to forward, one per person.
 echo.
 
 if defined INTERACTIVE pause

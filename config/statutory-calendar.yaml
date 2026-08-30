@@ -68,6 +68,11 @@ obligations:
     provenance: ceo_stated
     decision: D-23, D-24
     open_question: payroll tax quarterly dates
+    # Transcribed from the `rule` line above, which already named the
+    # holder in prose. A name in a sentence cannot be routed to without
+    # parsing prose, which Control does not do — so it is stated as a
+    # field. Nothing about the deadline changed.
+    answer_held_by: hadeer@ubcsis.com
 
   - id: STAT-SOCINS
     name: Social insurance contributions
@@ -186,6 +191,9 @@ obligations:
     provenance: ceo_stated
     decision: D-29
     open_question: renewal dates x 3
+    # Transcribed from the `rule` line above ("Mohamed Ali, from
+    # certificates"), for the same reason as STAT-PAYROLL.
+    answer_held_by: hr@ubcsis.com
 
   # B6. Not a filing — a watch. The PDPL executive regulations are still
   # pending (D-40), and every PDPL answer in the governance pack becomes
@@ -263,3 +271,6 @@ obligations:
     provenance: ceo_stated
     decision: D-29
     open_question: licence and permit renewal dates
+    # Transcribed from the `rule` line above ("Mohamed Ali, from
+    # certificates"), for the same reason as STAT-PAYROLL.
+    answer_held_by: hr@ubcsis.com

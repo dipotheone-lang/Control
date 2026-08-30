@@ -383,3 +383,132 @@ def render_missing(statutory_config: dict | None, today: date) -> str:
         "and reads no mailbox (D-15). النص العربي هو النص المعتمد.",
     ]
     return "\n".join(lines)
+
+
+# ---- the ask -----------------------------------------------------------
+#
+# The missing-dates page is an audit page: it tells the CEO what is
+# silent and why. It is the wrong thing to forward to the person holding
+# the answer — §-references, engine vocabulary, English only.
+#
+# This is the other half. One page per holder, in both languages (§4),
+# plain and short (§4 plain-language mode: the defect, the fix, the
+# deadline, numbered, no compliance vocabulary), naming only what that
+# person can answer.
+#
+# Routing is by the `answer_held_by` field, never by reading a name out
+# of the `rule` prose. A rule with no holder recorded is listed under
+# nobody rather than guessed at — the whole point of the field is that a
+# name in a sentence is not a routable address.
+
+
+def _by_holder(statutory_config: dict | None, today: date) -> tuple:
+    """(holder -> rows, rows with no holder recorded)."""
+    answerable, _ = missing_dates(statutory_config, today)
+    held: dict = {}
+    unrouted = []
+    for row in answerable:
+        holder = str(row.get("answer_held_by") or "").strip().lower()
+        if not holder:
+            unrouted.append(row)
+            continue
+        held.setdefault(holder, []).append(row)
+    return held, unrouted
+
+
+def render_ask(statutory_config: dict | None, today: date,
+               people: dict | None = None) -> str:
+    """Forwardable requests, one per person holding an answer."""
+    names = {}
+    for entry in (people or {}).get("people") or []:
+        email = str(entry.get("email") or "").strip().lower()
+        if email:
+            names[email] = str(entry.get("name") or email)
+
+    held, unrouted = _by_holder(statutory_config, today)
+    lines = [
+        f"REQUESTS TO SEND — {today:%d-%b-%Y}",
+        "",
+        "One block per person. Each is written to be forwarded as it",
+        "stands. Control drafts and never sends (§10) — these go out from",
+        "you, not from the system.",
+        "",
+    ]
+    if not held and not unrouted:
+        lines += ["Nothing outstanding. Every class 1 rule that can carry a "
+                  "date has one.", ""]
+        return "\n".join(lines)
+
+    for holder, rows in sorted(held.items()):
+        who = names.get(holder, holder)
+        lines += [
+            "════════════════════════════════════════",
+            f"TO: {who} <{holder}>",
+            "SUBJECT: [CONTROL] Statutory dates needed — "
+            f"{len(rows)} item{'' if len(rows) == 1 else 's'}",
+            "════════════════════════════════════════",
+            "",
+            f"{who},",
+            "",
+            "Control tracks the company's statutory deadlines and alerts",
+            "before each one falls due. The items below have no date on",
+            "file, so nothing is counting down to them and no alert can",
+            "fire.",
+            "",
+        ]
+        for index, row in enumerate(rows, 1):
+            lines += [
+                f"{index}. {row.get('name')}",
+                f"   Needed: {row.get('open_question')}",
+                f"   On file now: {row.get('rule')}",
+                "",
+            ]
+        lines += [
+            "Please reply with the date or the recurring pattern for each.",
+            "A reply like \"1 January, then every three months\" is enough —",
+            "it does not need to be exact wording.",
+            "",
+            "This is a gap in the records, not a question about your work.",
+            "",
+            "────────────────────────────────────────",
+            f"إلى: {who}",
+            "",
+            f"الأستاذ/ة {who}،",
+            "",
+            "يقوم نظام كنترول بمتابعة المواعيد القانونية للشركة والتنبيه قبل",
+            "حلول كل موعد. البنود التالية لا يوجد لها تاريخ مسجل، وبالتالي لا",
+            "يتم العد التنازلي لها ولا يمكن إصدار أي تنبيه بشأنها.",
+            "",
+        ]
+        for index, row in enumerate(rows, 1):
+            lines += [
+                f"{index}. {row.get('name')}",
+                f"   المطلوب: {row.get('open_question')}",
+                f"   المسجل حالياً: {row.get('rule')}",
+                "",
+            ]
+        lines += [
+            "برجاء الرد بالتاريخ أو بنمط التكرار لكل بند. رد مثل \"1 يناير ثم",
+            "كل ثلاثة أشهر\" يكفي، ولا يلزم صياغة محددة.",
+            "",
+            "هذه فجوة في السجلات وليست استفساراً عن أداء العمل.",
+            "",
+            "النص العربي هو النص المعتمد.",
+            "",
+        ]
+
+    if unrouted:
+        lines += [
+            "════════════════════════════════════════",
+            f"NO HOLDER RECORDED — {len(unrouted)}",
+            "",
+            "These need an answer and the register does not say whose it",
+            "is. Control does not guess a name, so nothing above asks for",
+            "them (§1.1). Add `answer_held_by` to the row and re-run:",
+            "",
+        ]
+        for row in unrouted:
+            lines.append(f"  {row.get('id')} — {row.get('open_question')}")
+        lines.append("")
+
+    return "\n".join(lines)

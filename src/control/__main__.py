@@ -1467,6 +1467,16 @@ def cmd_statutory(args) -> int:
     today = date.fromisoformat(args.today) if args.today else date.today()
     config = load_config(control_root / "config")
 
+    if getattr(args, "ask", False):
+        page = sd.render_ask(config["statutory-calendar"], today,
+                             config.get("people"))
+        print(page)
+        out = control_root / "reports" / f"statutory-ask-{today:%Y-%m-%d}.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(page, encoding="utf-8")
+        print(f"\nwritten: {out}")
+        return 0
+
     if getattr(args, "missing", False):
         page = sd.render_missing(config["statutory-calendar"], today)
         print(page)
@@ -3106,6 +3116,9 @@ def main(argv: list[str] | None = None) -> int:
     statutory.add_argument("--missing", action="store_true",
                            help="the class 1 rules that fire no countdown, "
                                 "and the one question each is waiting on")
+    statutory.add_argument("--ask", action="store_true",
+                           help="the same gaps as forwardable bilingual "
+                                "requests, one per person holding an answer")
     statutory.add_argument("--today", default="", help="ISO date, for testing")
     statutory.set_defaults(fn=cmd_statutory)
 

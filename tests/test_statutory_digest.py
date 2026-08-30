@@ -222,3 +222,85 @@ def test_the_routing_field_is_not_read_as_the_holder_of_the_date():
     text = render_missing(calendar([row]), TODAY)
     assert "subject sits with counsel, not the tax advisor" in text
     assert "answered by:" not in text
+
+
+# ---- the forwardable ask ----------------------------------------------
+
+PEOPLE = {"people": [
+    {"name": "Hadeer Mohamed", "email": "hadeer@ubcsis.com", "tier": 1},
+    {"name": "Mohamed Ali", "email": "hr@ubcsis.com", "tier": 2},
+]}
+
+
+def test_requests_are_grouped_by_the_person_who_holds_the_answer():
+    from control.statutory_digest import render_ask
+
+    rows = [dict(PENDING, id="STAT-REG", answer_held_by="hr@ubcsis.com"),
+            {"id": "STAT-PAYROLL", "name": "Payroll tax",
+             "rule": "UNVERIFIED — quarterly dates pending",
+             "open_question": "payroll tax quarterly dates",
+             "answer_held_by": "hadeer@ubcsis.com"}]
+    text = render_ask(calendar(rows), TODAY, PEOPLE)
+
+    assert "TO: Hadeer Mohamed <hadeer@ubcsis.com>" in text
+    assert "TO: Mohamed Ali <hr@ubcsis.com>" in text
+    # Each person sees only what they can answer.
+    hadeer = text.split("TO: Hadeer Mohamed")[1].split("TO: Mohamed Ali")[0]
+    assert "payroll tax quarterly dates" in hadeer
+    assert "renewal dates x 3" not in hadeer
+
+
+def test_a_row_with_no_holder_is_listed_rather_than_guessed_at():
+    """A name in the `rule` prose is not a routable address. Control does
+    not parse one out, so an unrouted row is named as unrouted (§1.1)."""
+    from control.statutory_digest import render_ask
+
+    rows = [{"id": "STAT-X", "name": "Something",
+             "rule": "UNVERIFIED — pending (Mohamed Ali)",
+             "open_question": "the date"}]
+    text = render_ask(calendar(rows), TODAY, PEOPLE)
+
+    assert "NO HOLDER RECORDED — 1" in text
+    assert "STAT-X — the date" in text
+    assert "TO:" not in text, "an unrouted row must not be addressed to anyone"
+
+
+def test_the_request_is_bilingual_and_does_not_blame_the_reader():
+    """§4 in full, and §1.4: the message addresses a gap in the records,
+    never the person's conduct."""
+    from control.statutory_digest import render_ask
+
+    rows = [dict(PENDING, answer_held_by="hr@ubcsis.com")]
+    text = render_ask(calendar(rows), TODAY, PEOPLE)
+
+    assert "المطلوب:" in text and "النص العربي هو النص المعتمد" in text
+    assert "This is a gap in the records, not a question about your work." in text
+    assert "٢٠٢٦" not in text
+    # §10: Control drafts, the CEO sends.
+    assert "never sends" in text
+
+
+def test_one_item_is_not_reported_as_one_items():
+    from control.statutory_digest import render_ask
+
+    text = render_ask(calendar([dict(PENDING, answer_held_by="hr@ubcsis.com")]),
+                      TODAY, PEOPLE)
+    assert "1 item" in text and "1 items" not in text
+
+
+def test_nothing_outstanding_says_so():
+    from control.statutory_digest import render_ask
+
+    text = render_ask(calendar([VAT]), TODAY, PEOPLE)
+    assert "Nothing outstanding" in text
+    assert "TO:" not in text
+
+
+def test_the_live_register_routes_every_open_question():
+    """Whoever holds an answer must be reachable from a field. If this
+    fails, a real outstanding date is sitting in the register with
+    nobody being asked for it."""
+    from control.statutory_digest import render_ask
+
+    text = render_ask(_live_calendar(), TODAY, PEOPLE)
+    assert "NO HOLDER RECORDED" not in text
