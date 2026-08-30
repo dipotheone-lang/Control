@@ -457,34 +457,54 @@ def cmd_contracts(args) -> int:
         print(f"cache: {cache_dir}")
 
     ocr = None
+    args_ocr_unavailable = ""
     if args.ocr:
         from .ocr import available, ocr_document
 
         usable, reason = available()
-        if not usable:
+        if not usable and "Arabic" in reason:
+            # A HALF-configured engine. English-only OCR over Arabic scans
+            # fabricates text, and a fabricated clause is worse than the
+            # gap it replaces (§1.1, §5.5). This one is worth refusing.
             print(f"OCR requested but unusable: {reason}")
             print("Refusing to scan with a half-configured engine — scanned "
                   "documents would be silently misread rather than recorded "
                   "as gaps (§1.1, §5.5).")
             return 1
-        floor = args.ocr_floor
-        print(f"OCR ACTIVE: {reason}")
-        print(f"  confidence floor {floor} — below it a document is UNREADABLE, "
-              "not evaluated, not posted (§5.5)")
-        if args.confidential_dates:
-            print("  Confidential contracts ARE included, under decision D-14 "
-                  "(17-Aug-2026):")
-            print("  dates and term durations only, and the OCR text is never "
-                  "retained — it is")
-            print("  dropped at capture, so no clause text reaches a register "
-                  "or a report.")
-        else:
-            print("  Confidential documents are NOT OCR'd on this run. D-14 "
-                  "permits it for")
-            print("  dates only, and only with --confidential-dates.")
+        if not usable:
+            # NO engine is a different case, and refusing it cost the whole
+            # of Stage C for want of a component most of the documents do
+            # not need. Without OCR a scanned document is recorded as
+            # UNREADABLE with the reason — the honest gap §5.5 asks for —
+            # while every text-readable contract still yields its
+            # guarantees. Losing those too is not caution, it is a worse
+            # answer than the one being avoided.
+            print(f"OCR requested but unavailable: {reason}")
+            print("Continuing WITHOUT OCR. Scanned documents will be "
+                  "recorded as UNREADABLE with that reason rather than "
+                  "guessed at (§5.5), and the count is in the report. "
+                  "Text-readable contracts are unaffected.")
+            args_ocr_unavailable = reason
 
-        def ocr(path, _floor=floor):
-            return ocr_document(path, floor=_floor)
+        if usable:
+            floor = args.ocr_floor
+            print(f"OCR ACTIVE: {reason}")
+            print(f"  confidence floor {floor} — below it a document is "
+                  "UNREADABLE, not evaluated, not posted (§5.5)")
+            if args.confidential_dates:
+                print("  Confidential contracts ARE included, under decision "
+                      "D-14 (17-Aug-2026):")
+                print("  dates and term durations only, and the OCR text is "
+                      "never retained — it is")
+                print("  dropped at capture, so no clause text reaches a "
+                      "register or a report.")
+            else:
+                print("  Confidential documents are NOT OCR'd on this run. "
+                      "D-14 permits it for")
+                print("  dates only, and only with --confidential-dates.")
+
+            def ocr(path, _floor=floor):
+                return ocr_document(path, floor=_floor)
 
     from .discovery.stage_c import StageCResult
 
@@ -557,7 +577,8 @@ def cmd_contracts(args) -> int:
     out.write_text(
         render_commercial_exposure(result,
                                    not_scanned=[str(m) for m in missing],
-                                   scanned=[str(s) for s in sources]),
+                                   scanned=[str(s) for s in sources],
+                                   ocr_unavailable=args_ocr_unavailable),
         encoding="utf-8")
 
     # The wire from the report to the thing that actually alerts. §2.2

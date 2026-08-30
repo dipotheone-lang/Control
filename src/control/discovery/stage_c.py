@@ -952,7 +952,8 @@ def _process_one(path: Path, relative: str, confidential_clients: list[str],
 
 def render_commercial_exposure(result: StageCResult, today: date | None = None,
                                not_scanned: list | None = None,
-                               scanned: list | None = None) -> str:
+                               scanned: list | None = None,
+                               ocr_unavailable: str = "") -> str:
     """`not_scanned` names folders the operator asked for that do not
     exist. A folder named wrongly is the easiest way to end up with a
     report that looks complete over ground it never covered, so the miss
@@ -1058,6 +1059,15 @@ def render_commercial_exposure(result: StageCResult, today: date | None = None,
         lines.append(f"  - `{record.path}` — {record.reason}")
     if len(result.blocked) > 40:
         lines.append(f"  - … {len(result.blocked) - 40} further documents")
+
+    if ocr_unavailable:
+        lines += [
+            "",
+            f"- **OCR was requested for this run and was unavailable** "
+            f"({ocr_unavailable}). The unreadable count below is a property "
+            "of this run, not of the documents: a scan with a working engine "
+            "would read some of them. Nothing was guessed at (§5.5).",
+        ]
 
     lines += [
         "",

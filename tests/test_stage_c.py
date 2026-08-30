@@ -599,3 +599,26 @@ def test_the_distance_histogram_carries_no_offsets():
                for k, v in buckets.items())
     assert all(k.startswith(("<=", ">")) or k == "no date in document"
                for k in buckets)
+
+
+def test_the_report_says_when_ocr_was_asked_for_and_absent():
+    """Otherwise the unreadable count reads as a property of the
+    documents rather than of the run that produced it.
+
+    Requesting OCR with no engine used to abort the whole of Stage C.
+    That cost every text-readable contract's guarantees for want of a
+    component most of the documents do not need — a worse answer than
+    the one it was avoiding. A half-configured engine is still refused:
+    English-only OCR over Arabic scans fabricates text, and a fabricated
+    clause is worse than the gap it replaces (§5.5).
+    """
+    from control.discovery.stage_c import (
+        StageCResult, render_commercial_exposure,
+    )
+
+    text = render_commercial_exposure(
+        StageCResult(), ocr_unavailable="pytesseract not installed")
+    assert "OCR was requested for this run and was unavailable" in text
+    assert "a property of this run, not of the documents" in text
+
+    assert "OCR was requested" not in render_commercial_exposure(StageCResult())
