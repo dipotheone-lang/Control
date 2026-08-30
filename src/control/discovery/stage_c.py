@@ -426,6 +426,51 @@ def _clause_before(fragment: str) -> str:
     return "\n".join(text.split("\n")[-(_MAX_WRAPS + 1):])
 
 
+# How far a term sits from the nearest readable date, in characters.
+# Buckets rather than distances: a bucket count is a statistic, an exact
+# offset starts to describe a document's structure.
+_DISTANCE_BUCKETS = (120, 250, 500, 1000, 2500)
+
+
+def _distance_histogram(text: str) -> dict:
+    """For each term, how far away the nearest parseable date is.
+
+    The question this exists to answer, and the one guessing kept
+    getting wrong. Eleven client-confidential contracts produced 29
+    terms and 47 readable dates and paired none of them: the dates are
+    present, the terms are present, and the window between them is the
+    only thing left. Widening a window blind is how a date from the
+    clause next door ends up in a register (§2.1), so the width is
+    measured first.
+
+    Counts per bucket only. No offset, no text — a bucket is a
+    statistic, an exact position starts to describe a document's
+    structure (§12.1.2).
+    """
+    positions: list[int] = []
+    for _, pattern in _TERM_PATTERNS:
+        positions.extend(match.start() for match in pattern.finditer(text))
+    if not positions:
+        return {}
+
+    dates: list[int] = []
+    for pattern in date_shapes.CANDIDATES:
+        for match in pattern.finditer(text):
+            if _parse_date(match.group(0)):
+                dates.append(match.start())
+
+    histogram: dict[str, int] = {}
+    for position in positions:
+        if not dates:
+            key = "no date in document"
+        else:
+            nearest = min(abs(position - d) for d in dates)
+            key = next((f"<={bucket}" for bucket in _DISTANCE_BUCKETS
+                        if nearest <= bucket), f">{_DISTANCE_BUCKETS[-1]}")
+        histogram[key] = histogram.get(key, 0) + 1
+    return histogram
+
+
 def find_terms(text: str, source: str, window: int = 120) -> list[CommercialTerm]:
     """Locate commercial terms and the date belonging to each.
 
@@ -868,6 +913,7 @@ def _process_one(path: Path, relative: str, confidential_clients: list[str],
     # is working is not otherwise observable. Counts only; no date, no
     # clause, nothing traceable to content (§12.1.2).
     parsed_shapes, unparsed_shapes = date_shapes.histogram(text, _parse_date)
+    payload["term_date_distance"] = _distance_histogram(text)
     payload["date_shapes"] = {"parsed": parsed_shapes,
                               "unparsed": unparsed_shapes}
     payload["terms_seen"] = len(terms)

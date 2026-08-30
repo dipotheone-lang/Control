@@ -155,3 +155,29 @@ def test_the_confidential_section_carries_no_document_content(tmp_path):
     text = render(diagnose(directory))
     assert "NNNN/NN/NN" in text
     assert "KNAUF" not in text
+
+
+def test_the_distance_histogram_is_reported_for_confidential_contracts(tmp_path):
+    """What the measurement is for: 29 terms, 47 readable dates, zero
+    pairings. If most terms sit beyond the 120-character window, the
+    window is the finding — and the report has to say by how much rather
+    than leave it to be guessed at a fourth time."""
+    directory = tmp_path / "stage-c-cache"
+    directory.mkdir()
+    (directory / "c.json").write_text(json.dumps({
+        "relative": "KNAUF/a.pdf", "outcome": "terms", "text": None,
+        "d05": True, "terms": [], "terms_seen": 29, "terms_dated": 0,
+        "date_shapes": {"parsed": {"NN/NN/NNNN": 47}, "unparsed": {}},
+        "term_date_distance": {"<=500": 4, ">2500": 16}}), encoding="utf-8")
+    (directory / "o.json").write_text(json.dumps({
+        "relative": "x.txt", "outcome": "terms", "text": "bond 30/11/2026",
+        "terms": [], "term_date_distance": {"<=120": 3}}), encoding="utf-8")
+
+    result = diagnose(directory)
+    assert result.confidential_distance[">2500"] == 16
+    assert result.distance["<=120"] == 3
+
+    text = render(result)
+    assert "HOW FAR EACH TERM SITS FROM THE NEAREST READABLE DATE" in text
+    assert "The window is 120 characters" in text
+    assert "16" in text

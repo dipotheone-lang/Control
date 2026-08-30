@@ -71,6 +71,12 @@ class Diagnosis:
     confidential_unparsed_shapes: Counter = field(default_factory=Counter)
     confidential_parsed: int = 0
     confidential_unparsed: int = 0
+    # How far each term sits from the nearest readable date. The only
+    # question left once the dates parse and the terms are found: 11
+    # confidential contracts produced 29 terms and 47 readable dates and
+    # paired none of them, so the width between them is the answer.
+    distance: Counter = field(default_factory=Counter)
+    confidential_distance: Counter = field(default_factory=Counter)
     terms_dated: int = 0
     # Terms that are undated in a document which does contain a parseable
     # date somewhere. These are the only ones the clause window could
@@ -105,9 +111,14 @@ def diagnose(cache_dir: Path) -> Diagnosis:
                 for name, count in (shapes.get("unparsed") or {}).items():
                     result.confidential_unparsed_shapes[name] += count
                     result.confidential_unparsed += count
+                for bucket, count in (payload.get("term_date_distance")
+                                      or {}).items():
+                    result.confidential_distance[bucket] += count
             continue
 
         result.documents += 1
+        for bucket, count in (payload.get("term_date_distance") or {}).items():
+            result.distance[bucket] += count
         terms = payload.get("terms") or []
         result.terms += len(terms)
         dated_terms = sum(1 for t in terms if t.get("found_date"))
@@ -138,6 +149,22 @@ def diagnose(cache_dir: Path) -> Diagnosis:
             result.terms_in_documents_with_no_date += len(terms)
 
     return result
+
+
+_BUCKET_ORDER = ("<=120", "<=250", "<=500", "<=1000", "<=2500", ">2500",
+                "no date in document")
+
+
+def _distance_lines(counts, indent="  ") -> list[str]:
+    total = sum(counts.values())
+    if not total:
+        return []
+    lines = []
+    for bucket in _BUCKET_ORDER:
+        if counts.get(bucket):
+            lines.append(f"{indent}  {counts[bucket]:>6}  "
+                         f"{bucket:<20} ({counts[bucket] * 100 // total}%)")
+    return lines
 
 
 def render(result: Diagnosis) -> str:
@@ -215,10 +242,28 @@ def render(result: Diagnosis) -> str:
             f"  {result.confidential_parsed} date(s) parsed, "
             f"{result.confidential_unparsed} not.",
         ]
+        distance = _distance_lines(result.confidential_distance)
+        if distance:
+            lines += [
+                "  HOW FAR EACH TERM SITS FROM THE NEAREST READABLE DATE:",
+                *distance,
+                "      The window is 120 characters. Everything below that is",
+                "      a term the engine can already reach; everything above",
+                "      it is a date sitting in the document, readable, and out",
+                "      of range. Widening blind is how a date from the clause",
+                "      next door enters a register (§2.1) — this says how far",
+                "      it would have to go, so the decision is made on the",
+                "      number rather than on a guess.",
+            ]
         if result.confidential_unparsed_shapes:
             lines.append("  SHAPES THEY WRITE THAT NOTHING PARSES:")
             for name, count in result.confidential_unparsed_shapes.most_common(8):
                 lines.append(f"    {count:>6}  {name}")
+
+    distance = _distance_lines(result.distance)
+    if distance:
+        lines += ["", "HOW FAR EACH TERM SITS FROM THE NEAREST READABLE DATE",
+                  *distance]
 
     lines += [
         "",

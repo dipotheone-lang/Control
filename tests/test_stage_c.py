@@ -561,3 +561,41 @@ def test_the_report_names_the_folders_it_covered():
     assert "This report covers 2 folder(s)" in text
     assert "6. Clients Legal Documents" in text
     assert "not evidence that they hold nothing" in text
+
+
+def test_the_distance_from_a_term_to_the_nearest_date_is_measured():
+    """The question guessing kept getting wrong.
+
+    Eleven client-confidential contracts produced 29 terms and 47
+    readable dates and paired none of them. The dates parse and the
+    terms are found, so the width between them is the only thing left —
+    and widening a window blind is how a date from the clause next door
+    ends up in a register (§2.1). The width is measured first.
+    """
+    from control.discovery.stage_c import _distance_histogram
+
+    near = "The performance bond is valid until 31/12/2027."
+    assert _distance_histogram(near).get("<=120")
+
+    far = ("Contract dated 15/03/2026.\n" + "filler " * 400
+           + "The performance bond shall be provided.")
+    buckets = _distance_histogram(far)
+    assert not buckets.get("<=120")
+    assert sum(buckets.values()) >= 1
+
+    none = "The performance bond shall be provided in due course."
+    assert _distance_histogram(none) == {"no date in document": 1}
+
+
+def test_the_distance_histogram_carries_no_offsets():
+    """A bucket count is a statistic. An exact position starts to
+    describe a document's structure, and these run over contracts whose
+    text is never retained (§12.1.2, D-14)."""
+    from control.discovery.stage_c import _distance_histogram
+
+    buckets = _distance_histogram(
+        "Performance bond valid until 31/12/2027. Retention money held.")
+    assert all(isinstance(k, str) and isinstance(v, int)
+               for k, v in buckets.items())
+    assert all(k.startswith(("<=", ">")) or k == "no date in document"
+               for k in buckets)
