@@ -1387,6 +1387,23 @@ def cmd_diagnose_dates(args) -> int:
     return 0
 
 
+def cmd_ocr_floor(args) -> int:
+    """What each OCR confidence floor would admit — §5.5, §14.4.
+
+    The floor is at 60 because 60 is the default, which §5.5 names as
+    the wrong reason: it is a governance number to be set from this
+    estate's own documents. Reports only — §14.4 forbids learning from
+    lowering it, and nothing here changes a setting.
+    """
+    from .discovery import ocr_floor
+
+    control_root = Path(args.control_root)
+    evidence = ocr_floor.gather(control_root / "data" / "stage-c-cache",
+                                floor_in_force=args.ocr_floor)
+    print(ocr_floor.render(evidence))
+    return 0
+
+
 def cmd_terms(args) -> int:
     """§5.5 — the work queue for what OCR could not reach."""
     from .db import connect
@@ -2943,6 +2960,15 @@ def main(argv: list[str] | None = None) -> int:
     diagnose.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     diagnose.set_defaults(fn=cmd_diagnose_dates)
 
+    floor = sub.add_parser(
+        "ocr-floor",
+        help="§5.5: what each OCR confidence floor would admit, from this "
+             "estate's own readings (reports only — §14.4)")
+    floor.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    floor.add_argument("--ocr-floor", type=float, default=60.0,
+                       help="the floor currently in force, for comparison")
+    floor.set_defaults(fn=cmd_ocr_floor)
+
     authority = sub.add_parser(
         "authority",
         help="O-02: read candidate delegated limits out of the delegation "
@@ -3005,7 +3031,7 @@ def main(argv: list[str] | None = None) -> int:
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "analyse", "init", "contracts", "registers",
                          "classify", "classify-scan", "backup", "manuals",
-                         "terms", "golden", "disputes", "diagnose-dates", "authority")
+                         "terms", "golden", "disputes", "diagnose-dates", "authority", "ocr-floor")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
