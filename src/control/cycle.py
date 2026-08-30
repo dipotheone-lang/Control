@@ -99,6 +99,11 @@ class CycleReport:
     # no trace in the cycle's own output reads as a full sweep that
     # found nothing (§1.1).
     gaps: list[str] = field(default_factory=list)
+    # Messages §10 required to be sent, written as drafts because no
+    # transport is provisioned. Counted apart from `drafted`: a draft
+    # the mode asked for is the system working, and a draft standing in
+    # for a send nobody received is not.
+    undelivered: list[str] = field(default_factory=list)
 
 
 def _raise_flag(conn, flag: Flag, report: CycleReport, budget: int | None,
@@ -121,9 +126,24 @@ def _raise_flag(conn, flag: Flag, report: CycleReport, budget: int | None,
 
 def _dispatch(outbox: Outbox, transport: MailTransport, msg: OutboundMessage,
               known: set[str], report: CycleReport, audit) -> None:
-    disposition: Disposition = outbox.submit(msg, already_sent=known)
+    disposition: Disposition = outbox.submit(
+        msg, already_sent=known,
+        can_send=getattr(transport, "can_send", True))
     if disposition.action == "SKIPPED_DUPLICATE":
         report.skipped_duplicates += 1
+        return
+    if disposition.action == "UNDELIVERED":
+        # §10 required a send and no transport is provisioned. The run
+        # continues — there is other work to finish and halting here
+        # would lose it — but the message did not reach anybody, and
+        # that is carried out of the cycle rather than left in a file.
+        if msg.dedupe_key:
+            known.add(msg.dedupe_key)
+        report.undelivered.append(disposition.draft_id)
+        audit.append("outbox.undelivered", {
+            "kind": msg.kind, "key": msg.dedupe_key,
+            "draft_id": disposition.draft_id,
+            "reason": "no transport provisioned (D-08)"})
         return
     if disposition.action == "SEND":
         message_id = transport.send(

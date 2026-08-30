@@ -56,7 +56,7 @@ echo   CONTROL_ROOT : %CONTROL_ROOT%
 echo   Scope        : STATUTORY_ONLY (D-15) - class 1 only, no mailbox read
 echo.
 
-echo == 1 of 2: updating ==
+echo == 1 of 3: updating ==
 rem The tracking branch, not a named one: a hardcoded branch stops
 rem updating the day it is merged and deleted, and does so silently.
 git pull --ff-only
@@ -67,7 +67,7 @@ if errorlevel 1 (
 python -m pip install -e . --quiet >nul 2>&1
 
 echo.
-echo == 2 of 2: the horizon ==
+echo == 2 of 3: the horizon ==
 echo.
 python -m control statutory --control-root "%CONTROL_ROOT%"
 if errorlevel 1 (
@@ -87,6 +87,30 @@ rem waiting on and who holds the answer. Printing both every morning
 rem would bury the one that changes daily, so this is a file to open on
 rem the day somebody chases them.
 python -m control statutory --missing --control-root "%CONTROL_ROOT%" >nul 2>&1
+
+echo.
+echo == 3 of 3: the run ==
+echo    The horizon above is the page. This is the record: the deadline
+echo    engine plans the section 2.1 alerts (T-7, T-3, T-1 and the day
+echo    itself), writes them, and posts to the database and the
+echo    hash-chained log.
+echo.
+echo    Nothing is sent. Until Graph is provisioned there is no transport,
+echo    so an alert section 10 asks to SEND is written and reported as
+echo    NOT DELIVERED - which is the honest state, not a failure of this
+echo    run. Watch for that line.
+echo.
+rem UB_ROOT is not read in this scope. It is passed because the command
+rem requires it, and an unreachable one is reported and stepped past
+rem rather than halting - nothing here touches the drive.
+if not defined UB_ROOT set "UB_ROOT=E:\UBCSIS Co Date Jan 2026"
+python -m control cycle --control-root "%CONTROL_ROOT%" --ub-root "%UB_ROOT%" --run-mode SUPERVISED --learning-mode OBSERVE --level 2
+if errorlevel 1 (
+  echo.
+  echo    The run above stopped. The horizon printed earlier still stands -
+  echo    it is computed from the calendar alone and does not depend on
+  echo    this step.
+)
 
 echo.
 echo ===========================================================================

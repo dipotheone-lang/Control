@@ -79,6 +79,11 @@ def _startup(args):
 
         for line in summary(report.scope):
             print(line)
+    for gap in report.gaps:
+        # Something a wider scope would have halted on. Proceeding past
+        # it is a decision, and a decision nobody sees is indistinguishable
+        # from nothing having been wrong.
+        print(f"PROCEEDED PAST: {gap}")
     print(f"open disputes: {report.open_disputes} | open threads: {report.open_threads} | "
           f"active absences: {report.active_absences}")
     if report.schema_added:
@@ -1190,6 +1195,20 @@ def cmd_cycle(args) -> int:
     print(f"sent:             {len(result.sent)}")
     print(f"drafted:          {len(result.drafted)}")
     print(f"duplicates held:  {result.skipped_duplicates}")
+    if result.undelivered:
+        # Loudest line in the run. §10 required these to be sent and
+        # they were written to a folder instead — a class 1 alert that
+        # reached nobody is the most expensive failure in this charter,
+        # and it must not be readable as a clean run.
+        print(f"\nNOT DELIVERED:    {len(result.undelivered)} message(s) "
+              "§10 required to be SENT")
+        print("                  were written as drafts — no transport is "
+              "provisioned (D-08).")
+        print("                  Nobody was alerted. They are in "
+              "outbox/pending-approval marked")
+        print("                  UNDELIVERED_NO_TRANSPORT, and they stay "
+              "undelivered until Graph")
+        print("                  is provisioned: scripts/provision-graph.ps1")
     # What the sweep did not do. `processed: 0` above is true of a
     # mailbox that was empty and of one that was never opened, and those
     # are opposite facts (§1.1) — so the reason is printed beside the

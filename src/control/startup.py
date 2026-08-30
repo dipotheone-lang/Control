@@ -20,7 +20,9 @@ from . import HaltError
 from .audit import AuditLog
 from .config import Config, load_config
 from .db import connect, ensure_schema, integrity_check
+from .scope_statutory import MAILBOX_READ
 from .scope_statutory import normalise as normalise_scope
+from .scope_statutory import permits as scope_permits
 from .states import State, validate_state
 from .transport import assert_route_permitted
 
@@ -42,6 +44,11 @@ class StartupReport:
     # the charter as written; STATUTORY_ONLY refuses every capability
     # that would read a mailbox or evaluate a person's work.
     scope: str = "FULL"
+    # Conditions startup would have halted on in a wider scope and
+    # proceeded past in this one. Carried out rather than logged and
+    # forgotten: a run that quietly tolerated a missing root looks
+    # exactly like one where nothing was missing (§1.1).
+    gaps: tuple = ()
 
 
 def run_startup(
@@ -54,10 +61,28 @@ def run_startup(
     scope: str = "FULL",
 ) -> StartupReport:
     control_root, ub_root = Path(control_root), Path(ub_root)
+    # Needed before the roots are checked: it decides whether an
+    # unreachable UB_ROOT is a partial view or an irrelevance. An
+    # unrecognised value still halts (§5.6).
+    scope = normalise_scope(scope)
+    root_gaps: list[str] = []
 
     # 5 (checked early — never operate on a partial view, §13.2)
+    #
+    # §13.2's reason is the partial view: half a drive read as a whole
+    # one produces absences that are not absences. A scope that reads no
+    # mailbox also reads no drive — no Stage B inventory, no submission
+    # files, no contract scan — so there is no view to be partial, and
+    # halting would stop a class 1 run because a USB disk is unplugged.
+    # It is recorded as a gap instead of being assumed away.
     if not ub_root.is_dir():
-        raise HaltError(f"UB_ROOT unreachable: {ub_root}")
+        if scope_permits(scope, MAILBOX_READ):
+            raise HaltError(f"UB_ROOT unreachable: {ub_root}")
+        root_gaps.append(
+            f"UB_ROOT unreachable ({ub_root}) — not used in this scope, "
+            "which reads no drive and no mailbox (D-15). Nothing was read "
+            "from it and nothing was inferred about it; a widened scope "
+            "halts on this again.")
     if not control_root.is_dir():
         raise HaltError(f"CONTROL_ROOT unreachable: {control_root}")
 
@@ -73,16 +98,32 @@ def run_startup(
         )
     state = validate_state(maturity_level, run_mode, learning_mode)
 
-    # An interim transport route is legal only in the phases it was
-    # granted for (§5.1, D-08). Checked here, where the run mode is
-    # known, rather than left to be remembered at Phase 2.
-    assert_route_permitted(config["transport"], run_mode)
-
     # The operating scope, validated here with the run mode rather than
     # trusted at the point of use. An unrecognised value halts: the
     # default would be the wider scope, and a typo must not widen what
     # Control may read (§5.6).
-    scope = normalise_scope(scope)
+    #
+    # (The scope was normalised before the root checks, which needed it.)
+
+    # An interim transport route is legal only in the phases it was
+    # granted for (§5.1, D-08). Checked here, where the run mode is
+    # known, rather than left to be remembered at Phase 2.
+    #
+    # Except where the scope reads no mailbox. D-08 refuses Outlook in
+    # SUPERVISED for two reasons, and neither survives that: the route
+    # cannot hold a send schedule, and it sees whatever the Windows
+    # profile sees rather than the set D-07 authorises. A scope that
+    # opens no mailbox and sends through no route is not doing either
+    # thing — it is handed a transport with no mailbox at all
+    # (`NullTransport`), and this file is not even consulted for it.
+    #
+    # Without this, §16's own row for D-15 — STATUTORY_ONLY at level 2,
+    # SUPERVISED, OBSERVE — halted at startup: the charter declared a
+    # state legal that the code refused to enter. The gate was
+    # protecting a route the run does not use, at the cost of the only
+    # scope currently operating.
+    if scope_permits(scope, MAILBOX_READ):
+        assert_route_permitted(config["transport"], run_mode)
 
     # 2
     db_path = control_root / "data" / "control.db"
@@ -125,10 +166,15 @@ def run_startup(
             "date": today,
             "chain": detail,
             **({"schema_added": list(schema_added)} if schema_added else {}),
+            # §1.9. Proceeding past a condition a wider scope halts on
+            # is a decision this run made, and an unlogged decision did
+            # not happen.
+            **({"proceeded_past": list(root_gaps)} if root_gaps else {}),
         },
     )
     return StartupReport(
         scope=scope,
+        gaps=tuple(root_gaps),
         config=config,
         state=state,
         audit=audit,

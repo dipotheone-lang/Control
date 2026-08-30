@@ -229,23 +229,70 @@ def test_the_null_transport_refuses_to_send_rather_than_swallowing_it():
     assert "Graph" in str(excinfo.value)
 
 
-def test_a_class_1_alert_with_nowhere_to_go_halts_rather_than_vanishes(env):
+def test_a_class_1_alert_with_nowhere_to_go_is_reported_not_lost(env):
     """SUPERVISED sends class 1 alerts (§10). With no Graph there is
-    nowhere to send them, and the run stops saying so.
+    nowhere to send them.
 
-    Before D-15 the cycle needed a transport to exist before it planned
-    anything, so a machine with neither Graph nor Outlook planned no
-    statutory alerts at all — the one job this scope was narrowed to,
-    not done, and reported as a clean run.
+    Two responses are wrong. Raising kills a run with other work to
+    finish. Writing an ordinary PENDING_APPROVAL draft turns an alert
+    §10 required into one nobody knows was never delivered. So it is
+    written, marked, and counted apart — a draft the mode asked for is
+    the system working; a draft standing in for a send nobody received
+    is not.
     """
+    import json
+
     from control.transport import NullTransport
 
     startup, control_root = env
+    report = run_cycle(startup, NullTransport(), control_root, specs={},
+                       tracked_items=[_vat()], enforcer=_enforcer(),
+                       today=date(2026, 8, 13), ceo=CEO, cfo=CFO)
+
+    assert report.undelivered, "the class 1 alert vanished"
+    assert not report.sent
+    assert not report.drafted, "an undelivered send was counted as a draft"
+
+    records = [json.loads(p.read_text(encoding="utf-8"))
+               for p in (control_root / "outbox" / "pending-approval")
+               .glob("*.json")]
+    assert [r["status"] for r in records] == ["UNDELIVERED_NO_TRANSPORT"]
+
+    entries = [json.loads(line)
+               for path in sorted((control_root / "logs").glob("*.jsonl"))
+               for line in path.read_text(encoding="utf-8").splitlines()
+               if line.strip()]
+    assert any(e["event"] == "outbox.undelivered" for e in entries)
+
+
+def test_the_charter_s_own_state_for_d15_can_actually_be_entered(env):
+    """§16 lists STATUTORY_ONLY at level 2, SUPERVISED, OBSERVE.
+
+    D-08's route gate refused Outlook in SUPERVISED and so refused that
+    row — the charter declared a state legal that the code would not
+    enter. The gate exists to stop a laptop transport carrying a send
+    schedule and to stop it seeing more mailboxes than D-07 authorises;
+    a scope that opens no mailbox and sends through no route does
+    neither.
+    """
+    startup, _ = env
+    assert startup.state.run_mode == "SUPERVISED"
+    assert startup.scope == STATUTORY_ONLY
+
+
+def test_the_route_gate_still_refuses_the_wide_scope(tmp_path):
+    """The relaxation is bounded by the scope, not removed. With a
+    mailbox in play D-08 refuses exactly as before."""
+    ub_root = tmp_path / "UB"
+    control_root = ub_root / "CONTROL"
+    (control_root / "data").mkdir(parents=True)
+    (control_root / "logs").mkdir()
+    shutil.copytree(REPO_CONFIG, control_root / "config")
+
     with pytest.raises(HaltError) as excinfo:
-        run_cycle(startup, NullTransport(), control_root, specs={},
-                  tracked_items=[_vat()], enforcer=_enforcer(),
-                  today=date(2026, 8, 13), ceo=CEO, cfo=CFO)
-    assert "nothing can be sent" in str(excinfo.value)
+        run_startup(control_root, ub_root, "SUPERVISED", "OBSERVE", 2,
+                    "2026-08-13", scope="FULL")
+    assert "not permitted in RUN_MODE=SUPERVISED" in str(excinfo.value)
 
 
 def test_the_same_run_drafts_instead_of_halting_in_dry_run(tmp_path):
@@ -267,3 +314,57 @@ def test_the_same_run_drafts_instead_of_halting_in_dry_run(tmp_path):
                        today=date(2026, 8, 13), ceo=CEO, cfo=CFO)
     assert report.drafted, "no class 1 draft was produced"
     assert not report.sent
+
+
+def test_an_unreachable_ub_root_does_not_stop_a_class_1_run(tmp_path):
+    """§13.2 halts on an unreachable UB_ROOT to avoid operating on a
+    partial view. A scope that reads no drive has no view to be partial,
+    and halting would stop the statutory run because a USB disk is
+    unplugged. It proceeds, and says it proceeded."""
+    ub_root = tmp_path / "UB"
+    control_root = tmp_path / "CONTROL"
+    (control_root / "data").mkdir(parents=True)
+    (control_root / "logs").mkdir()
+    shutil.copytree(REPO_CONFIG, control_root / "config")
+    assert not ub_root.exists()
+
+    startup = run_startup(control_root, ub_root, "SUPERVISED", "OBSERVE", 2,
+                          "2026-08-13", scope=STATUTORY_ONLY)
+    assert startup.gaps, "proceeding past a halt condition left no trace"
+    assert "UB_ROOT unreachable" in startup.gaps[0]
+    assert "a widened scope halts on this again" in startup.gaps[0]
+
+
+def test_the_wide_scope_still_halts_on_an_unreachable_ub_root(tmp_path):
+    ub_root = tmp_path / "UB"
+    control_root = tmp_path / "CONTROL"
+    (control_root / "data").mkdir(parents=True)
+    (control_root / "logs").mkdir()
+    shutil.copytree(REPO_CONFIG, control_root / "config")
+
+    with pytest.raises(HaltError) as excinfo:
+        run_startup(control_root, ub_root, "DRY_RUN", "OBSERVE", 1,
+                    "2026-08-13", scope="FULL")
+    assert "UB_ROOT unreachable" in str(excinfo.value)
+
+
+def test_proceeding_past_a_halt_condition_is_logged(tmp_path):
+    """§1.9. An unlogged decision did not happen, and this run made
+    one."""
+    import json
+
+    ub_root = tmp_path / "UB"
+    control_root = tmp_path / "CONTROL"
+    (control_root / "data").mkdir(parents=True)
+    (control_root / "logs").mkdir()
+    shutil.copytree(REPO_CONFIG, control_root / "config")
+    run_startup(control_root, ub_root, "SUPERVISED", "OBSERVE", 2,
+                "2026-08-13", scope=STATUTORY_ONLY)
+
+    entries = [json.loads(line)
+               for path in sorted((control_root / "logs").glob("*.jsonl"))
+               for line in path.read_text(encoding="utf-8").splitlines()
+               if line.strip()]
+    startup = next(e for e in entries if e["event"] == "startup")
+    assert any("UB_ROOT unreachable" in g
+               for g in startup["data"]["proceeded_past"])

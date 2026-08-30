@@ -107,6 +107,12 @@ class MailTransport:
     incomplete sweep is a FAILED cycle, never a shorter message list
     (§5.1); absences must never be recorded from a partial view."""
 
+    # Whether this transport can deliver at all. False makes the outbox
+    # write a message §10 required to be sent as an UNDELIVERED draft
+    # instead of raising — the run finishes, and the fact that nobody
+    # was alerted is reported rather than inferred from a stack trace.
+    can_send = True
+
     def fetch_unprocessed(self) -> list[FetchedMessage]:
         raise NotImplementedError
 
@@ -165,10 +171,16 @@ class NullTransport(MailTransport):
     failure D-08 refuses a laptop transport over.
     """
 
+    can_send = False
+
     def fetch_unprocessed(self) -> list["FetchedMessage"]:
         return []
 
     def send(self, recipients, cc, subject, body) -> str:
+        # Kept as a hard refusal even though `can_send` normally routes
+        # around it. If anything ever calls this directly it must fail
+        # loudly: the one thing worse than an alert nobody received is
+        # one the system believes it delivered.
         raise HaltError(
             "no transport is configured, so nothing can be sent. Under "
             "OPERATING_SCOPE=STATUTORY_ONLY (D-15) Control computes the "

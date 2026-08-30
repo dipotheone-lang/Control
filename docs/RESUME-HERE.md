@@ -115,11 +115,30 @@ Double-click **`Run Control.cmd`** in the repository folder. It reads
 scan, no OCR — so Outlook can be closed and E: unplugged, and it takes
 seconds rather than hours.
 
-It prints the class 1 horizon for the next 30 days in both languages,
-saves it to `reports\statutory-YYYY-MM-DD.txt`, and says what the
-narrowed scope is *not* doing. That last part is deliberate: a page
-listing two deadlines and nothing else reads like a quiet company unless
-the reader is told what was never looked at.
+Three steps: update, the horizon, the run.
+
+**The horizon** is the page — the class 1 deadlines for the next 30 days
+in both languages, saved to `reports\statutory-YYYY-MM-DD.txt`, followed
+by what the narrowed scope is *not* doing. That last part is deliberate:
+a page listing two deadlines and nothing else reads like a quiet company
+unless the reader is told what was never looked at.
+
+**The run** is the record — `cycle` at SUPERVISED level 2, which is §16's
+own row for D-15. The deadline engine plans the §2.1 alerts (T−7, T−3,
+T−1 and the day itself), writes them, and posts to the database and the
+hash-chained log.
+
+**Nothing is sent, and the run says so.** With no transport provisioned,
+an alert §10 requires to be SENT is written to
+`outbox\pending-approval` marked `UNDELIVERED_NO_TRANSPORT` and reported
+as `NOT DELIVERED`. That is the honest state rather than a failure of
+the run — but it does mean nobody has been alerted, which is why the
+line is the loudest one in the output.
+
+Two conditions that would stop a wider run are stepped past here and
+reported as `PROCEEDED PAST`: an unreachable `UB_ROOT` (nothing in this
+scope reads the drive) and D-08's route gate (nothing in this scope uses
+a route). Both halt again the moment the scope widens.
 
 Once per machine first: **`First-time setup.cmd`**, which installs
 dependencies, creates the database and audit chain, and sets

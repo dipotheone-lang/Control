@@ -172,7 +172,8 @@ class Outbox:
                     keys.add(key)
         return keys
 
-    def submit(self, msg: OutboundMessage, already_sent: set[str] | None = None) -> Disposition:
+    def submit(self, msg: OutboundMessage, already_sent: set[str] | None = None,
+               *, can_send: bool = True) -> Disposition:
         if msg.dedupe_key and already_sent and msg.dedupe_key in already_sent:
             return Disposition("SKIPPED_DUPLICATE")
 
@@ -181,9 +182,27 @@ class Outbox:
         self._apply_continuity_cc(msg)
         self._check_recipients(msg)  # re-verify after mutation
 
-        if disposition == _S:
+        if disposition == _S and can_send:
             return Disposition("SEND", message=msg)
 
+        if disposition == _S:
+            # §10 decided to send and there is nothing to send with —
+            # no transport is provisioned. Two ways to handle that are
+            # wrong: raising kills a run that has other work to finish,
+            # and writing an ordinary PENDING_APPROVAL draft turns an
+            # alert §10 required into one nobody knows was never
+            # delivered.
+            #
+            # So the message is written, marked as what it is, and the
+            # deviation is returned for the caller to report. A class 1
+            # alert that became a draft has alerted nobody, and that is
+            # a finding, not a quiet success (§1.1).
+            return self._write_draft(msg, status="UNDELIVERED_NO_TRANSPORT",
+                                     action="UNDELIVERED")
+        return self._write_draft(msg, status="PENDING_APPROVAL", action="DRAFT")
+
+    def _write_draft(self, msg: OutboundMessage, *, status: str,
+                     action: str) -> Disposition:
         draft_id = f"DRAFT-{datetime.now(timezone.utc):%Y%m%d}-{uuid.uuid4().hex[:8]}"
         record = {
             "draft_id": draft_id,
@@ -199,11 +218,12 @@ class Outbox:
             "dedupe_key": msg.dedupe_key,
             "content_classes": sorted(msg.content_classes),
             "body": msg.body,
-            "status": "PENDING_APPROVAL",
+            "status": status,
         }
         path = self.pending / f"{draft_id}.json"
         path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-        return Disposition("DRAFT", message=msg, draft_id=draft_id, draft_path=str(path))
+        return Disposition(action, message=msg, draft_id=draft_id,
+                           draft_path=str(path))
 
     # -- approval (§10, authenticated per v4.3/V11) ------------------------
 
