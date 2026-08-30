@@ -1,11 +1,14 @@
-# Proposed decision D-15 — statutory-only operation
+# Decision D-15 — statutory-only operation
 
-**Status:** PROPOSED. Control may propose amendments with evidence and
-may never edit the charter (§17). This becomes operative when Ahmed Diab
-adds it to Appendix B with a version, date and reason.
+**Status: ADOPTED, 30-Aug-2026.** In the charter at Appendix B, and in
+§16 as a legal state. Charter version 4.11.
 
-**Proposed by:** Control, 30-Aug-2026, on the CEO's instruction to
-narrow the project after reviewing `reports/status-2026-08-30.txt`.
+Decided by Ahmed Diab. Entered into `CLAUDE.md` by Control on his
+express instruction — §17 otherwise reserves every edit to him, and the
+Appendix B row records the same split so the provenance of the amendment
+is not ambiguous later.
+
+This file is the reasoning behind the row. The row is the decision.
 
 ---
 

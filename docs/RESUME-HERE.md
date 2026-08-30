@@ -1,5 +1,22 @@
 # RESUME HERE — state as at 30-Aug-2026
 
+> **The project was narrowed on 30-Aug-2026. Decision D-15, charter 4.11:
+> Control operates on class 1 statutory obligations alone and reads no
+> mailbox.** Read `docs/decisions/D15-STATUTORY-ONLY.md` before anything
+> else here — most of what follows describes capabilities that are built,
+> tested, and now out of scope. Nothing is deleted; widening means closing
+> the §12 pre-conditions and moving the scope back.
+>
+> **What is left to operate, and none of it is code:**
+> 1. The tax advisor confirms the twelve statutory rules —
+>    `discovery/TAX-ADVISOR-BRIEF.md` is generated and waiting. O-03 is
+>    now the only thing between here and operation.
+> 2. Graph provisioned — `scripts/provision-graph.ps1`. D-08 is enforced
+>    in code and refuses Outlook in SUPERVISED.
+>
+> Then: `python -m control cycle --scope STATUTORY_ONLY`, and switch
+> `RUN_MODE` to SUPERVISED so alerts send rather than draft.
+
 `docs/RUNBOOK.md` says how to run each thing. This file says **where the
 build actually is and what the next action is**, so a new session — a
 new PowerShell window or a new Claude Code session — can pick up without
