@@ -117,3 +117,18 @@ def test_an_unapproved_obligation_builds_no_cases():
     adopted."""
     rows = build([obligation(approved_by_ceo=None)], documents(), FOLDERS)
     assert rows == []
+
+
+def test_the_drive_walk_is_materialised_before_it_is_counted(tmp_path):
+    """`series.walk` yields, and the register proposal counted it with
+    len(). So on any machine with no Stage B inventory — which is every
+    machine before its first scan — the whole register proposal reported
+    as a failed step and was skipped, inside a runner whose point is
+    that it does not stop halfway.
+    """
+    from control.discovery import series
+
+    (tmp_path / "8. Finance").mkdir()
+    (tmp_path / "8. Finance" / "ledger.xlsx").write_text("x", encoding="utf-8")
+    rows = list(series.walk(tmp_path))
+    assert len(rows) >= 1

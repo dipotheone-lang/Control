@@ -1480,6 +1480,16 @@ def cmd_disputes(args) -> int:
         conn.close()
 
 
+# Where contracts, guarantees and delegated limits actually live.
+# Everything else on this drive is project documentation.
+_CONTRACT_FOLDERS = (
+    "6. Clients Legal Documents",
+    "7. Suppliers Legal Documents",
+    "11. Vendor Registration Request",
+    "13. Delegations",
+)
+
+
 def cmd_phase1(args) -> int:
     """Everything Phase 1 can do without a human — §16.
 
@@ -1549,6 +1559,41 @@ def cmd_phase1(args) -> int:
     run("5. Advisor brief — the completed statutory table",
         lambda: cmd_advisor_brief(like()))
 
+    # 5b — Stage C. §6 calls COMMERCIAL-EXPOSURE.md the likely
+    #      highest-value single output of the build, and it was not in
+    #      this chain at all: the guarantee expiries and forfeitable
+    #      claim windows were reachable only by a separate command
+    #      nobody was told to run.
+    #
+    #      Scoped to the folders that hold contracts rather than the
+    #      whole drive. Measured, not assumed: `14. Construction
+    #      Management Files` is 801 of 957 documents and produced 525
+    #      terms with one usable date — project files and blank
+    #      templates naming a retention because the boilerplate does.
+    #      Scanning it costs hours and buys nothing.
+    ub_root = Path(args.ub_root) if getattr(args, "ub_root", "") else None
+    if ub_root and ub_root.is_dir():
+        folders = [ub_root / name for name in _CONTRACT_FOLDERS]
+        present = [str(f) for f in folders if f.is_dir()]
+        if present:
+            run("5b. Stage C — guarantee expiries, notice periods, "
+                "accreditations",
+                lambda: cmd_contracts(like(
+                    source=",".join(present), no_cache=False,
+                    ocr=getattr(args, "ocr", False),
+                    ocr_floor=getattr(args, "ocr_floor", 60.0),
+                    confidential_dates=True)),
+                needed="skipped — no contract folder found")
+
+    # 5c — the cases the golden set is built from. Nothing put a case
+    #      into pending/, so the Phase 1 gate reported the set as
+    #      blocked on the CEO's time when the missing piece was this.
+    if ub_root and ub_root.is_dir():
+        run("5c. Golden set — build the pending cases from the archive",
+            lambda: cmd_golden(like(build=True, issue=False, apply="",
+                                    per_obligation=12)),
+            needed="skipped — UB_ROOT not reachable")
+
     # 6 — a full DRY_RUN cycle: everything evaluated, everything drafted.
     if not args.skip_cycle:
         run("6. Cycle — evaluate everything, send nothing (DRY_RUN)",
@@ -1573,16 +1618,15 @@ def cmd_phase1(args) -> int:
     run("9. Phase 1 gate — the seven conditions, measured", lambda: cmd_gate(
         like()))
 
-    print("\nWhat is left, and why it cannot be done for you:")
-    print("  1. Approve the obligation register. §6 makes that approval "
-          "the thing that\n     ends Phase 0. One command:")
-    print("       python -m control register --approve --by ahmed@ubcsis.com")
-    print("  2. Judge the golden set. §13.1 and D-03: CEO only, unanchored, "
-          "no\n     pre-filled suggestions — anchoring the human to the "
-          "machine's answer\n     produces a test the machine cannot fail. "
-          "Batches of ten:")
-    print("       python -m control golden --issue")
-    print("\nEverything else above ran without you.")
+    # What is left is read off the gate rather than written here. A
+    # hardcoded list told the CEO to approve a register he had already
+    # approved, which is the fastest way to teach someone that the
+    # closing summary is not worth reading.
+    print("\nEverything above ran without you. What is left cannot be:")
+    print("  see the gate rows immediately above — each names the one "
+          "person who can\n  close it, and what they would do. Control "
+          "closes none of them by design\n  (§16): a gate the system "
+          "could close alone would not be a gate.")
     return 0
 
 
@@ -1738,7 +1782,11 @@ def cmd_register_obligations(args) -> int:
         rows = series_mod.read_inventory(inventory)
         source = f"Stage B inventory ({inventory.name})"
     elif ub_root and ub_root.is_dir():
-        rows = series_mod.walk(ub_root)
+        # Materialised, because `walk` yields. The generator was counted
+        # with len() below and reported as a failed step, so the whole
+        # register proposal was skipped on any machine with no Stage B
+        # inventory — which is every machine before the first scan.
+        rows = list(series_mod.walk(ub_root))
         source = f"direct walk of {ub_root}"
     else:
         print(f"no file inventory at {inventory} and UB_ROOT not reachable. "
@@ -2647,6 +2695,9 @@ def main(argv: list[str] | None = None) -> int:
         help="everything Phase 1 can do without a human, in one command")
     _common(phase1)
     phase1.add_argument("--today", default="", help="ISO date, for testing")
+    phase1.add_argument("--ocr", action="store_true",
+                        help="§5.5: OCR scanned documents in Stage C")
+    phase1.add_argument("--ocr-floor", type=float, default=60.0)
     phase1.add_argument("--accept-template", action="append", default=[],
                         metavar="FILE.yaml")
     phase1.add_argument("--skip-scan", action="store_true",
