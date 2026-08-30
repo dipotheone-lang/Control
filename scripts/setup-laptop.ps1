@@ -90,8 +90,18 @@ if ($doctorExit -eq 0) {
 } else {
     Write-Host "Setup finished with warnings - see above." -ForegroundColor Yellow
 }
-Write-Host "Next: docs\RUNBOOK.md - the commands in order."
-Write-Host "Start with:  python -m control contracts"
+Write-Host ""
+Write-Host "  Close this window and open a new one, so CONTROL_ROOT and"
+Write-Host "  UB_ROOT are picked up. Then double-click:"
+Write-Host ""
+Write-Host "      Run Control.cmd" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  That is the whole run - mailbox scan, drive scan, contract"
+Write-Host "  terms, registers, golden-set cases, reports and the gate."
+Write-Host "  Open classic Outlook first and leave it signed in."
+Write-Host ""
+Write-Host "  Where things stand and what is blocked: docs\RESUME-HERE.md"
+Write-Host "  How to run each piece by hand:            docs\RUNBOOK.md"
 Write-Host ""
 Write-Host "Reminder: CONTROL_ROOT holds mail-derived data and is not in git."
 Write-Host "Back it up encrypted, daily, in full (charter 5.2)."
