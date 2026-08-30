@@ -109,6 +109,21 @@ def load_pending(directory: Path) -> list[dict]:
     return out
 
 
+def _form_of(spec: dict) -> str:
+    """What the CEO reads in the governing-form column.
+
+    An obligation with no controlled form rendered as " rev " — which
+    looks like a rendering fault rather than the fact it is. Stage D
+    found LIVE 0: no series on this drive is on a controlled form, so
+    this column is empty for most of the set and has to say so.
+    """
+    code = str(spec.get("form_code") or "").strip()
+    revision = str(spec.get("current_revision") or "").strip()
+    if not code:
+        return "NONE — this obligation has no controlled form"
+    return f"{code} rev {revision}" if revision else f"{code} — revision NOT RECORDED"
+
+
 def _clause_of(raw: dict) -> str:
     rules = (raw.get("spec") or {}).get("manual_rules") or []
     clauses = [str(r.get("clause")) for r in rules if r.get("clause")]
@@ -159,7 +174,7 @@ def write_batch(pending: list[dict], path: Path, *, clause_blank: set[str]
                 _received(raw),
                 f"{spec.get('name', '')} ({spec.get('obligation_id', '')})",
                 _due(raw),
-                f"{spec.get('form_code', '')} rev {spec.get('current_revision', '')}",
+                _form_of(spec),
                 clause,
                 "", "", "", "",
             ])

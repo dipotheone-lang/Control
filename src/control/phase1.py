@@ -304,12 +304,21 @@ def _golden_gate(e: Evidence) -> GateItem:
     owner = "Ahmed Diab, CEO — D-03 puts these verdicts with him alone"
 
     if not e.golden_cases and not e.golden_pending:
+        # Owner deliberately not the CEO. With nothing pending there is
+        # nothing for him to judge, and naming him against it sent the
+        # bill to the wrong person for as long as the step that builds
+        # the cases did not exist. His time is the constraint from the
+        # moment a batch is issued, and not before.
         return GateItem(
             "golden_set", requirement, BLOCKED,
             "no judged cases and no pending cases — nothing has been built "
-            "to judge", owner, reference,
-            "Build the pending cases from real historical submissions, then "
-            "issue the first batch. An empty set is not a pass (§16).")
+            "to judge, so nothing is waiting on a verdict",
+            "Control — the cases are built from the archive first",
+            reference,
+            "python -m control golden --build --ub-root <UB_ROOT>, then "
+            "--issue for the first batch of 10. An empty set is not a pass "
+            "(§16), and a set that can only exercise C1 is not one either — "
+            "the build states which checks its cases could exercise.")
 
     if not e.golden_cases:
         outstanding = ""

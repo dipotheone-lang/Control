@@ -2129,6 +2129,60 @@ def cmd_golden(args) -> int:
     ledger_path = golden_dir / "worksheets" / "batches.yaml"
     batches = gw.load_ledger(ledger_path)
 
+    if args.build:
+        # The step nothing performed. `--issue` writes batches and
+        # `--apply` reads them back; neither ever put a case into
+        # pending/, so the Phase 1 gate reported the golden set as
+        # BLOCKED on the CEO's time when what was missing was this.
+        from . import golden_build
+        from .config import load_config
+
+        ub_root = Path(args.ub_root) if args.ub_root else None
+        if not ub_root or not ub_root.is_dir():
+            print("--ub-root is required and must exist: the cases are built "
+                  "from documents on the drive.")
+            return 1
+
+        obligations = (load_config(control_root / "config")
+                       .get("obligations") or {}).get("obligations") or []
+        documents = []
+        for path in ub_root.rglob("*"):
+            if path.is_file() and path.suffix.lower() in (
+                    ".xlsx", ".xls", ".docx", ".pdf"):
+                documents.append(
+                    (path, datetime.fromtimestamp(path.stat().st_mtime)))
+
+        owner_folders = {
+            "accounts@ubcsis.com": ["8. Finance"],
+            "hr@ubcsis.com": ["9. HR Department"],
+            "shymaa@ubcsis.com": ["Progress Reports"],
+            "a.elsayed@ubcsis.com": ["14. Construction Management Files"],
+            "hse@ubcsis.com": ["16. Safety Documents"],
+            "info@ubcsis.com": ["3. Purchase Orders", "4. Suppliers POs"],
+        }
+        buildable = golden_build.build(obligations, documents, owner_folders,
+                                       per_obligation=args.per_obligation)
+        cases = golden_build.to_cases(buildable, obligations)
+
+        pending_dir.mkdir(parents=True, exist_ok=True)
+        written = 0
+        for case in cases:
+            target = pending_dir / f"{case['case_id']}.yaml"
+            if target.exists():
+                continue
+            target.write_text(
+                yaml.safe_dump(case, allow_unicode=True, sort_keys=False),
+                encoding="utf-8")
+            written += 1
+
+        for line in golden_build.render(buildable, cases, today):
+            print(line)
+        print(f"\nwritten: {written} pending case(s) to {pending_dir}")
+        if written:
+            print("Next: python -m control golden --issue   "
+                  "(a batch of 10 for the CEO, unanchored — D-03)")
+        return 0
+
     if args.issue:
         pending = gw.load_pending(pending_dir)
         issued = {cid for b in batches for cid in b.case_ids}
@@ -2682,6 +2736,11 @@ def main(argv: list[str] | None = None) -> int:
         "golden",
         help="§13.1 golden set: issue a batch, apply it, or run the gate")
     golden.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    golden.add_argument("--build", action="store_true",
+                        help="build pending cases from documents on the drive "
+                             "(needs --ub-root)")
+    golden.add_argument("--ub-root", default=os.environ.get("UB_ROOT", ""))
+    golden.add_argument("--per-obligation", type=int, default=12)
     golden.add_argument("--issue", action="store_true",
                         help="write the next batch of 10 for the CEO to judge")
     golden.add_argument("--apply", default="",
