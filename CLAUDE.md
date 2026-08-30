@@ -922,4 +922,4 @@ Findings from the second-round review (`docs/CHARTER-REVIEW-v4.2.md`) and where 
 
 ---
 
-*End of charter — v4.10*
+*End of charter — v4.11*
