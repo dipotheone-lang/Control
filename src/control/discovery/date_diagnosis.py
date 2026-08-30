@@ -25,9 +25,14 @@ It separates the three explanations that look identical from outside:
    to be paired.** That is the clause-window question, and it is the
    only one of the three the boundary logic can answer.
 
-**Nothing here reads a confidential document.** It works on cached text,
-which is retained for ordinary documents only (D-14), so confidential
-contracts are absent by construction rather than by filtering.
+**Nothing here reads a confidential document.** Ordinary documents are
+measured from their cached text. Client-confidential contracts retain no
+text at all (D-14), so they are counted from a shape histogram taken
+while the text was in hand and then dropped — the same shape as D-05
+itself, which keeps a date and discards the clause around it. They are
+reported apart, because the question they answer is different: whether
+the exception granted for the largest clients is delivering the
+guarantee expiries it was granted for.
 
 **Nothing here prints document text.** A date shape is reported as its
 shape — `NN.NN.NNNN` — so the report says what the estate writes without
@@ -35,39 +40,12 @@ reproducing what any document says (§12.1.2).
 """
 
 import json
-import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import date_shapes
 from .stage_c import _DATE_PATTERNS, _parse_date
-
-# Deliberately broader than _DATE_PATTERNS: this is looking for things a
-# human would read as a date, including the ones the engine cannot parse.
-# That difference is the whole measurement.
-_CANDIDATES = (
-    re.compile(r"\d{1,4}\s*[./\-]\s*\d{1,2}\s*[./\-]\s*\d{2,4}"),
-    re.compile(r"\d{1,2}\s+[^\W\d_]{3,12}\.?\s+\d{2,4}"),
-    re.compile(r"[^\W\d_]{3,12}\s+\d{1,2},?\s+\d{4}"),
-)
-
-# Digits to N, letters to A: enough to see "NN.NN.NNNN" or "NN AAA NNNN"
-# without carrying a value out of a document.
-_SHAPE = str.maketrans({})
-
-
-def _shape(text: str) -> str:
-    out = []
-    for char in text.strip():
-        if char.isdigit():
-            out.append("N")
-        elif char.isalpha():
-            out.append("A" if char.isascii() else "ع")
-        else:
-            out.append(char)
-    # Collapse runs so "NNNN" and "NN" stay distinct but "AAAAAAA" and
-    # "AAAA" do not — the month name's length is not the point.
-    return re.sub(r"A{2,}", "A+", re.sub(r"ع{2,}", "ع+", "".join(out)))
 
 
 @dataclass
@@ -82,6 +60,17 @@ class Diagnosis:
     parsed_shapes: Counter = field(default_factory=Counter)
     terms: int = 0
     terms_in_documents_with_no_date: int = 0
+    # Client-confidential contracts retain no text (D-14), so they can
+    # only be counted from statistics taken during the scan. Reported
+    # apart because the D-05 exception exists for them specifically, and
+    # whether it is working is a different question from whether the
+    # ordinary folders parse.
+    confidential_documents: int = 0
+    confidential_terms_seen: int = 0
+    confidential_terms_dated: int = 0
+    confidential_unparsed_shapes: Counter = field(default_factory=Counter)
+    confidential_parsed: int = 0
+    confidential_unparsed: int = 0
     terms_dated: int = 0
     # Terms that are undated in a document which does contain a parseable
     # date somewhere. These are the only ones the clause window could
@@ -102,7 +91,21 @@ def diagnose(cache_dir: Path) -> Diagnosis:
             continue
         text = payload.get("text")
         if not text:
-            continue                      # confidential (D-14), or unreadable
+            # Confidential (D-14) or unreadable. A confidential contract
+            # carries statistics taken while its text was in hand; that
+            # is the only trace of it there will ever be, and without it
+            # the population D-05 exists for is invisible.
+            shapes = payload.get("date_shapes")
+            if shapes and payload.get("d05"):
+                result.confidential_documents += 1
+                result.confidential_terms_seen += payload.get("terms_seen", 0)
+                result.confidential_terms_dated += payload.get("terms_dated", 0)
+                result.confidential_parsed += sum(
+                    (shapes.get("parsed") or {}).values())
+                for name, count in (shapes.get("unparsed") or {}).items():
+                    result.confidential_unparsed_shapes[name] += count
+                    result.confidential_unparsed += count
+            continue
 
         result.documents += 1
         terms = payload.get("terms") or []
@@ -110,13 +113,7 @@ def diagnose(cache_dir: Path) -> Diagnosis:
         dated_terms = sum(1 for t in terms if t.get("found_date"))
         result.terms_dated += dated_terms
 
-        found: list[str] = []
-        for pattern in _CANDIDATES:
-            found.extend(pattern.findall(text) if pattern.groups == 0
-                         else [m.group(0) for m in pattern.finditer(text)])
-        # findall returns tuples when a pattern has groups; these have
-        # none, so the strings come back directly.
-        found = [f if isinstance(f, str) else "".join(f) for f in found]
+        found = date_shapes.candidates(text)
 
         if not found:
             result.documents_with_no_candidate += 1
@@ -129,11 +126,11 @@ def diagnose(cache_dir: Path) -> Diagnosis:
         for candidate in found:
             if _parse_date(candidate):
                 result.parsed += 1
-                result.parsed_shapes[_shape(candidate)] += 1
+                result.parsed_shapes[date_shapes.shape(candidate)] += 1
                 document_has_parseable = True
             else:
                 result.unparsed += 1
-                result.unparsed_shapes[_shape(candidate)] += 1
+                result.unparsed_shapes[date_shapes.shape(candidate)] += 1
 
         if document_has_parseable:
             result.terms_undated_in_dated_documents += len(terms) - dated_terms
@@ -199,6 +196,29 @@ def render(result: Diagnosis) -> str:
         lines += ["", "  SHAPES IT DOES PARSE:"]
         for shape, count in result.parsed_shapes.most_common(6):
             lines.append(f"    {count:>6}  {shape}")
+
+    if result.confidential_documents:
+        lines += [
+            "",
+            "CLIENT-CONFIDENTIAL CONTRACTS — counted apart, and why",
+            f"  {result.confidential_documents} contract(s) read under D-05. "
+            f"{result.confidential_terms_seen} term(s) found in them, "
+            f"{result.confidential_terms_dated} dated.",
+            "      These retain no text (D-14), so nothing about them can be",
+            "      measured after the fact — these counts were taken while the",
+            "      text was in hand and the text dropped. They are the",
+            "      population D-05 exists for: the largest clients, and the",
+            "      guarantee expiries §2.2 calls the most expensive class of",
+            "      miss. A low dated count here is not a finding about a",
+            "      folder. It is the exception failing to deliver the thing it",
+            "      was granted for.",
+            f"  {result.confidential_parsed} date(s) parsed, "
+            f"{result.confidential_unparsed} not.",
+        ]
+        if result.confidential_unparsed_shapes:
+            lines.append("  SHAPES THEY WRITE THAT NOTHING PARSES:")
+            for name, count in result.confidential_unparsed_shapes.most_common(8):
+                lines.append(f"    {count:>6}  {name}")
 
     lines += [
         "",

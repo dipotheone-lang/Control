@@ -49,6 +49,8 @@ from dataclasses import dataclass, field, fields
 from datetime import date, datetime
 from pathlib import Path
 
+from . import date_shapes
+
 READABLE_SUFFIXES = {".pdf", ".docx", ".txt", ".md"}
 # Rendered documents Control cannot read as text without OCR (§5.5).
 SCANNED_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
@@ -69,7 +71,10 @@ _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun",
 # this fails on the calendar rather than entering a register.
 _DATE_PATTERNS = (
     re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b"),
-    re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b"),
+    # `2026/11/30` — 199 occurrences, the largest unparsed shape in the
+    # estate after the dotted form was fixed. ISO order with slashes,
+    # and unambiguous because a four-digit year cannot be a day.
+    re.compile(r"\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b"),
     # The optional stop lets an abbreviated month through: `12 Sept. 2021`
     # is written that way and was rejected on the punctuation alone. The
     # month itself is matched on its first three letters, so the
@@ -854,6 +859,20 @@ def _process_one(path: Path, relative: str, confidential_clients: list[str],
         return payload
 
     terms = find_terms(text, relative)
+
+    # Taken while the text is in hand, because for a confidential
+    # document there is no later. D-14 retains no text for those, so
+    # without this nothing about them can ever be measured — and they
+    # are the population that matters most: the D-05 exception exists to
+    # catch guarantee expiries for the largest clients, and whether it
+    # is working is not otherwise observable. Counts only; no date, no
+    # clause, nothing traceable to content (§12.1.2).
+    parsed_shapes, unparsed_shapes = date_shapes.histogram(text, _parse_date)
+    payload["date_shapes"] = {"parsed": parsed_shapes,
+                              "unparsed": unparsed_shapes}
+    payload["terms_seen"] = len(terms)
+    payload["terms_dated"] = sum(1 for term in terms if term.found_date)
+
     if confidential:
         # D-05: the value and its reference may be kept; the clause text
         # may not. Redact at the point of capture, not at the point of

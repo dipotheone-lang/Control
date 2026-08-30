@@ -98,3 +98,60 @@ def test_a_confidential_document_is_absent_by_construction(tmp_path):
 def test_an_empty_cache_says_so_rather_than_reporting_zero_problems(tmp_path):
     text = render(diagnose(tmp_path / "nothing"))
     assert "No cached document text to diagnose" in text
+
+
+def test_a_confidential_contract_is_counted_without_retaining_its_text(tmp_path):
+    """The population the whole exception exists for, and the one that
+    was invisible.
+
+    957 documents produced 525 terms and two dated ones. The diagnosis
+    covered 684 of them, because a client-confidential contract retains
+    no text under D-14 — so the 208 read under D-05, the largest
+    clients' contracts and the guarantees §2.2 calls the most expensive
+    class of miss, could not be measured at all. Their counts are now
+    taken while the text is in hand and the text dropped, which is the
+    same shape as D-05 itself: keep the derived value, discard the
+    clause.
+    """
+    directory = tmp_path / "stage-c-cache"
+    directory.mkdir()
+    (directory / "c.json").write_text(json.dumps({
+        "relative": "KNAUF/agreement.pdf", "outcome": "terms", "text": None,
+        "d05": True, "terms": [], "terms_seen": 7, "terms_dated": 1,
+        "date_shapes": {"parsed": {"NN/NN/NNNN": 3},
+                        "unparsed": {"NNNN/NN/NN": 12}}}), encoding="utf-8")
+    (directory / "o.json").write_text(json.dumps({
+        "relative": "7. Suppliers/x.txt", "outcome": "terms",
+        "text": "Performance bond valid until 30/11/2026.",
+        "terms": [{"kind": "GUARANTEE_EXPIRY", "found_date": "2026-11-30"}]}),
+        encoding="utf-8")
+
+    result = diagnose(directory)
+    assert result.confidential_documents == 1
+    assert result.confidential_terms_seen == 7
+    assert result.confidential_terms_dated == 1
+    assert result.confidential_unparsed_shapes["NNNN/NN/NN"] == 12
+    # And it stays out of the ordinary counts, which answer a different
+    # question: whether the readable folders parse.
+    assert result.documents == 1
+    assert result.terms == 1
+
+    text = render(result)
+    assert "1 contract(s) read under D-05" in text
+    assert "7 term(s) found in them, 1 dated" in text
+
+
+def test_the_confidential_section_carries_no_document_content(tmp_path):
+    directory = tmp_path / "stage-c-cache"
+    directory.mkdir()
+    (directory / "c.json").write_text(json.dumps({
+        "relative": "KNAUF/agreement.pdf", "outcome": "terms", "text": None,
+        "d05": True, "terms": [], "terms_seen": 3, "terms_dated": 0,
+        "date_shapes": {"parsed": {}, "unparsed": {"NNNN/NN/NN": 4}}}),
+        encoding="utf-8")
+    (directory / "o.json").write_text(json.dumps({
+        "relative": "x.txt", "outcome": "terms", "text": "bond 30/11/2026",
+        "terms": []}), encoding="utf-8")
+    text = render(diagnose(directory))
+    assert "NNNN/NN/NN" in text
+    assert "KNAUF" not in text
