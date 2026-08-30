@@ -330,3 +330,73 @@ def test_repo_config_reports_itself_as_unprotected_here():
     data = yaml.safe_load((REPO_CONFIG / "backup.yaml").read_text(encoding="utf-8"))
     lines = continuity_lines(data, on_date=date(2026, 8, 16), env={})
     assert any("NOT CONFIGURED" in line for line in lines)
+
+
+# ---- finding the destination without trusting the environment ---------
+#
+# `OneDriveCommercial` and `OneDrive` are set for the interactive session
+# that signed in. A scheduled task, a service, or a shell opened before
+# sign-in does not inherit them — so a check reading only the environment
+# reports "not configured" on the machine where the folder is sitting
+# there. The same defect the OCR language path had, one variable over.
+
+ONEDRIVE = {"destination": {"path": None, "auto_detect": "onedrive",
+                            "subfolder": "UBCSIS-Control-Backup"}}
+
+
+def test_the_environment_variable_is_used_when_it_is_there(tmp_path):
+    from control.backup import resolve_destination
+
+    assert resolve_destination(
+        ONEDRIVE, {"OneDriveCommercial": str(tmp_path)}
+    ) == tmp_path / "UBCSIS-Control-Backup"
+
+
+def test_the_folder_is_found_on_disk_when_the_variable_is_absent(tmp_path):
+    from control.backup import resolve_destination
+
+    (tmp_path / "OneDrive - UBCSIS").mkdir()
+    assert resolve_destination(
+        ONEDRIVE, {"USERPROFILE": str(tmp_path)}
+    ) == tmp_path / "OneDrive - UBCSIS" / "UBCSIS-Control-Backup"
+
+
+def test_two_synced_tenants_are_refused_rather_than_picked_between(tmp_path):
+    """Picking one would put the company's records in whichever sorted
+    first (§1.1)."""
+    from control.backup import describe_destination, resolve_destination
+
+    (tmp_path / "OneDrive - UBCSIS").mkdir()
+    (tmp_path / "OneDrive - Other").mkdir()
+    env = {"USERPROFILE": str(tmp_path)}
+
+    assert resolve_destination(ONEDRIVE, env) is None
+    reason = describe_destination(ONEDRIVE, env)
+    assert "2 OneDrive folders" in reason
+    assert "set destination.path to say which" in reason
+
+
+def test_the_three_reasons_for_no_destination_are_told_apart():
+    """"NOT CONFIGURED" was true of a config that never asked, a machine
+    with no OneDrive, and one with two — three different fixes behind one
+    message."""
+    from control.backup import describe_destination
+
+    never_asked = describe_destination({"destination": {"path": None}}, {})
+    assert "nothing was asked to look anywhere" in never_asked
+
+    no_profile = describe_destination(ONEDRIVE, {})
+    assert "no USERPROFILE" in no_profile
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as empty:
+        absent = describe_destination(ONEDRIVE, {"USERPROFILE": empty})
+    assert "no OneDrive folder under" in absent
+
+
+def test_an_explicit_path_still_wins(tmp_path):
+    from control.backup import describe_destination, resolve_destination
+
+    config = {"destination": {"path": str(tmp_path), "auto_detect": "onedrive"}}
+    assert resolve_destination(config, {"OneDrive": "/somewhere/else"}) == tmp_path
+    assert "destination.path in backup.yaml" in describe_destination(config, {})

@@ -70,19 +70,75 @@ def resolve_destination(config: dict | None, env: dict | None = None) -> Path | 
     data = (config or {}).get("destination") or {}
     env = os.environ if env is None else env
 
-    explicit = data.get("path")
-    if explicit:
-        base = Path(str(explicit))
-    elif str(data.get("auto_detect") or "").lower() == "onedrive":
-        found = env.get("OneDriveCommercial") or env.get("OneDrive")
-        if not found:
-            return None
-        base = Path(found)
-    else:
+    base, _ = _resolve_base(data, env)
+    if base is None:
         return None
-
     subfolder = data.get("subfolder")
     return base / str(subfolder) if subfolder else base
+
+
+def _onedrive_on_disk(env: dict) -> tuple[Path | None, str]:
+    """Find the OneDrive folder without trusting the environment.
+
+    `OneDriveCommercial` and `OneDrive` are set for the interactive
+    session that signed in. A scheduled task, a service, or a shell
+    opened before sign-in does not inherit them — so a check that reads
+    only the environment reports "not configured" on the same machine
+    where the folder is sitting there. The same defect the OCR language
+    path had, one variable over.
+    """
+    profile = env.get("USERPROFILE")
+    if not profile:
+        return None, "no USERPROFILE, so no user folder to look in"
+    home = Path(profile)
+    if not home.is_dir():
+        return None, f"USERPROFILE {home} is not a directory"
+
+    commercial = sorted(p for p in home.glob("OneDrive - *") if p.is_dir())
+    if len(commercial) == 1:
+        return commercial[0], f"found on disk at {commercial[0]}"
+    if len(commercial) > 1:
+        # Two tenants synced to one profile. Picking one would put the
+        # company's records in whichever sorted first (§1.1).
+        names = ", ".join(p.name for p in commercial)
+        return None, (f"{len(commercial)} OneDrive folders under {home} "
+                      f"({names}) — set destination.path to say which")
+    personal = home / "OneDrive"
+    if personal.is_dir():
+        return personal, f"found on disk at {personal}"
+    return None, (f"no OneDrive folder under {home} and neither "
+                  "OneDriveCommercial nor OneDrive is set in this process")
+
+
+def _resolve_base(data: dict, env: dict) -> tuple[Path | None, str]:
+    """(base path, how it was resolved or why it was not)."""
+    explicit = data.get("path")
+    if explicit:
+        return Path(str(explicit)), "destination.path in backup.yaml"
+
+    mode = str(data.get("auto_detect") or "").lower()
+    if mode != "onedrive":
+        return None, (
+            "destination.path is not set and destination.auto_detect is "
+            f"{data.get('auto_detect')!r} — nothing was asked to look "
+            "anywhere")
+
+    found = env.get("OneDriveCommercial") or env.get("OneDrive")
+    if found:
+        return Path(found), "OneDrive environment variable"
+    return _onedrive_on_disk(env)
+
+
+def describe_destination(config: dict | None, env: dict | None = None) -> str:
+    """Why there is no destination — naming what was tried.
+
+    "NOT CONFIGURED" is true of a config that never asked, of a machine
+    where OneDrive is absent, and of one where two tenants are synced.
+    Those need three different fixes, and a single message sent the
+    reader to the wrong one.
+    """
+    data = (config or {}).get("destination") or {}
+    return _resolve_base(data, os.environ if env is None else env)[1]
 
 
 # ---- the key ---------------------------------------------------------
@@ -164,9 +220,10 @@ def create_backup(control_root: Path, config: dict, *, on_date: date,
     destination = resolve_destination(config, env)
     if destination is None:
         result.gaps.append(
-            "backup destination NOT CONFIGURED — set destination.path in "
-            "backup.yaml, or run on a machine where OneDrive is signed in. "
-            "Nothing was written (§1.1: a visible gap, not a silent one)."
+            "backup destination NOT CONFIGURED: "
+            f"{describe_destination(config, env)}. Set destination.path in "
+            "backup.yaml to fix it outright. Nothing was written "
+            "(§1.1: a visible gap, not a silent one)."
         )
         return result
 
