@@ -1870,6 +1870,66 @@ def cmd_register_obligations(args) -> int:
     return 0
 
 
+def cmd_authority(args) -> int:
+    """Delegated limits from the delegation documents — O-02, §3.2.
+
+    D-06's interim was to observe a month of commitment volume so the
+    thresholds came from evidence. Phase 0 records no transactions, so
+    the review due 16-Sep-2026 would arrive with the evidence it started
+    with. `13. Delegations` is the company's own answer to the same
+    question and predates the interim.
+
+    Proposes only. §14.2 Tier C: authority limits are never applied by
+    the system.
+    """
+    from .discovery import authority_proposal as ap
+    from .discovery.stage_c import extract_text
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+    sources = [Path(s.strip()) for s in str(args.source).split(",") if s.strip()]
+    missing = [s for s in sources if not s.is_dir()]
+    sources = [s for s in sources if s.is_dir()]
+    for s in missing:
+        print(f"source folder not found: {s}")
+    if not sources:
+        print("no source folder exists. Nothing read.")
+        return 1
+
+    proposal = ap.Proposal()
+    for root in sources:
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in (
+                    ".pdf", ".docx", ".txt", ".md"):
+                continue
+            text = extract_text(path)
+            proposal.documents_read += 1
+            if not text:
+                proposal.documents_with_no_amount += 1
+                continue
+            found = ap.extract(text, path.relative_to(root).as_posix())
+            if not found:
+                proposal.documents_with_no_amount += 1
+            proposal.candidates.extend(found)
+
+    discovery = control_root / "discovery"
+    discovery.mkdir(parents=True, exist_ok=True)
+    (discovery / "PROPOSED-AUTHORITY.md").write_text(
+        ap.render(proposal, today), encoding="utf-8")
+    (discovery / "PROPOSED-AUTHORITY.yaml").write_text(
+        ap.to_yaml(proposal, today), encoding="utf-8")
+
+    print(f"{proposal.documents_read} document(s) read, "
+          f"{len(proposal.candidates)} candidate limit(s) found")
+    for item in sorted(proposal.candidates, key=lambda c: -c.amount)[:10]:
+        print(f"  {item.amount:>14,.0f} {item.currency:<10} {item.source[:44]}")
+    print(f"\nworksheet: {discovery / 'PROPOSED-AUTHORITY.md'}")
+    print("Nothing is in force. §14.2 Tier C puts authority limits with a "
+          "human — copy a\nvalue into config/authority.yaml by hand, with "
+          "the holder you decide.")
+    return 0
+
+
 def cmd_advisor_brief(args) -> int:
     """The tax advisor brief — execution order step 5.
 
@@ -2862,6 +2922,17 @@ def main(argv: list[str] | None = None) -> int:
     diagnose.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     diagnose.set_defaults(fn=cmd_diagnose_dates)
 
+    authority = sub.add_parser(
+        "authority",
+        help="O-02: read candidate delegated limits out of the delegation "
+             "documents (proposes only — §14.2 Tier C)")
+    authority.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    authority.add_argument("--source", default="",
+                           help="folder(s) holding delegation documents, "
+                                "comma-separated")
+    authority.add_argument("--today", default="", help="ISO date, for testing")
+    authority.set_defaults(fn=cmd_authority)
+
     manuals = sub.add_parser(
         "manuals",
         help="Stage C: find the governing manuals, for CEO confirmation")
@@ -2913,7 +2984,7 @@ def main(argv: list[str] | None = None) -> int:
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "analyse", "init", "contracts", "registers",
                          "classify", "classify-scan", "backup", "manuals",
-                         "terms", "golden", "disputes", "diagnose-dates")
+                         "terms", "golden", "disputes", "diagnose-dates", "authority")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
