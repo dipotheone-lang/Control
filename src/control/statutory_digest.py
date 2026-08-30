@@ -289,7 +289,14 @@ def render_missing(statutory_config: dict | None, today: date) -> str:
             f"      register:  rule: {row.get('rule')}",
         ]
         if row.get("answered_by"):
-            lines.append(f"      answered by: {row['answered_by']}")
+            # `answered_by` routes the obligation's *subject* away from
+            # the tax advisor (advisor.py). Printing it as "answered by"
+            # under a missing *date* said the wrong thing: on
+            # STAT-PDPL-REGS the subject is counsel's and the date is an
+            # internal scheduling choice, and the page read as though
+            # counsel had to be asked for a calendar entry.
+            lines.append(f"      routing:   subject sits with "
+                         f"{row['answered_by']}, not the tax advisor")
         lines += [
             f"      owner:     {row.get('owner') or 'NOT PROVIDED'}"
             f"   preparer: {row.get('preparer') or 'NOT PROVIDED'}",

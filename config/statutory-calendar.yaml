@@ -191,6 +191,16 @@ obligations:
   # pending (D-40), and every PDPL answer in the governance pack becomes
   # reviewable on the day they issue. A quarterly review is the cheapest
   # way to not miss that.
+  #
+  # Two different things are outstanding here and they have different
+  # owners. WHEN the review happens is an internal scheduling choice —
+  # pick a date and the quarterly cadence anchors from it. WHAT the
+  # review is about is counsel's, which is what `answered_by` records
+  # and why this row stays out of the tax advisor brief.
+  #
+  # The `open_question` below was missing until 30-Aug-2026. Every other
+  # rule awaiting a date carried one, so this one was the only class 1
+  # obligation waiting on an answer that nothing was asking for.
   - id: STAT-PDPL-REGS
     name: PDPL executive regulations — watch for issue
     # Not a tax matter. The advisor brief only carries rows a tax
@@ -205,6 +215,10 @@ obligations:
     provenance: ceo_stated
     decision: D-40
     mechanism: watch
+    open_question: >-
+      first quarterly review date — an internal scheduling choice, not a
+      question for counsel; counsel answers what the review is about,
+      not when it starts
     on_issue: >
       Every PDPL position recorded under D-52 becomes reviewable. Raise
       as a CEO decision, not as a configuration change.

@@ -165,3 +165,53 @@ def test_the_missing_page_is_bilingual():
     assert "الفئة 1 — التواريخ الناقصة" in text
     assert "النص العربي هو النص المعتمد" in text
     assert "٢٠٢٦" not in text
+
+
+# ---- the live register ------------------------------------------------
+
+def _live_calendar():
+    import yaml
+
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "config" / "statutory-calendar.yaml"
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def test_every_rule_awaiting_a_date_carries_a_question():
+    """The drift this caught once, asserted so it cannot return.
+
+    The engine classifies a silent rule as awaiting a date; the
+    missing-dates page splits on whether a question is recorded against
+    it. A rule in the first set but not the second is waiting on an
+    answer that nothing is asking for — which is how STAT-PDPL-REGS sat
+    silent with nobody chasing it.
+    """
+    from control.loader import SILENCE_AWAITING_DATE, _no_countdown, parse_due
+    from control.statutory_digest import missing_dates
+
+    config = _live_calendar()
+    awaiting = set()
+    for row in config["obligations"]:
+        due, problem = parse_due(str(row.get("rule") or ""),
+                                 str(row.get("cadence") or ""), TODAY)
+        if due is not None:
+            continue
+        if _no_countdown(row, problem)[0] == SILENCE_AWAITING_DATE:
+            awaiting.add(str(row["id"]))
+
+    answerable, _ = missing_dates(config, TODAY)
+    assert awaiting == {str(r["id"]) for r in answerable}, (
+        "a rule is awaiting a date with no open_question recorded — "
+        "nothing is chasing it")
+
+
+def test_the_routing_field_is_not_read_as_the_holder_of_the_date():
+    """`answered_by` routes the obligation's subject away from the tax
+    advisor. On STAT-PDPL-REGS the subject is counsel's and the date is
+    an internal scheduling choice, so printing it as "answered by" under
+    a missing date said the wrong thing."""
+    from control.statutory_digest import render_missing
+
+    text = render_missing(_live_calendar(), TODAY)
+    assert "subject sits with counsel, not the tax advisor" in text
+    assert "answered by:" not in text
