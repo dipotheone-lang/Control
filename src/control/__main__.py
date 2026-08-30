@@ -699,6 +699,8 @@ def cmd_doctor(args) -> int:
     import platform
     import shutil
 
+    from .config import load_config
+
     ok = True
     print(f"platform: {platform.system()} {platform.release()}")
     print(f"python:   {platform.python_version()}")
@@ -746,6 +748,50 @@ def cmd_doctor(args) -> int:
     else:
         print("\nNo CONTROL_ROOT given (--control-root or $CONTROL_ROOT)")
         ok = False
+
+    # Outlook, actually asked rather than assumed. D-08 puts the engine
+    # on the COM route for DISCOVERY and DRY_RUN, and every mailbox
+    # Control reads comes through it.
+    print("\nOUTLOOK (D-08) — the route the mailbox scan uses:")
+    try:
+        from .outlook import available_mailboxes
+
+        mailboxes, problem = available_mailboxes()
+        windows = platform.system() == "Windows"
+        if problem:
+            # Only a failure where the route could work. Off Windows
+            # this is informational: Outlook is legitimately absent and
+            # §5.1 puts the engine on Graph there anyway, so counting it
+            # against READY would report a machine as broken for not
+            # being the laptop.
+            ok = ok and not windows
+            print(f"  [{'MISSING' if windows else 'n/a  '}] {problem[:180]}")
+            print("            Classic Outlook for Windows must be installed, "
+                  "signed in and running.")
+            print("            The 'new Outlook' app exposes no COM "
+                  "interface at all — in classic Outlook,")
+            print("            File → Options is the giveaway; new Outlook "
+                  "has no such menu.")
+        elif not mailboxes:
+            ok = ok and not windows
+            print("  [MISSING] Outlook answered and the profile holds no "
+                  "mailbox Control can read.")
+        else:
+            print(f"  [ok]   {len(mailboxes)} mailbox(es) in the profile")
+            scoped = str((load_config(control_root / "config")
+                          .get("mailbox-scope") or {}).get("mailboxes") or []) \
+                if control_root and (control_root / "config").is_dir() else ""
+            for address in mailboxes:
+                marker = "reads" if address in scoped else "     "
+                print(f"           {marker}  {address}")
+            print("           'reads' marks a mailbox in the configured "
+                  "scope (§3.1a). The rest are")
+            print("           visible to the profile and out of scope — "
+                  "seeing a mailbox is not")
+            print("           authority to read it, which is D-08's whole "
+                  "objection to this route.")
+    except Exception as e:                      # noqa: BLE001
+        print(f"  [warn] could not test the Outlook route: {str(e)[:140]}")
 
     # OCR (§5.5). Reported separately and never counted toward READY:
     # its absence does not stop Control running, it decides whether

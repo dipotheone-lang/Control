@@ -86,6 +86,42 @@ def _dispatch_namespace():
         ) from e
 
 
+def available_mailboxes(namespace=None) -> tuple[list[str], str]:
+    """(mailboxes the local profile exposes, why it could not be asked).
+
+    `doctor` reported the Outlook route as ready when `win32com.client`
+    imported — which says a Python package is installed, not that Outlook
+    is reachable, not that it is the classic build with a COM interface
+    at all, and not that the mailbox Control is scoped to is in the
+    profile. Those are three different failures with three different
+    fixes, and all of them looked like "[ok] win32com.client".
+
+    Metadata only: store addresses, never a message. Naming which
+    mailboxes the profile exposes is the same class of fact as §12.1.2
+    permits about a confidential document.
+    """
+    try:
+        namespace = namespace if namespace is not None else _dispatch_namespace()
+    except HaltError as e:
+        return [], str(e)
+
+    found: list[str] = []
+    try:
+        for store in namespace.Folders:
+            for attribute in ("SmtpAddress", "Name", "DisplayName"):
+                value = getattr(store, attribute, "") or ""
+                if "@" in value:
+                    found.append(value.lower())
+                    break
+            else:
+                name = getattr(store, "Name", "")
+                if name:
+                    found.append(f"{name} (no SMTP address on the store)")
+    except Exception as e:                      # noqa: BLE001
+        return found, f"Outlook answered but the profile could not be read: {e}"
+    return found, ""
+
+
 @dataclass
 class _Resolved:
     folder: object
