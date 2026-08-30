@@ -17,11 +17,24 @@ logs/**
 !logs/.gitkeep
 !logs/README.md
 
-# Run transcripts. They carry mailbox scan output — senders, subjects,
-# counts — which is the §12.2 personal data the rest of this file keeps
-# out of git.
-reports/runs/**
-!reports/runs/.gitkeep
+# Everything Control writes into reports/, not just the transcripts.
+#
+# The transcripts carry mailbox scan output — senders, subjects, counts
+# — which is the §12.2 personal data the rest of this file keeps out of
+# git. But so does the rest of the directory, and the narrower rule only
+# ever covered runs/: the weekly and monthly packs under management/
+# name individuals and their filing behaviour, and the daily
+# `statutory-YYYY-MM-DD.txt` names the company's tax deadlines and the
+# people who own them. On the live laptop CONTROL_ROOT *is* the repo
+# checkout, so all of it lands in a tracked directory — the same hole
+# discovery/ had, one directory over.
+#
+# README.md and the .gitkeep files are re-included: the structure is
+# part of the repository, the contents are not.
+reports/**
+!reports/README.md
+!reports/**/
+!reports/**/.gitkeep
 
 # Phase 0 output — the same rule, and the hole this file used to have.
 #
