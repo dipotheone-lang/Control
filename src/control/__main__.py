@@ -50,6 +50,11 @@ def _common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--ub-root", default=os.environ.get("UB_ROOT"),
                         help="UB_ROOT path (env UB_ROOT)")
     parser.add_argument("--run-mode", default=os.environ.get("RUN_MODE", "DISCOVERY"))
+    parser.add_argument("--scope",
+                        default=os.environ.get("OPERATING_SCOPE", "FULL"),
+                        help="FULL (the charter as written) or "
+                             "STATUTORY_ONLY (proposed D-15: class 1 only, "
+                             "no mailbox read)")
     parser.add_argument("--learning-mode",
                         default=os.environ.get("LEARNING_MODE", "OBSERVE"))
     parser.add_argument("--level", type=int, default=None)
@@ -62,9 +67,18 @@ def _startup(args):
     report = run_startup(
         Path(args.control_root), Path(args.ub_root),
         args.run_mode, args.learning_mode, level, date.today().isoformat(),
+        scope=getattr(args, "scope", "FULL"),
     )
     print(f"startup OK — phase {report.state.phase}, level {report.state.level}, "
           f"RUN_MODE={report.state.run_mode}, LEARNING_MODE={report.state.learning_mode}")
+    if report.scope != "FULL":
+        # Printed every run, not once at setup. A narrowed scope that is
+        # not visible in the output reads as a full one that found
+        # nothing (§1.1).
+        from .scope_statutory import summary
+
+        for line in summary(report.scope):
+            print(line)
     print(f"open disputes: {report.open_disputes} | open threads: {report.open_threads} | "
           f"active absences: {report.active_absences}")
     if report.schema_added:

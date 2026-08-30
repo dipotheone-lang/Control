@@ -20,6 +20,7 @@ from . import HaltError
 from .audit import AuditLog
 from .config import Config, load_config
 from .db import connect, ensure_schema, integrity_check
+from .scope_statutory import normalise as normalise_scope
 from .states import State, validate_state
 from .transport import assert_route_permitted
 
@@ -37,6 +38,10 @@ class StartupReport:
     # on a normal run; non-empty means the code was newer than the
     # database and the difference has just been applied (§5.2).
     schema_added: tuple = ()
+    # What Control is permitted to do this run (proposed D-15). FULL is
+    # the charter as written; STATUTORY_ONLY refuses every capability
+    # that would read a mailbox or evaluate a person's work.
+    scope: str = "FULL"
 
 
 def run_startup(
@@ -46,6 +51,7 @@ def run_startup(
     learning_mode: str,
     maturity_level: int,
     today: str,
+    scope: str = "FULL",
 ) -> StartupReport:
     control_root, ub_root = Path(control_root), Path(ub_root)
 
@@ -71,6 +77,12 @@ def run_startup(
     # granted for (§5.1, D-08). Checked here, where the run mode is
     # known, rather than left to be remembered at Phase 2.
     assert_route_permitted(config["transport"], run_mode)
+
+    # The operating scope, validated here with the run mode rather than
+    # trusted at the point of use. An unrecognised value halts: the
+    # default would be the wider scope, and a typo must not widen what
+    # Control may read (§5.6).
+    scope = normalise_scope(scope)
 
     # 2
     db_path = control_root / "data" / "control.db"
@@ -109,12 +121,14 @@ def run_startup(
             "run_mode": run_mode,
             "learning_mode": learning_mode,
             "level": maturity_level,
+            "scope": scope,
             "date": today,
             "chain": detail,
             **({"schema_added": list(schema_added)} if schema_added else {}),
         },
     )
     return StartupReport(
+        scope=scope,
         config=config,
         state=state,
         audit=audit,

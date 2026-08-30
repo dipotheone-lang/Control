@@ -27,6 +27,8 @@ from .enforce import Absence, Action, Enforcer, TrackedItem
 from .evaluate import ObligationSpec, evaluate
 from .hse import HseScope
 from .outbox import Disposition, OutboundMessage, Outbox
+from .scope_statutory import CLASS3_LADDER, MAILBOX_READ
+from .scope_statutory import permits as scope_permits
 from .render import correction_due, render_verdict_reply
 from .startup import StartupReport
 from .transport import MailTransport
@@ -93,6 +95,10 @@ class CycleReport:
     # §5.2 period lock: submissions refused because the period they
     # belong to has already been reported on.
     locked_period_refusals: list[str] = field(default_factory=list)
+    # What this cycle did not do, and why. A narrowed scope that leaves
+    # no trace in the cycle's own output reads as a full sweep that
+    # found nothing (§1.1).
+    gaps: list[str] = field(default_factory=list)
 
 
 def _raise_flag(conn, flag: Flag, report: CycleReport, budget: int | None,
@@ -202,8 +208,24 @@ def run_cycle(
 
     try:
         # ---- inbound ----------------------------------------------------
+        # Refused rather than skipped under a narrowed scope, and refused
+        # here rather than where the transport is built: the same object
+        # carries reading and sending, and a statutory-only run must
+        # still deliver its class 1 alerts. Reading is what the §12
+        # pre-conditions govern; sending a tax deadline to the CFO is
+        # not (proposed D-15).
         processed_ids: list[str] = []
-        for fetched in transport.fetch_unprocessed():
+        may_read = scope_permits(getattr(startup, "scope", "FULL"),
+                                 MAILBOX_READ)
+        if not may_read:
+            audit.append("scope.mailbox_read_withheld",
+                         {"scope": getattr(startup, "scope", "FULL")})
+            report.gaps.append(
+                "Mailbox not read: OPERATING_SCOPE=STATUTORY_ONLY (D-15). "
+                "No submission was evaluated, no external thread tracked "
+                "and no anomaly signal run — that is the scope, not a "
+                "quiet week (§1.1).")
+        for fetched in (transport.fetch_unprocessed() if may_read else ()):
             report.processed += 1
             processed_ids.append(fetched.message_id)
             classification = classifier.classify(InboundMessage(
@@ -398,6 +420,10 @@ def run_cycle(
         if enforcer and tracked_items:
             state = class3_state or {}
             for item in tracked_items:
+                if not scope_permits(getattr(startup, "scope", "FULL"),
+                                     CLASS3_LADDER) and \
+                        item.obligation_class != 1:
+                    continue
                 if item.obligation_class in (1, 2):
                     actions = enforcer.plan_class12(item, today)
                 elif item.obligation_class == 3:
