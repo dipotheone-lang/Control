@@ -57,12 +57,27 @@ echo   Scope        : STATUTORY_ONLY (D-15) - class 1 only, no mailbox read
 echo.
 
 echo == 1 of 3: updating ==
-rem The tracking branch, not a named one: a hardcoded branch stops
-rem updating the day it is merged and deleted, and does so silently.
-git pull --ff-only
-if errorlevel 1 (
-  echo    no update applied - offline, or local edits in the way.
-  echo    Running the version already on disk.
+rem Pull THIS branch from origin by name, rather than whatever upstream
+rem the local branch happens to be tracking.
+rem
+rem On 31-Aug-2026 the operating machine sat 28 commits behind for days
+rem while reporting "Already up to date" on every run: the local branch
+rem was tracking a different remote branch that had not moved, so the
+rem pull was correct and pointed at the wrong place. A silent no-op is
+rem the worst shape an update failure can take, because nothing looks
+rem wrong. Reading the branch name here keeps it from being hardcoded,
+rem which was the original reason for a bare `git pull`.
+for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "BRANCH=%%b"
+if not defined BRANCH set "BRANCH=HEAD"
+if "%BRANCH%"=="HEAD" (
+  echo    detached HEAD - not updating. Check out a branch first.
+) else (
+  echo    branch: %BRANCH%
+  git pull --ff-only origin "%BRANCH%"
+  if errorlevel 1 (
+    echo    no update applied - offline, or local edits in the way.
+    echo    Running the version already on disk.
+  )
 )
 python -m pip install -e . --quiet >nul 2>&1
 
