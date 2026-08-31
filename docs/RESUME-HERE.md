@@ -60,7 +60,7 @@ written down off the laptop.
 |---|---|---|
 | ~~Forward `reports\statutory-ask-*.txt`~~ | the system | **D-62 (31-Aug):** the daily run now sends the register-gap requests itself — internal holders only, weekly, self-terminating. Mohamed Ali gets the STAT-REG/STAT-LIC request on the next run; his answer takes coverage 7 of 13 → 9 of 13 |
 | Verify the 13 rules | a tax advisor — none engaged | O-03. Removes `[UNVERIFIED]` from every line. The two payroll rows first: a wrong monthly date fires twelve wrong alerts a year |
-| The Gmail continuity CC | you | D-04. Goes from draft to real traffic on 8 September. Leave, narrow, or replace |
+| ~~The Gmail continuity CC~~ | decided | **31-Aug-2026: the CEO chose to keep it as it is.** From 8 September the class 1 alerts and D-62 requests CC `contact.ubcsis@gmail.com`, with the D-04 content exclusions unchanged. This confirms D-09's status quo, so no charter amendment is needed; D-09's review date of **16-Nov-2026** stands, and the standing replacement recommendation continues to appear monthly as D-04 requires |
 | Business OneDrive for ubcsis.com | admin | Returns the backup to D-11 as written. The personal account is an accepted interim (D-60) |
 | `united_brothers_outreach` | — | A weekly job on this laptop, outside this repository, sending from the continuity Gmail. The CEO instructed on 31-Aug-2026 that it be ignored; recorded here so the instruction is visible rather than the job forgotten |
 
