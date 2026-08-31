@@ -33,23 +33,31 @@
 Everything else on this page is background. This is the list.
 
 1. **`git pull`** — or just double-click `Run Control.cmd`, which pulls first.
-2. **`python -m control backup --init-key`** — creates the backup
+2. **Bring the decisions across.** `git pull` updates the *repository's*
+   config; Control reads `CONTROL_ROOT`'s. They are different folders
+   (see the paths section below), so a decision committed here does not
+   reach the running system by itself. `python -m control doctor`
+   reports the distance; `python -m control init --adopt` closes what it
+   can safely close and names what it cannot. **A renamed register row
+   needs a hand edit** — adopt only ever adds, so the superseded row
+   stays until it is removed.
+3. **`python -m control backup --init-key`** — creates the backup
    encryption key in Windows Credential Manager. **Write the key it
    prints somewhere off this laptop.** A key that exists only on the
    machine the backup protects against is a coin flip. Until this is
    done, every run reports `BACKUP DID NOT RUN` and continues.
-3. **Plug in E:.** The backup destination is
+4. **Plug in E:.** The backup destination is
    `E:\UBCSIS Co Date Jan 2026\Control-Backup` (D-59). On days the
    drive is out, the run says so and carries on.
-4. **Open classic Outlook and leave it signed in.** Under D-58 it is the
+5. **Open classic Outlook and leave it signed in.** Under D-58 it is the
    route the class 1 alerts leave by. Closed Outlook is not fatal — the
    alert is written `UNDELIVERED` and retried on the next run — but
    nothing reaches anybody while it is shut.
-5. **Double-click `Run Control.cmd`.** Read the horizon; check for
+6. **Double-click `Run Control.cmd`.** Read the horizon; check for
    `NOT DELIVERED` and `REPEATED FAILURE`.
-6. **`scripts\Install-DailyRun.cmd`**, as administrator — registers the
+7. **`scripts\Install-DailyRun.cmd`**, as administrator — registers the
    7am task.
-7. **Forward `reports\statutory-ask-DATE.txt`** — two messages, to
+8. **Forward `reports\statutory-ask-DATE.txt`** — two messages, to
    Hadeer and Mohamed Ali, already written in both languages.
 
 **First alert:** social insurance on 15-Sep enters the T−7 window on
@@ -75,18 +83,34 @@ rediscovering it.
 
 ---
 
-## The two paths, confirmed on the machine
+## THREE paths, not two — corrected 31-Aug-2026
 
 | | |
 |---|---|
-| `CONTROL_ROOT` | `C:\Users\Lape Top Suez\Documents\Control` — the repo checkout |
-| `UB_ROOT` | `E:\UBCSIS Co Date Jan 2026` |
+| **repository** | `C:\Users\Lape Top Suez\Documents\Control` — where `git pull` lands |
+| **`CONTROL_ROOT`** | `C:\Users\Lape Top Suez\Documents\UnitedBrothers\CONTROL` — what Control actually reads and writes |
+| **`UB_ROOT`** | `E:\UBCSIS Co Date Jan 2026` |
 
-**`E:\UBCSIS Co Date Jan 2026\CONTROL` does not exist.** Charter §5.1
-sets `CONTROL_ROOT=<UB_ROOT>/CONTROL`; in practice the repo checkout is
-serving as `CONTROL_ROOT` and everything works. This divergence is
-recorded rather than fixed — moving it is a decision, not a cleanup, and
-it affects where D-11 backups land. Do not "correct" it silently.
+**This file said for days that CONTROL_ROOT was the repo checkout. It is
+not**, and the error was expensive in exactly the way §1.1 warns about:
+a wrong fact that nothing contradicted. It surfaced only when a runner
+printed both paths side by side on 31-Aug-2026.
+
+**The consequence, which is the thing to remember:** `git pull` updates
+the repository's `config/`. Control reads the *other* `config/`. A
+decision committed here does not reach the running system until it is
+adopted — `python -m control doctor` reports the distance and
+`python -m control init --adopt` closes what it safely can.
+
+`E:\UBCSIS Co Date Jan 2026\CONTROL` still does not exist, so §5.1's
+`CONTROL_ROOT=<UB_ROOT>/CONTROL` is still not what the machine does.
+That divergence is recorded rather than fixed — moving it is a decision,
+not a cleanup, and it affects where D-11 backups land. Do not "correct"
+it silently.
+
+The separation is, on balance, right: Phase 0 output and daily reports
+land outside git, which is what the `discovery/` and `reports/` ignore
+rules exist to guarantee even if this ever changes back.
 
 Environment as at 30-Aug-2026: Windows 11, Python 3.13.14, Tesseract
 5.4.0 with `ara`/`eng`/`osd` at `C:\Program Files\Tesseract-OCR`
@@ -97,10 +121,12 @@ names the mailboxes the profile exposes — the previous check confirmed a
 Python package was installed, which is a different fact.
 
 **Classic Outlook is required.** The "new Outlook" app has no COM
-interface at all; `File → Options` is the tell. D-08 permits this route
-in DISCOVERY and DRY_RUN only, and refuses it at startup in SUPERVISED
-and LIVE, because a transport needing a powered laptop with Outlook open
-cannot hold a Phase 2 schedule.
+interface at all; `File → Options` is the tell. D-08 permitted this route
+in DISCOVERY and DRY_RUN only — **superseded by D-58 (30-Aug-2026)**,
+which lets Outlook carry the class 1 alerts under `STATUTORY_ONLY`
+because that scope fetches nothing. The permission is conditional on the
+scope, not the run mode: `OPERATING_SCOPE=FULL` in SUPERVISED still
+halts on the route exactly as D-08 wrote it.
 
 **Claude Code cannot run on this laptop.** The CPU lacks AVX and the
 Bun runtime segfaults on startup. Alternative install methods download
