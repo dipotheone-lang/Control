@@ -24,12 +24,27 @@ destination:
   # OneDrive: the tenant was never provisioned and waiting for it left
   # the audit chain existing only on the laptop.
   #
-  # What this buys and what it does not. It survives the laptop, which
-  # a folder in the user profile would not. It does NOT survive a fire
-  # in the office, and it silently backs up nothing on the days E: is
-  # unplugged — so §13.3's backup-age line is the control that matters
-  # here, not the destination itself. A backup nobody checks the age of
-  # is a hope.
+  # WHAT THIS BUYS — corrected 31-Aug-2026, having actually looked.
+  #
+  # E: is a FIXED volume with 26.4 GB free, not the removable drive the
+  # decision was written assuming. Two consequences, opposite in sign:
+  #
+  #   Better: it is always attached, so the daily backup runs without
+  #   anybody remembering anything. The "backs up nothing on the days
+  #   E: is unplugged" risk recorded in D-59 does not exist.
+  #
+  #   Worse, and unresolved: a fixed volume may be a second physical
+  #   disk or a partition of the same one. If it is a partition, the
+  #   backup does not survive the disk failure or the theft it exists
+  #   to survive — and D-59's claim that it "survives the laptop" is
+  #   then false. `Get-Partition | Select DiskNumber, DriveLetter`
+  #   settles it, and until it does this destination is UNPROVEN rather
+  #   than adequate.
+  #
+  # It does NOT survive a fire in the office either way. §13.3's
+  # backup-age line and the restore test are the controls that matter
+  # here, not the destination: a backup nobody checks the age of is a
+  # hope, and one nobody has restored is a guess.
   #
   # Windows path on purpose: this file is read on the laptop that runs.
   path: E:\UBCSIS Co Date Jan 2026\Control-Backup
