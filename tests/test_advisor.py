@@ -61,7 +61,7 @@ def test_payroll_and_the_corporate_return_come_first(statutory):
     A reviewer's attention is highest on the first thing they meet and
     lowest on the twelfth row."""
     rows, _ = build_rows(statutory, {})
-    assert [r.obligation_id for r in rows[:2]] == list(LEAD_WITH)
+    assert [r.obligation_id for r in rows[:len(LEAD_WITH)]] == list(LEAD_WITH)
 
 
 def test_the_filing_archive_is_requested_in_the_same_message(statutory):
@@ -121,19 +121,35 @@ def test_twelve_filings_against_a_quarterly_rule_is_flagged_in_the_table(
     paths = [f"E:/UB/Tax/Payroll tax {y}-{m:02d}.pdf"
              for y in (2023, 2024, 2025, 2026) for m in range(1, 13)]
     rows, _ = build_rows(statutory, _archive(paths, rules))
-    payroll = next(r for r in rows if r.obligation_id == "STAT-PAYROLL")
-    assert "MORE than quarterly allows" in payroll.observed
+    payroll = next(r for r in rows if r.obligation_id == "STAT-PAYROLL-REM")
+    # The contradiction this check existed to surface was acted on: the
+    # CEO split the row on 30-Aug-2026 into a monthly remittance and a
+    # quarterly return, so twelve filings a year now agree with the
+    # register instead of contradicting it.
+    assert "consistent with monthly" in payroll.observed
 
 
-def test_four_filings_a_year_read_as_consistent_with_quarterly(statutory,
-                                                               rules):
-    """Named by the month of each quarter end — which is what the live
-    archive holds, and what an earlier version refused to compare."""
+def test_four_filings_against_the_monthly_rule_is_flagged(statutory, rules):
+    """The same comparison, pointed the other way. Too few filings for
+    the stated cadence is the direction that hides a missed filing, so
+    it has to read as loudly as too many did."""
     paths = [f"E:/UB/Tax/Payroll tax {y}-{m:02d}.pdf"
              for y in (2023, 2024, 2025, 2026) for m in (3, 6, 9, 12)]
     rows, _ = build_rows(statutory, _archive(paths, rules))
-    payroll = next(r for r in rows if r.obligation_id == "STAT-PAYROLL")
-    assert "consistent with quarterly" in payroll.observed
+    payroll = next(r for r in rows if r.obligation_id == "STAT-PAYROLL-REM")
+    assert "FEWER than monthly would produce" in payroll.observed
+
+
+def test_the_quarterly_return_is_shown_as_unevidenced(statutory, rules):
+    """The cost of the split, stated rather than hidden: the filename
+    markers cannot tell a remittance from a return, so the evidence is
+    attributed to the monthly row and the quarterly one has none.
+    Inventing a marker to separate them would be worse than the gap."""
+    paths = [f"E:/UB/Tax/Payroll tax {y}-{m:02d}.pdf"
+             for y in (2024, 2025) for m in range(1, 13)]
+    rows, _ = build_rows(statutory, _archive(paths, rules))
+    ret = next(r for r in rows if r.obligation_id == "STAT-PAYROLL-RET")
+    assert ret.observed == "no filing evidence found"
 
 
 def test_no_evidence_says_so_rather_than_being_left_blank(statutory):

@@ -104,6 +104,9 @@ class CycleReport:
     # the mode asked for is the system working, and a draft standing in
     # for a send nobody received is not.
     undelivered: list[str] = field(default_factory=list)
+    # Keys that have now failed to deliver more than once. A single miss
+    # is a closed laptop; a repeat is the transport itself.
+    repeatedly_undelivered: list[str] = field(default_factory=list)
 
 
 def _raise_flag(conn, flag: Flag, report: CycleReport, budget: int | None,
@@ -139,11 +142,21 @@ def _dispatch(outbox: Outbox, transport: MailTransport, msg: OutboundMessage,
         # that is carried out of the cycle rather than left in a file.
         if msg.dedupe_key:
             known.add(msg.dedupe_key)
+        # Counted AFTER `submit`, which has already written this attempt's
+        # record — so the count includes it and needs no adjustment.
+        # Three failures on a class 1 alert is a different fact from a
+        # first one: it means the transport is not merely asleep, and a
+        # count nobody sees cannot say so.
+        attempts = outbox.undelivered_attempts(msg.dedupe_key)
         report.undelivered.append(disposition.draft_id)
+        if attempts > 1:
+            report.repeatedly_undelivered.append(
+                f"{msg.dedupe_key}: {attempts} failed attempts")
         audit.append("outbox.undelivered", {
             "kind": msg.kind, "key": msg.dedupe_key,
             "draft_id": disposition.draft_id,
-            "reason": "no transport provisioned (D-08)"})
+            "attempt": attempts,
+            "reason": "no transport available"})
         return
     if disposition.action == "SEND":
         message_id = transport.send(

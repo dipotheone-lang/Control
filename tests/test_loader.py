@@ -390,7 +390,8 @@ def test_the_repo_config_loads_and_reports_exactly_what_is_missing(conn):
     # and every reason is named.
     assert result.approved == 0
     assert {t.item_id for t in result.tracked} == {
-        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-CIT", "STAT-PDPL-REGS"}
+        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-CIT", "STAT-PDPL-REGS",
+        "STAT-PAYROLL-REM", "STAT-PAYROLL-RET"}
     # This used to assert "obligations.yaml is empty". It no longer is:
     # the starter register assigned from the archive on 26-Aug-2026 ships
     # six class 3 rows. None of them is approved, so none is tracked —
@@ -527,8 +528,9 @@ def test_the_provenance_line_distinguishes_nothing_from_unverified():
 
 def test_the_shipped_calendar_alerts_on_the_recurring_obligations():
     """What the execution order's step 1 actually buys, asserted rather
-    than assumed, plus the PDPL review anchor the CEO set on 30-Aug-2026:
-    the five with known dates alert; the rest stay visible gaps naming
+    than assumed, plus the decisions of 30-Aug-2026 — the PDPL review
+    anchor and the payroll split:
+    the seven with known dates alert; the rest stay visible gaps naming
     what each needs."""
     import pathlib
 
@@ -542,7 +544,8 @@ def test_the_shipped_calendar_alerts_on_the_recurring_obligations():
     tracked, gaps = build_statutory(config, date(2026, 8, 18))
 
     assert {t.item_id for t in tracked} == {
-        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-CIT", "STAT-PDPL-REGS"}
+        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-CIT", "STAT-PDPL-REGS",
+        "STAT-PAYROLL-REM", "STAT-PAYROLL-RET"}
 
     # VAT alerts on its operative date, five working days early.
     vat = next(t for t in tracked if t.item_id == "STAT-VAT")

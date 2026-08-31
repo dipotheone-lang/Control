@@ -194,28 +194,63 @@ def test_the_withholding_is_written_to_the_audit_chain(env):
 # are constructed, so a scope enforced only at the fetch had already done
 # the thing §12.2 governs before deciding not to look.
 
-def test_the_narrowed_scope_gets_a_transport_with_no_mailbox():
-    """`_transport_for` must not construct a real transport at all.
+def _report(scope=STATUTORY_ONLY, route="outlook_com"):
+    from types import SimpleNamespace
 
-    Not 'must not fetch' — must not connect. Opening the mailbox is the
-    processing; reading a message afterwards is a second act.
+    return SimpleNamespace(
+        scope=scope,
+        config={"transport": {"route": route},
+                "mailbox-scope": {"control_mailbox": "control@ubcsis.com"}})
+
+
+def test_a_scope_that_neither_reads_nor_sends_gets_no_transport(monkeypatch):
+    """Not 'must not fetch' — must not connect. Opening the mailbox is
+    the processing; reading a message afterwards is a second act."""
+    from types import SimpleNamespace
+
+    from control import scope_statutory
+    from control.__main__ import _transport_for
+    from control.transport import NullTransport
+
+    # D-58 gave this scope sending. Withdraw it and the old contract
+    # must still hold: no transport is constructed at all.
+    monkeypatch.setitem(scope_statutory._WITHHELD,
+                        scope_statutory.TRANSPORT_SEND, "is withdrawn here")
+    transport = _transport_for(_report(), SimpleNamespace(allow_send=False))
+
+    assert isinstance(transport, NullTransport)
+    assert transport.fetch_unprocessed() == []
+
+
+def test_a_send_only_scope_falls_back_instead_of_aborting_the_run():
+    """D-58 makes Outlook the whole route, and Outlook is closed whenever
+    the laptop is. Returning None there produced no alert, no record and
+    nothing to retry — the run did nothing and called it a transport
+    problem. It must degrade to a retryable non-delivery instead.
+
+    (Outlook cannot be constructed in this environment, which is exactly
+    the condition under test.)
     """
     from types import SimpleNamespace
 
     from control.__main__ import _transport_for
     from control.transport import NullTransport
 
-    report = SimpleNamespace(
-        scope=STATUTORY_ONLY,
-        # An Outlook route, which is what the machine actually carries.
-        # If the scope were checked after the route, this is the branch
-        # that would have signed into the mailbox.
-        config={"transport": {"route": "outlook_com"},
-                "mailbox-scope": {"control_mailbox": "control@ubcsis.com"}})
-    transport = _transport_for(report, SimpleNamespace(allow_send=False))
-
+    transport = _transport_for(_report(), SimpleNamespace(allow_send=False))
     assert isinstance(transport, NullTransport)
-    assert transport.fetch_unprocessed() == []
+    assert transport.can_send is False
+
+
+def test_a_reading_scope_still_aborts_when_the_transport_is_absent():
+    """§5.1: an incomplete sweep is a FAILED cycle. Absences recorded
+    from a partial view are not absences, so the fallback above must not
+    apply where the mailbox is actually read."""
+    from types import SimpleNamespace
+
+    from control.__main__ import _transport_for
+
+    assert _transport_for(_report(scope="FULL"),
+                          SimpleNamespace(allow_send=False)) is None
 
 
 def test_the_null_transport_refuses_to_send_rather_than_swallowing_it():
@@ -368,3 +403,45 @@ def test_proceeding_past_a_halt_condition_is_logged(tmp_path):
     startup = next(e for e in entries if e["event"] == "startup")
     assert any("UB_ROOT unreachable" in g
                for g in startup["data"]["proceeded_past"])
+
+
+def test_an_undelivered_alert_is_retried_on_the_next_run(env):
+    """The defect D-58 makes critical.
+
+    An UNDELIVERED record sits in outbox/pending-approval, and
+    `known_dedupe_keys` counted every pending record as already handled.
+    So a laptop closed on T-7 wrote one undelivered alert and then
+    silenced T-3, T-1 and the deadline itself — each later run skipping
+    it as a duplicate and reporting a clean sweep (§2.1, §1.1).
+    """
+    from control.transport import NullTransport
+
+    startup, control_root = env
+    for _ in range(3):
+        report = run_cycle(startup, NullTransport(), control_root, specs={},
+                           tracked_items=[_vat()], enforcer=_enforcer(),
+                           today=date(2026, 8, 13), ceo=CEO, cfo=CFO)
+        assert report.undelivered, "the alert stopped being attempted"
+        assert not report.skipped_duplicates
+
+    # And the run says it is a repeat rather than a first miss: three
+    # failures means the transport is not merely asleep.
+    assert report.repeatedly_undelivered
+    assert "3 failed attempts" in report.repeatedly_undelivered[0]
+
+
+def test_a_delivered_alert_is_still_not_sent_twice(env):
+    """The relaxation is bounded. Idempotency (§1.10) still holds for a
+    message that actually reached somebody."""
+    startup, control_root = env
+    transport = MockTransport([])
+
+    first = run_cycle(startup, transport, control_root, specs={},
+                      tracked_items=[_vat()], enforcer=_enforcer(),
+                      today=date(2026, 8, 13), ceo=CEO, cfo=CFO)
+    second = run_cycle(startup, transport, control_root, specs={},
+                       tracked_items=[_vat()], enforcer=_enforcer(),
+                       today=date(2026, 8, 13), ceo=CEO, cfo=CFO)
+
+    assert first.sent and not second.sent
+    assert second.skipped_duplicates

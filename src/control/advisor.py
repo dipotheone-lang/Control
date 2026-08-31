@@ -30,7 +30,7 @@ from .extraction import (
 )
 
 # Step 5: "Lead with the payroll cycle and the corporate return date."
-LEAD_WITH = ("STAT-PAYROLL", "STAT-CIT")
+LEAD_WITH = ("STAT-PAYROLL-REM", "STAT-PAYROLL-RET", "STAT-CIT")
 
 
 @dataclass(frozen=True)

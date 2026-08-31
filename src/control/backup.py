@@ -410,7 +410,8 @@ def restore_test(config: dict, target: Path,
 # ---- the daily guard -------------------------------------------------
 
 def ensure_daily_backup(control_root: Path, config: dict, *, on_date: date,
-                        env: dict | None = None) -> BackupResult:
+                        env: dict | None = None,
+                        must_succeed: bool = True) -> BackupResult:
     """Make today's backup if it is missing (§5.2, before first write).
 
     Returns a result carrying gaps rather than raising when the
@@ -418,6 +419,13 @@ def ensure_daily_backup(control_root: Path, config: dict, *, on_date: date,
     finding for the report, not a reason to stop a discovery run. A
     *configured* destination that then fails to write does raise —
     at that point something is wrong that silence would hide.
+
+    `must_succeed=False` turns that raise into a loud gap. It is set by
+    the caller for a scope whose whole output is class 1 alerts: a
+    missing encryption key or an unplugged backup drive is a real
+    finding, and losing a day of the record is bad — but it is not as
+    bad as a missed statutory filing, which is what stopping the run
+    would cost. The gap says exactly what failed either way.
     """
     if not ((config or {}).get("schedule") or {}).get("daily"):
         return BackupResult()
@@ -428,7 +436,17 @@ def ensure_daily_backup(control_root: Path, config: dict, *, on_date: date,
         if existing.exists():
             return BackupResult(path=existing)
 
-    result = create_backup(control_root, config, on_date=on_date, env=env)
+    try:
+        result = create_backup(control_root, config, on_date=on_date, env=env)
+    except Exception as e:                              # noqa: BLE001
+        if must_succeed:
+            raise
+        failed = BackupResult()
+        failed.gaps.append(
+            f"BACKUP DID NOT RUN: {str(e)[:300]} — the run continued because "
+            "this scope's output is class 1 alerts and stopping would cost a "
+            "statutory deadline. Today's record is not backed up.")
+        return failed
     if result.written:
         prune(config, on_date=on_date, env=env)
     return result

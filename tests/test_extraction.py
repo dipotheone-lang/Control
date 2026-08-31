@@ -89,7 +89,7 @@ def test_documents_match_the_obligation_they_name(rules):
         "E:/UB/Tax/ضريبة كسب العمل 2026-01.pdf",
     ], rules)
     assert {e.obligation_id for e in found} == {
-        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-PAYROLL"}
+        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-PAYROLL-REM"}
 
 
 def test_a_supplier_invoice_is_not_our_vat_return(rules):
@@ -135,7 +135,7 @@ def test_periods_are_counted_not_documents(rules):
     """The failure this guards would have been a confident wrong answer
     to the single highest-value question in the brief."""
     found = scan_paths(_payroll(12, copies=3), rules)
-    record = observe(found)["STAT-PAYROLL"]
+    record = observe(found)["STAT-PAYROLL-REM"]
     assert record.documents == 12 * 4 * 3
     assert len(record.periods) == 48
     assert record.per_year(MONTHLY)[2025] == 12
@@ -144,17 +144,34 @@ def test_periods_are_counted_not_documents(rules):
 def test_twelve_monthly_payroll_periods_contradict_the_quarterly_rule(
         rules, statutory):
     """The order's own highest-value test: "Twelve means D-23/24 is
-    wrong and eleven obligations are missing"."""
+    wrong and eleven obligations are missing".
+
+    It was right, and it was acted on. The CEO split the row on
+    30-Aug-2026 into a monthly remittance and a quarterly return, so the
+    live register no longer disagrees with twelve filings a year. Both
+    halves are asserted here: the finding is closed against the real
+    config, and the detector that produced it still works.
+    """
     observed = observe(scan_paths(_payroll(12), rules))
-    found = disagreements(statutory, observed)
-    payroll = next(d for d in found if d.obligation_id == "STAT-PAYROLL")
+
+    # Closed: nothing in the shipped register contradicts twelve filings.
+    assert not [d for d in disagreements(statutory, observed)
+                if d.obligation_id.startswith("STAT-PAYROLL")]
+
+    # Intact: put the pre-split rule back and the same evidence still
+    # produces the same finding, with its consequence stated.
+    as_quarterly = {**statutory, "obligations": [
+        {**row, "cadence": "quarterly"} if row["id"] == "STAT-PAYROLL-REM"
+        else row for row in statutory["obligations"]]}
+    found = disagreements(as_quarterly, observed)
+    payroll = next(d for d in found if d.obligation_id == "STAT-PAYROLL-REM")
     assert "quarterly — 4 period(s) a year" in payroll.stated
     assert "2024: 12, 2025: 12" in payroll.observed
     assert "about 8 obligation(s) a year are missing" in payroll.consequence
     # One entry per obligation, not one per contradicting year — a
     # paragraph repeated says nothing the first one did not, and a
     # reader who skims the second stops reading the section.
-    assert len([d for d in found if d.obligation_id == "STAT-PAYROLL"]) == 1
+    assert len([d for d in found if d.obligation_id == "STAT-PAYROLL-REM"]) == 1
     # And it is raised, not acted on.
     assert "raised, not acted on" in payroll.consequence
 
@@ -337,7 +354,7 @@ def test_quarterly_named_filings_are_compared_as_quarters(rules, statutory):
     """
     paths = [f"E:/UB/Tax/Payroll tax Q{q} {y}.pdf"
              for y in (2023, 2024, 2025, 2026) for q in (1, 2, 3, 4)]
-    record = observe(scan_paths(paths, rules))["STAT-PAYROLL"]
+    record = observe(scan_paths(paths, rules))["STAT-PAYROLL-REM"]
     assert record.granularity == QUARTERLY
     assert record.complete_years == {2024: 4, 2025: 4}
     # Four quarterly filings a year agree with a quarterly rule.
@@ -429,6 +446,6 @@ def test_a_coarser_naming_says_so_rather_than_reading_as_agreement(
     observed = observe(scan_paths(paths, rules))
     note = next(n for n in silent_obligations(statutory, observed)
                 if n.startswith("STAT-PAYROLL"))
-    assert "stated quarterly, but the filings are named by year" in note
+    assert "stated monthly, but the filings are named by year" in note
     assert "may contain several filings" in note
     assert "hides how many returns are inside it" in note

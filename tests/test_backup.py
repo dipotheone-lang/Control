@@ -319,17 +319,42 @@ def test_repo_config_records_the_decision():
     assert data["destination"]["auto_detect"] == "onedrive"
     assert data["schedule"]["daily"] is True
     assert data["schedule"]["before_first_write"] is True
-    # Path is null on purpose: set on the machine that runs, not guessed
-    # in a repository (§1.1).
-    assert data["destination"]["path"] is None
     assert data["restore_test"]["last_tested"] is None
+
+    # The path was null on purpose — "set on the machine that runs, not
+    # guessed in a repository". The CEO set it on 30-Aug-2026 (D-59) to
+    # the company drive, after the OneDrive tenant was never provisioned
+    # and the audit chain sat unprotected on one laptop for weeks.
+    #
+    # The original principle is set aside knowingly and only because
+    # there is one machine, and on it CONTROL_ROOT *is* this repository —
+    # so this file is that machine's config, not a guess about someone
+    # else's. A second machine makes it wrong again.
+    assert data["destination"]["path"] == r"E:\UBCSIS Co Date Jan 2026\Control-Backup"
 
 
 def test_repo_config_reports_itself_as_unprotected_here():
-    """On a machine with no OneDrive, the honest answer is 'not backed up'."""
+    """On a machine without that drive, the honest answer is still 'not
+    backed up' — and it names the folder it looked in, so the reader can
+    tell an unplugged drive from a misconfigured path."""
     data = yaml.safe_load((REPO_CONFIG / "backup.yaml").read_text(encoding="utf-8"))
     lines = continuity_lines(data, on_date=date(2026, 8, 16), env={})
-    assert any("NOT CONFIGURED" in line for line in lines)
+    assert any("CONTROL_ROOT is not protected" in line for line in lines)
+    assert any("Control-Backup" in line for line in lines)
+
+
+def test_a_configured_destination_that_cannot_be_written_is_not_silent():
+    """The cost of choosing the company drive: it backs up nothing on
+    the days E: is unplugged. That must read as a finding, never as a
+    quiet success (§1.1)."""
+    from control.backup import ensure_daily_backup
+
+    data = yaml.safe_load((REPO_CONFIG / "backup.yaml").read_text(encoding="utf-8"))
+    result = ensure_daily_backup(REPO_CONFIG.parent, data,
+                                 on_date=date(2026, 8, 16), env={},
+                                 must_succeed=False)
+    assert not result.written
+    assert result.gaps and "BACKUP DID NOT RUN" in result.gaps[0]
 
 
 # ---- finding the destination without trusting the environment ---------

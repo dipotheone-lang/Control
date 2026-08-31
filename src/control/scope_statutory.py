@@ -50,6 +50,12 @@ CLASS3_LADDER = "class3_ladder"
 CLASS2_REGISTERS = "class2_registers"
 LEARNING = "learning"
 STATUTORY_ALERTS = "statutory_alerts"
+# Opening the transport to SEND. Separate from MAILBOX_READ on
+# purpose: D-58 lets Outlook carry class 1 alerts out of this
+# machine while nothing is ever read back in, and one capability
+# covering both would have made that indistinguishable from
+# reopening the mailbox.
+TRANSPORT_SEND = "transport_send"
 
 _WITHHELD = {
     MAILBOX_READ: (
@@ -116,17 +122,28 @@ def summary(scope: str) -> list[str]:
     if normalise(scope) == FULL:
         return ["OPERATING_SCOPE=FULL — the charter as written."]
     return [
-        "OPERATING_SCOPE=STATUTORY_ONLY (D-15, charter v4.11)",
+        "OPERATING_SCOPE=STATUTORY_ONLY (D-15, charter v4.12)",
         "  Doing:     class 1 statutory deadlines — §0's first priority,",
         "             'no statutory deadline is missed'.",
         "  Not doing: report chasing, external SLA, verdicts, anomaly and",
         "             fraud signals, commercial registers, learning.",
-        "  Not read:  any mailbox. That is the basis for operating without",
-        "             the §12 pre-conditions, so it is enforced rather than",
-        "             remembered.",
-        "  Unchanged: §1 in full, §10's external gate, D-08's requirement",
-        "             that Graph carries anything sent on a schedule, and",
+        "  Not read:  any mailbox. Nothing is fetched, classified or",
+        "             evaluated — that is the basis for operating without",
+        "             the §12 pre-conditions, and it is enforced rather",
+        "             than remembered.",
+        "  Sends via: Outlook on this machine (D-58), class 1 alerts only.",
+        "             Opening the transport to send is not reading: no",
+        "             message comes back in. An alert only leaves while",
+        "             the laptop is awake and Outlook is running — when it",
+        "             is not, the alert is written UNDELIVERED and tried",
+        "             again on the next run, never marked sent.",
+        "  Unchanged: §1 in full, §10's external gate — no message ever",
+        "             leaves for an address outside ubcsis.com — and",
         "             §2.1's advisor verification (O-03).",
+        "  Accepted:  D-08 said a transport needing a powered laptop",
+        "             cannot hold a class 1 schedule. That is still true.",
+        "             D-58 accepts it, because the alternative here was",
+        "             no delivery at all rather than Graph.",
         "  Standing:  the §3.2 segregation-of-duties exposure. Narrowing",
         "             the software does not narrow it.",
     ]

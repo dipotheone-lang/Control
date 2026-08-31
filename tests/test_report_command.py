@@ -65,7 +65,7 @@ def test_a_partial_register_reads_as_partial_not_as_clear(root, capsys):
     """
     run(root)
     out = capsys.readouterr().out
-    assert "5 of 12 class 1 obligations have a usable date" in out
+    assert "7 of 13 class 1 obligations have a usable date" in out
     assert "the register is incomplete" in out
 
 

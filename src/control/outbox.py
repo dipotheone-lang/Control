@@ -31,6 +31,11 @@ from . import HaltError
 INTERNAL_DOMAIN = "ubcsis.com"
 BACKUP_CC = "contact.ubcsis@gmail.com"
 
+# Written when §10 asked for a SEND and no transport could carry it.
+# Distinct from PENDING_APPROVAL on purpose: that one is waiting for
+# a person, this one reached nobody and must be attempted again.
+UNDELIVERED = "UNDELIVERED_NO_TRANSPORT"
+
 # D-04: content classes the continuity CC never carries.
 CC_EXCLUDED_CLASSES = {
     "SUSPECTED_FRAUD",
@@ -159,6 +164,14 @@ class Outbox:
         that exists; producing a second one for the same event would put
         two versions of the same report in front of the same person with
         nothing saying which is current.
+
+        UNDELIVERED does NOT count, and the difference matters more than
+        it looks. That record reached nobody — the reason for deduping a
+        pending draft is that a person is already looking at one, and
+        nobody is looking at this. Counting it would mean an alert that
+        failed to send once is never attempted again: a laptop closed on
+        T-7 would silence T-3, T-1 and the deadline itself, and the run
+        would report a clean sweep every time (§1.1, §2.1).
         """
         keys: set[str] = set()
         for folder in (self.sent_dir, self.pending):
@@ -167,10 +180,32 @@ class Outbox:
                     record = json.loads(path.read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     continue
+                if record.get("status") == UNDELIVERED:
+                    continue
                 key = record.get("dedupe_key")
                 if key:
                     keys.add(key)
         return keys
+
+    def undelivered_attempts(self, dedupe_key: str) -> int:
+        """How many times delivery of this message has already failed.
+
+        Reported rather than counted silently: three failed attempts on a
+        class 1 alert is a different fact from a first one, and it is the
+        signal that the transport is not merely asleep.
+        """
+        if not dedupe_key:
+            return 0
+        attempts = 0
+        for path in self.pending.glob("*.json"):
+            try:
+                record = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (record.get("status") == UNDELIVERED
+                    and record.get("dedupe_key") == dedupe_key):
+                attempts += 1
+        return attempts
 
     def submit(self, msg: OutboundMessage, already_sent: set[str] | None = None,
                *, can_send: bool = True) -> Disposition:
@@ -197,7 +232,7 @@ class Outbox:
             # deviation is returned for the caller to report. A class 1
             # alert that became a draft has alerted nobody, and that is
             # a finding, not a quiet success (§1.1).
-            return self._write_draft(msg, status="UNDELIVERED_NO_TRANSPORT",
+            return self._write_draft(msg, status=UNDELIVERED,
                                      action="UNDELIVERED")
         return self._write_draft(msg, status="PENDING_APPROVAL", action="DRAFT")
 

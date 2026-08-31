@@ -1134,7 +1134,14 @@ def cmd_cycle(args) -> int:
     # the record it is about to change does not proceed silently.
     backup_config = yaml.safe_load(
         (control_root / "config" / "backup.yaml").read_text(encoding="utf-8")) or {}
-    backup = ensure_daily_backup(control_root, backup_config, on_date=today)
+    backup = ensure_daily_backup(
+        control_root, backup_config, on_date=today,
+        # A scope whose only output is class 1 alerts does not stop for a
+        # backup failure. An unplugged drive or a missing key is a real
+        # finding and is reported as one — but losing a day of the record
+        # costs less than a missed statutory filing (D-15).
+        must_succeed=scope_permits(getattr(report, "scope", "FULL"),
+                                   CLASS3_LADDER))
     for gap in backup.gaps:
         print(f"BACKUP GAP: {gap}")
     if backup.written and backup.files:
@@ -1209,6 +1216,9 @@ def cmd_cycle(args) -> int:
         print("                  UNDELIVERED_NO_TRANSPORT, and they stay "
               "undelivered until Graph")
         print("                  is provisioned: scripts/provision-graph.ps1")
+        for line in result.repeatedly_undelivered:
+            print(f"  REPEATED FAILURE: {line} — a single miss is a closed "
+                  "laptop; a repeat is the transport.")
     # What the sweep did not do. `processed: 0` above is true of a
     # mailbox that was empty and of one that was never opened, and those
     # are opposite facts (§1.1) — so the reason is printed beside the
@@ -1285,18 +1295,45 @@ def _role(people: dict, tier: int, marker: str = "") -> str:
 def _transport_for(report, args):
     """Outlook in DISCOVERY/DRY_RUN, Graph beyond — D-08 already refused
     an illegal combination at startup, so this only picks."""
-    from .scope_statutory import MAILBOX_READ
+    from .scope_statutory import MAILBOX_READ, TRANSPORT_SEND
     from .scope_statutory import permits as scope_permits
 
-    if not scope_permits(getattr(report, "scope", "FULL"), MAILBOX_READ):
-        # Before the route is read, because both real transports sign
-        # into a mailbox when they are constructed. A scope enforced
-        # only at the fetch would have opened the mailbox and then
-        # declined to look in it, and it is the opening that §12.2 is
-        # about (D-15).
-        from .transport import NullTransport
+    from .transport import NullTransport
 
+    scope = getattr(report, "scope", "FULL")
+    reads = scope_permits(scope, MAILBOX_READ)
+    sends = scope_permits(scope, TRANSPORT_SEND)
+
+    if not reads and not sends:
+        # A scope that neither reads nor sends gets no transport at all,
+        # rather than one it declines to use: both real transports sign
+        # into a mailbox when they are constructed, and it is the opening
+        # that §12.2 is about.
         return NullTransport()
+
+    def unavailable(reason: str):
+        """No transport this run — fatal, or retryable, by scope.
+
+        A scope that READS must stop: §5.1 makes an incomplete sweep a
+        FAILED cycle, because absences recorded from a partial view are
+        not absences.
+
+        A scope that only SENDS must not. Under D-58 Outlook is the whole
+        route, and Outlook is closed whenever the laptop is. Aborting
+        there produced no alert, no record and nothing to retry — the run
+        simply did nothing and reported "no transport available", which
+        reads like a fetching problem. With a NullTransport the alert is
+        written UNDELIVERED, reported, and attempted again next run.
+        """
+        print(f"transport unavailable: {reason[:140]}")
+        if reads:
+            return None
+        print("  Continuing: this scope reads nothing, so there is no "
+              "partial view to protect against.")
+        print("  Class 1 alerts are written UNDELIVERED and retried — "
+              "never marked sent.")
+        return NullTransport()
+
     route = str((report.config["transport"] or {}).get("route") or "graph").lower()
     if route == "outlook_com":
         from .outlook import OutlookTransport
@@ -1304,17 +1341,21 @@ def _transport_for(report, args):
         mailbox = (report.config["mailbox-scope"] or {}).get(
             "control_mailbox") or "control@ubcsis.com"
         try:
-            return OutlookTransport(mailbox, allow_send=args.allow_send)
-        except Exception as e:
-            print(f"Outlook not available: {str(e)[:140]}")
-            return None
+            # Sending is permitted by the scope, not only by a flag
+            # somebody has to remember. Under D-58 an alert that needed
+            # the flag and did not get it would silently become a draft.
+            return OutlookTransport(
+                mailbox,
+                allow_send=bool(getattr(args, "allow_send", False))
+                or (sends and not reads))
+        except Exception as e:                          # noqa: BLE001
+            return unavailable(f"Outlook: {e}")
     from .transport import GraphTransport
 
     try:
         return GraphTransport()
-    except Exception as e:
-        print(f"Graph not available: {str(e)[:140]}")
-        return None
+    except Exception as e:                              # noqa: BLE001
+        return unavailable(f"Graph: {e}")
 
 
 def cmd_report(args) -> int:

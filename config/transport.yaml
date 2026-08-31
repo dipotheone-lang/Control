@@ -22,6 +22,32 @@
 #     enforced by Exchange, on the server, against a scoped identity.
 #     A permission the system grants itself is not a control.
 
+#
+# D-58 (30-Aug-2026) — Outlook is now the route, not an interim one.
+#
+# The CEO ended the wait for Graph. What that decision separated, and
+# what it accepted:
+#
+#   - The mailbox-scope objection is GONE, not accepted. Under
+#     OPERATING_SCOPE=STATUTORY_ONLY nothing is fetched, classified or
+#     evaluated, so Outlook cannot see more than D-07 authorises: it
+#     sees nothing.
+#   - The schedule objection is ACCEPTED with the cost stated. A
+#     transport needing a powered laptop with Outlook running cannot
+#     hold a class 1 schedule. On the day a filing falls due with the
+#     machine asleep, nobody is told. That is the failure this charter
+#     exists to prevent, and it is chosen knowingly because the
+#     alternative on this machine was no delivery at all — not Graph.
+#
+# The mitigations, since the risk is real:
+#   - An alert that cannot leave is written UNDELIVERED, never marked
+#     sent, and RETRIED on the next run. Missing T-7 does not silence
+#     T-3, T-1 and the day itself.
+#   - A repeat failure on the same alert is reported separately: one
+#     miss is a closed laptop, a repeat is the transport.
+#   - §10's external gate is untouched. Nothing leaves for an address
+#     outside ubcsis.com, by any route, in any mode.
+
 route: outlook_com          # outlook_com | graph
 
 interim:
@@ -29,6 +55,13 @@ interim:
   decided: 2026-08-16
   decided_by: ahmed@ubcsis.com
   # Not a date. A phase: Outlook COM is refused in SUPERVISED and LIVE.
+  #
+  # This list is unchanged by D-58 on purpose. The permission it grants
+  # is conditional on the SCOPE, not on the run mode, and lives in
+  # startup.py where the scope is known: STATUTORY_ONLY skips this gate
+  # because it reads nothing, and OPERATING_SCOPE=FULL in SUPERVISED
+  # still halts here exactly as D-08 wrote it. Widening the scope must
+  # not quietly widen the route as well.
   permitted_run_modes: [DISCOVERY, DRY_RUN]
   reason: >
     Graph provisioning stalled on tenant authentication; Phase 0 is

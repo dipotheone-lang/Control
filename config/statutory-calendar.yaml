@@ -46,33 +46,59 @@ obligations:
     preparer: hadeer@ubcsis.com         # Hadeer Mohamed
     escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
     cadence: monthly
-    rule: end of the following month
+    # Lead set by the CEO on 30-Aug-2026, closing the open question that
+    # stood here. Five working days, matching VAT: the same person
+    # prepares both, and the only other rule with a lead uses it.
+    #
+    # The statutory date stays the anchor — `statutory_rule` below is
+    # what the law requires. The lead moves when Control acts, never
+    # when the filing falls due, so it can only ever make Control early.
+    rule: end of the following month, -5 working days
+    statutory_rule: end of the following month
     provenance: ceo_stated
-    decision: D-22
-    # Lead time not yet established — Hadeer. Until it is, Control acts
-    # on the statutory date itself, which is later than ideal but never
-    # later than the law.
-    open_question: withholding lead time
+    decision: D-22, D-59
 
   # D-23, D-24. Return AND remittance — two acts, and the execution
   # order's own highest-value test is whether the year holds twelve
   # remittances rather than four. If it does, this rule is wrong and
   # eleven obligations are missing.
-  - id: STAT-PAYROLL
-    name: Payroll tax — return and remittance
+  # SPLIT 30-Aug-2026 by the CEO, closing the open question that stood
+  # here. The comment above was the register's own doubt: if the year
+  # holds twelve remittances rather than four, one quarterly row hides
+  # eleven obligations. It does — the remittance is monthly and the
+  # return is quarterly, so they are two rows that fail differently.
+  #
+  # Both dates are ceo_stated and unverified like every other row here.
+  # A wrong monthly date fires twelve wrong alerts a year, so O-03 gets
+  # these two before it gets anything else.
+  - id: STAT-PAYROLL-REM
+    name: Payroll tax — monthly remittance
+    owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
+    preparer: hadeer@ubcsis.com         # Hadeer Mohamed
+    escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
+    cadence: monthly
+    rule: end of the following month
+    provenance: ceo_stated
+    decision: D-23, D-24, D-59
+    note: >
+      Same shape as VAT and withholding tax. No preparation lead is set:
+      Control acts on the statutory date itself, which is later than
+      ideal but never later than the law. Ask for a lead when O-03 is
+      answered.
+
+  - id: STAT-PAYROLL-RET
+    name: Payroll tax — quarterly reconciliation return
     owner: accounts@ubcsis.com          # Mohamed Abdelsadiq, Acting CFO
     preparer: hadeer@ubcsis.com         # Hadeer Mohamed
     escalation: ahmed@ubcsis.com        # CEO, same day (§2.1)
     cadence: quarterly
-    rule: UNVERIFIED — quarterly dates pending (Hadeer)
+    # 31 Jan, 30 Apr, 31 Jul, 31 Oct. The day differs by month, which is
+    # why this cannot be written as a day-of-month — and why the engine
+    # refuses a bare one against a quarterly cadence rather than
+    # computing it monthly.
+    rule: end of the month after each quarter
     provenance: ceo_stated
-    decision: D-23, D-24
-    open_question: payroll tax quarterly dates
-    # Transcribed from the `rule` line above, which already named the
-    # holder in prose. A name in a sentence cannot be routed to without
-    # parsing prose, which Control does not do — so it is stated as a
-    # field. Nothing about the deadline changed.
-    answer_held_by: hadeer@ubcsis.com
+    decision: D-23, D-24, D-59
 
   - id: STAT-SOCINS
     name: Social insurance contributions

@@ -369,7 +369,8 @@ def test_after_adopting_the_calendar_actually_alerts(machine):
     after, _ = build_statutory(
         yaml.safe_load(path.read_text(encoding="utf-8")), date(2026, 8, 18))
     assert {t.item_id for t in after} == {
-        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-CIT", "STAT-PDPL-REGS"}
+        "STAT-VAT", "STAT-WHT", "STAT-SOCINS", "STAT-CIT", "STAT-PDPL-REGS",
+        "STAT-PAYROLL-REM", "STAT-PAYROLL-RET"}
 
 
 def test_the_previous_version_is_kept_before_a_rewrite(machine):

@@ -20,9 +20,21 @@ destination:
   # variables when path is null: OneDriveCommercial first, then
   # OneDrive. If neither resolves, backup reports NOT CONFIGURED and
   # says so — it never silently writes nowhere.
-  path: null
+  # Set by the CEO on 30-Aug-2026 (D-59). The company drive, not
+  # OneDrive: the tenant was never provisioned and waiting for it left
+  # the audit chain existing only on the laptop.
+  #
+  # What this buys and what it does not. It survives the laptop, which
+  # a folder in the user profile would not. It does NOT survive a fire
+  # in the office, and it silently backs up nothing on the days E: is
+  # unplugged — so §13.3's backup-age line is the control that matters
+  # here, not the destination itself. A backup nobody checks the age of
+  # is a hope.
+  #
+  # Windows path on purpose: this file is read on the laptop that runs.
+  path: E:\UBCSIS Co Date Jan 2026\Control-Backup
   auto_detect: onedrive
-  subfolder: UBCSIS-Control-Backup
+  subfolder: null
 
 encryption:
   # Non-negotiable. An unencrypted backup of this data in a synced

@@ -137,6 +137,8 @@ _MONTHS_BY_NAME = {
 }
 _MONTH_END = re.compile(
     r"end of (?:the )?(following|next|current|same) month|month[- ]end")
+_QUARTER_MONTH_END = re.compile(
+    r"end of (?:the )?month (?:after|following) (?:each |the )?quarter")
 _ANNUAL_DATE = re.compile(
     r"\b(\d{1,2})\s+(" + "|".join(_MONTHS_BY_NAME) + r")\b"
     r"|\b(" + "|".join(_MONTHS_BY_NAME) + r")\s+(\d{1,2})\b")
@@ -155,6 +157,18 @@ def _next_quarterly(anchor_month: int, day: int, today: date) -> date:
     for year in (today.year, today.year + 1):
         for month in months:
             candidate = date(year, month, day)
+            if candidate >= today:
+                return candidate
+    raise AssertionError("a quarterly cycle always has a next occurrence")
+
+
+def _next_quarter_month_end(today: date) -> date:
+    """End of the month following each quarter: 31 Jan, 30 Apr, 31 Jul,
+    31 Oct. The day differs by month, which is why this cannot be
+    written as a day-of-month at all."""
+    for year in (today.year, today.year + 1):
+        for month in (1, 4, 7, 10):
+            candidate = _last_day(year, month)
             if candidate >= today:
                 return candidate
     raise AssertionError("a quarterly cycle always has a next occurrence")
@@ -243,9 +257,29 @@ def parse_due(expression: str, cadence: str, today: date) -> tuple[datetime | No
     # statutory shape — several Egyptian filings land on it — and it
     # cannot be written as a day-of-month at all, because the day it
     # falls on changes with the month.
+    # "end of the month after each quarter" — 31 Jan, 30 Apr, 31 Jul,
+    # 31 Oct. Handled before the general month-end branch, which would
+    # otherwise read the word "month" and compute the NEXT month every
+    # time: a quarterly rule firing twelve times a year, exactly the
+    # defect a bare day-of-month had.
+    if _QUARTER_MONTH_END.search(text):
+        if cadence and cadence != "quarterly":
+            return None, (f"cadence {cadence!r} with {expression!r} — that "
+                          "expression is quarterly by construction")
+        return _apply_lead(
+            datetime.combine(_next_quarter_month_end(today), at), text)
+
     month_end = _MONTH_END.search(text)
     if month_end:
         which = month_end.group(1) or "current"
+        if cadence in ("quarterly", "annual", "annually", "yearly"):
+            # Same trap, arriving by the other door: this branch computes
+            # from today's month and knows nothing of the cadence.
+            return None, (
+                f"{expression!r} with cadence {cadence!r} — a month-end "
+                "expression says which day of a month and never which "
+                "month. Write 'end of the month after each quarter' for a "
+                "quarterly one, or a named date for an annual one")
         year, month = today.year, today.month
         if which in ("following", "next"):
             month += 1

@@ -70,7 +70,19 @@ obligations:
       - خصم و تحصيل
       - استقطاع
 
-  - id: STAT-PAYROLL
+  # Attributed to the MONTHLY remittance, not the quarterly return.
+  #
+  # These markers cannot tell the two apart — a file called "Payroll tax
+  # 2025-03" is a remittance or a return depending on nothing visible in
+  # the name — and the archive holds the monthly filings. Attributing
+  # them to the monthly row is what makes the count comparable to a
+  # cadence at all.
+  #
+  # The consequence, stated rather than left to be discovered:
+  # STAT-PAYROLL-RET has no independent filing evidence, so the advisor
+  # brief will show it as unevidenced. That is true, and inventing a
+  # marker to distinguish them would be worse than the gap (§1.1).
+  - id: STAT-PAYROLL-REM
     markers:
       - payroll tax
       - salary tax

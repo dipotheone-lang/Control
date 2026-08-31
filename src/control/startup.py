@@ -109,19 +109,23 @@ def run_startup(
     # granted for (§5.1, D-08). Checked here, where the run mode is
     # known, rather than left to be remembered at Phase 2.
     #
-    # Except where the scope reads no mailbox. D-08 refuses Outlook in
-    # SUPERVISED for two reasons, and neither survives that: the route
-    # cannot hold a send schedule, and it sees whatever the Windows
-    # profile sees rather than the set D-07 authorises. A scope that
-    # opens no mailbox and sends through no route is not doing either
-    # thing — it is handed a transport with no mailbox at all
-    # (`NullTransport`), and this file is not even consulted for it.
+    # Except where the scope reads no mailbox. D-08 refused Outlook in
+    # SUPERVISED for two reasons, and D-58 separated them.
     #
-    # Without this, §16's own row for D-15 — STATUTORY_ONLY at level 2,
-    # SUPERVISED, OBSERVE — halted at startup: the charter declared a
-    # state legal that the code refused to enter. The gate was
-    # protecting a route the run does not use, at the cost of the only
-    # scope currently operating.
+    # The first — Outlook sees whatever the Windows profile sees, not the
+    # set D-07 authorises — cannot happen under a scope that fetches
+    # nothing. It is gone, not accepted.
+    #
+    # The second — a transport needing a powered laptop cannot hold a
+    # class 1 schedule — is still true, and D-58 accepts it with the cost
+    # stated: the alternative on this machine was no delivery at all
+    # rather than Graph. An alert that cannot leave is written
+    # UNDELIVERED and retried, never marked sent.
+    #
+    # The skip is conditional on the SCOPE, not the run mode, so FULL in
+    # SUPERVISED still halts here exactly as D-08 wrote it. Without it
+    # §16's own row for D-15 could not be entered at all: the charter
+    # declared a state legal that the code refused.
     if scope_permits(scope, MAILBOX_READ):
         assert_route_permitted(config["transport"], run_mode)
 
