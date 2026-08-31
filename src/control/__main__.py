@@ -1209,6 +1209,14 @@ def cmd_cycle(args) -> int:
                   "Phase 2.")
             return 1
 
+        gap_requests, gap_notes = _gap_request_messages(report.config, today)
+        for note in gap_notes:
+            print(f"GAP: {note}")
+        if gap_requests:
+            print(f"register-gap requests (D-62): {len(gap_requests)} due "
+                  "this week — sent once per holder per week until the "
+                  "register gains the date.")
+
         result = run_cycle(
             report, transport, control_root,
             specs=loaded.specs, tracked_items=tracked,
@@ -1216,6 +1224,7 @@ def cmd_cycle(args) -> int:
             enforcer=Enforcer(loaded.calendar, loaded.roster,
                               ceo=ceo, coo=coo, cfo=cfo),
             watchdog=_watchdog_for(report, conn, loaded),
+            gap_requests=gap_requests,
             today=today, ceo=ceo, cfo=cfo, coo=coo,
         )
     finally:
@@ -1326,6 +1335,63 @@ def _role(people: dict, tier: int, marker: str = "") -> str:
             continue
         return str(entry.get("email", "")).lower()
     return ""
+
+
+def _gap_request_messages(config: dict, today: date) -> tuple[list, list]:
+    """(messages, notes) — the D-62 register-gap requests, bounded.
+
+    D-62 lets the run send the request for a missing statutory date to
+    the internal person recorded as holding the answer, instead of
+    printing it for the CEO to forward. The bounds live here, where the
+    message is built, so nothing downstream has to remember them:
+
+    - **Internal only.** A holder or CC outside ubcsis.com is refused
+      and reported, never sent to — the §10 external gate does not open
+      for this kind, and D-62 changed who sends, not who may receive.
+    - **Weekly, not daily.** The dedupe key carries the ISO week, so a
+      question asks once and then waits six days for its answer before
+      asking again. A daily nag teaches people to filter the sender,
+      which silences the class 1 alerts travelling under the same name.
+    - **Self-terminating.** The moment the register row gains a usable
+      date it stops appearing in `missing_dates`, and the requests stop
+      without anything needing to be cancelled.
+    """
+    from .outbox import OutboundMessage
+    from .statutory_digest import ask_messages
+
+    messages, notes = [], []
+    asks, unrouted = ask_messages(config.get("statutory-calendar"), today,
+                                  config.get("people"))
+    if unrouted:
+        ids = ", ".join(str(r.get("id") or "?") for r in unrouted)
+        notes.append(f"register-gap requests: {len(unrouted)} rule(s) have "
+                     f"an open question and no answer_held_by ({ids}) — "
+                     "nobody is asked, and nothing will chase these until "
+                     "the register names a holder (§1.1).")
+
+    year, week, _ = today.isocalendar()
+    for ask in asks:
+        if not ask.holder.endswith("@ubcsis.com"):
+            notes.append(f"register-gap request for {ask.holder} refused: "
+                         "not a ubcsis.com address, and the external gate "
+                         "does not open for this kind (§10, D-62). The "
+                         "block is on the statutory-ask page to forward "
+                         "by hand.")
+            continue
+        cc = [a for a in ask.cc if a.endswith("@ubcsis.com")]
+        messages.append(OutboundMessage(
+            kind="REGISTER_GAP_REQUEST",
+            subject=ask.subject,
+            body=ask.body,
+            recipients=[ask.holder],
+            cc=cc,
+            dedupe_key=("GAPASK/" + ask.holder + "/"
+                        + "+".join(sorted(ask.rule_ids))
+                        + f"/{year}-W{week:02d}"),
+            rationale=("D-62: statutory register gap — "
+                       + ", ".join(sorted(ask.rule_ids))),
+        ))
+    return messages, notes
 
 
 def _transport_for(report, args):

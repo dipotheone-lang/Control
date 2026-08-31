@@ -111,8 +111,11 @@ rem would bury the one that changes daily, so this is a file to open on
 rem the day somebody chases them.
 python -m control statutory --missing --control-root "%CONTROL_ROOT%" >nul 2>&1
 
-rem And the same gaps written as messages to forward. Control drafts and
-rem never sends (section 10) - these go out from the CEO, not the system.
+rem And the same gaps written as messages. Under decision D-62 the cycle
+rem below SENDS these itself - to internal ubcsis.com holders only, once
+rem per week per question, until the register gains the date. This page
+rem is the record of what goes out, and the fallback to forward by hand
+rem on a day the transport cannot deliver.
 python -m control statutory --ask --control-root "%CONTROL_ROOT%" >nul 2>&1
 
 echo.

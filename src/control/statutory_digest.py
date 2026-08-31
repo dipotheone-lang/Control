@@ -416,22 +416,128 @@ def _by_holder(statutory_config: dict | None, today: date) -> tuple:
     return held, unrouted
 
 
-def render_ask(statutory_config: dict | None, today: date,
-               people: dict | None = None) -> str:
-    """Forwardable requests, one per person holding an answer."""
+@dataclass
+class AskMessage:
+    """One register-gap request, addressed and ready to send (D-62)."""
+    holder: str                 # the answer_held_by address
+    holder_name: str
+    subject: str
+    body: str
+    rule_ids: list
+    cc: list                    # the obligations' owners, deduplicated
+
+
+def _names(people: dict | None) -> dict:
     names = {}
     for entry in (people or {}).get("people") or []:
         email = str(entry.get("email") or "").strip().lower()
         if email:
             names[email] = str(entry.get("name") or email)
+    return names
+
+
+def _ask_body(who: str, rows: list) -> str:
+    """The bilingual request text for one holder. Used verbatim by both
+    the reports/ page and the sent email — one source, so the page is
+    always an exact record of what went out (§13.1)."""
+    lines = [
+        f"{who},",
+        "",
+        "Control tracks the company's statutory deadlines and alerts",
+        "before each one falls due. The items below have no date on",
+        "file, so nothing is counting down to them and no alert can",
+        "fire.",
+        "",
+    ]
+    for index, row in enumerate(rows, 1):
+        lines += [
+            f"{index}. {row.get('name')}",
+            f"   Needed: {row.get('open_question')}",
+            f"   On file now: {row.get('rule')}",
+            "",
+        ]
+    lines += [
+        "Please reply with the date or the recurring pattern for each.",
+        "A reply like \"1 January, then every three months\" is enough —",
+        "it does not need to be exact wording.",
+        "",
+        "This is a gap in the records, not a question about your work.",
+        "",
+        "────────────────────────────────────────",
+        f"إلى: {who}",
+        "",
+        f"الأستاذ/ة {who}،",
+        "",
+        "يقوم نظام كنترول بمتابعة المواعيد القانونية للشركة والتنبيه قبل",
+        "حلول كل موعد. البنود التالية لا يوجد لها تاريخ مسجل، وبالتالي لا",
+        "يتم العد التنازلي لها ولا يمكن إصدار أي تنبيه بشأنها.",
+        "",
+    ]
+    for index, row in enumerate(rows, 1):
+        lines += [
+            f"{index}. {row.get('name')}",
+            f"   المطلوب: {row.get('open_question')}",
+            f"   المسجل حالياً: {row.get('rule')}",
+            "",
+        ]
+    lines += [
+        "برجاء الرد بالتاريخ أو بنمط التكرار لكل بند. رد مثل \"1 يناير ثم",
+        "كل ثلاثة أشهر\" يكفي، ولا يلزم صياغة محددة.",
+        "",
+        "هذه فجوة في السجلات وليست استفساراً عن أداء العمل.",
+        "",
+        "النص العربي هو النص المعتمد.",
+    ]
+    return "\n".join(lines)
+
+
+def ask_messages(statutory_config: dict | None, today: date,
+                 people: dict | None = None) -> tuple:
+    """(messages, unrouted_rows) — the D-62 register-gap requests.
+
+    One message per holder. A row with no `answer_held_by` produces no
+    message: a name in prose is not a routable address, and guessing
+    one would put a request in the wrong inbox with the system's name
+    on it (§1.1).
+    """
+    names = _names(people)
+    held, unrouted = _by_holder(statutory_config, today)
+    messages = []
+    for holder, rows in sorted(held.items()):
+        who = names.get(holder, holder)
+        owners: list = []
+        for row in rows:
+            owner = str(row.get("owner") or "").strip().lower()
+            if owner and owner != holder and owner not in owners:
+                owners.append(owner)
+        messages.append(AskMessage(
+            holder=holder,
+            holder_name=who,
+            subject=("[CONTROL] Statutory dates needed — "
+                     f"{len(rows)} item{'' if len(rows) == 1 else 's'}"),
+            body=_ask_body(who, rows),
+            rule_ids=[str(row.get("id") or "") for row in rows],
+            cc=owners,
+        ))
+    return messages, unrouted
+
+
+def render_ask(statutory_config: dict | None, today: date,
+               people: dict | None = None) -> str:
+    """The register-gap requests, as a page — the record of what the
+    D-62 sender sends, and the thing to forward by hand on a day the
+    transport cannot deliver."""
+    names = _names(people)
 
     held, unrouted = _by_holder(statutory_config, today)
     lines = [
         f"REQUESTS TO SEND — {today:%d-%b-%Y}",
         "",
-        "One block per person. Each is written to be forwarded as it",
-        "stands. Control drafts and never sends (§10) — these go out from",
-        "you, not from the system.",
+        "One block per person. Under decision D-62 the daily run sends",
+        "each block to its holder — internal ubcsis.com addresses only,",
+        "once per week per question, until the register gains the date.",
+        "This page is the record of what goes out, and the fallback to",
+        "forward by hand on a day the transport cannot deliver.",
         "",
     ]
     if not held and not unrouted:
@@ -448,52 +554,7 @@ def render_ask(statutory_config: dict | None, today: date,
             f"{len(rows)} item{'' if len(rows) == 1 else 's'}",
             "════════════════════════════════════════",
             "",
-            f"{who},",
-            "",
-            "Control tracks the company's statutory deadlines and alerts",
-            "before each one falls due. The items below have no date on",
-            "file, so nothing is counting down to them and no alert can",
-            "fire.",
-            "",
-        ]
-        for index, row in enumerate(rows, 1):
-            lines += [
-                f"{index}. {row.get('name')}",
-                f"   Needed: {row.get('open_question')}",
-                f"   On file now: {row.get('rule')}",
-                "",
-            ]
-        lines += [
-            "Please reply with the date or the recurring pattern for each.",
-            "A reply like \"1 January, then every three months\" is enough —",
-            "it does not need to be exact wording.",
-            "",
-            "This is a gap in the records, not a question about your work.",
-            "",
-            "────────────────────────────────────────",
-            f"إلى: {who}",
-            "",
-            f"الأستاذ/ة {who}،",
-            "",
-            "يقوم نظام كنترول بمتابعة المواعيد القانونية للشركة والتنبيه قبل",
-            "حلول كل موعد. البنود التالية لا يوجد لها تاريخ مسجل، وبالتالي لا",
-            "يتم العد التنازلي لها ولا يمكن إصدار أي تنبيه بشأنها.",
-            "",
-        ]
-        for index, row in enumerate(rows, 1):
-            lines += [
-                f"{index}. {row.get('name')}",
-                f"   المطلوب: {row.get('open_question')}",
-                f"   المسجل حالياً: {row.get('rule')}",
-                "",
-            ]
-        lines += [
-            "برجاء الرد بالتاريخ أو بنمط التكرار لكل بند. رد مثل \"1 يناير ثم",
-            "كل ثلاثة أشهر\" يكفي، ولا يلزم صياغة محددة.",
-            "",
-            "هذه فجوة في السجلات وليست استفساراً عن أداء العمل.",
-            "",
-            "النص العربي هو النص المعتمد.",
+            _ask_body(who, rows),
             "",
         ]
 

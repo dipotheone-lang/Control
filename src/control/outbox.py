@@ -62,6 +62,13 @@ ACTION_GATES: dict[str, dict[str, str]] = {
     "FRAUD_FLAG":        {"DRY_RUN": _D, "SUPERVISED": _S, "LIVE": _S},
     "WATCHDOG_NOTICE":   {"DRY_RUN": _D, "SUPERVISED": _S, "LIVE": _S},
     "MANAGEMENT_REPORT": {"DRY_RUN": _D, "SUPERVISED": _D, "LIVE": _D},
+    # D-62 (31-Aug-2026): the request for a missing statutory date, sent
+    # to the internal person recorded as holding the answer. Same
+    # dispositions as a class 3 reminder — it is the same shape of
+    # message: internal, non-committal, chasing a class 1 input. The
+    # internal-only bound is enforced where the message is built
+    # (__main__._gap_request_messages), not merely assumed here.
+    "REGISTER_GAP_REQUEST": {"DRY_RUN": _D, "SUPERVISED": _S, "LIVE": _S},
 }
 # DISCOVERY sends nothing (§6): everything drafts.
 _DISCOVERY_DISPOSITION = _D

@@ -58,7 +58,7 @@ written down off the laptop.
 
 | Item | Who | Effect |
 |---|---|---|
-| Forward `reports\statutory-ask-*.txt` | you | One ready bilingual message, to Mohamed Ali. His answer on STAT-REG and STAT-LIC takes coverage 7 of 13 → 9 of 13. D-59 closed the rows Hadeer held |
+| ~~Forward `reports\statutory-ask-*.txt`~~ | the system | **D-62 (31-Aug):** the daily run now sends the register-gap requests itself — internal holders only, weekly, self-terminating. Mohamed Ali gets the STAT-REG/STAT-LIC request on the next run; his answer takes coverage 7 of 13 → 9 of 13 |
 | Verify the 13 rules | a tax advisor — none engaged | O-03. Removes `[UNVERIFIED]` from every line. The two payroll rows first: a wrong monthly date fires twelve wrong alerts a year |
 | The Gmail continuity CC | you | D-04. Goes from draft to real traffic on 8 September. Leave, narrow, or replace |
 | Business OneDrive for ubcsis.com | admin | Returns the backup to D-11 as written. The personal account is an accepted interim (D-60) |

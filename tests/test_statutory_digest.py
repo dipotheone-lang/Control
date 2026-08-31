@@ -276,8 +276,9 @@ def test_the_request_is_bilingual_and_does_not_blame_the_reader():
     assert "المطلوب:" in text and "النص العربي هو النص المعتمد" in text
     assert "This is a gap in the records, not a question about your work." in text
     assert "٢٠٢٦" not in text
-    # §10: Control drafts, the CEO sends.
-    assert "never sends" in text
+    # D-62: the run sends these; the page must say what actually happens
+    # rather than keep the pre-D-62 claim that only the CEO sends.
+    assert "D-62" in text and "internal ubcsis.com addresses only" in text
 
 
 def test_one_item_is_not_reported_as_one_items():
@@ -304,3 +305,132 @@ def test_the_live_register_routes_every_open_question():
 
     text = render_ask(_live_calendar(), TODAY, PEOPLE)
     assert "NO HOLDER RECORDED" not in text
+
+
+# ---- D-62: the run sends the requests itself --------------------------
+#
+# The CEO's instruction of 31-Aug-2026: the system was built to send
+# email, not to hand the CEO a page to forward. These tests pin the
+# bounds that made that instruction safe to take: internal addresses
+# only, weekly not daily, self-terminating, and never guessing a
+# recipient.
+
+def test_ask_messages_addresses_the_holder_and_ccs_the_owner():
+    from control.statutory_digest import ask_messages
+
+    rows = [dict(PENDING, answer_held_by="hr@ubcsis.com")]
+    messages, unrouted = ask_messages(calendar(rows), TODAY, PEOPLE)
+
+    assert unrouted == []
+    assert len(messages) == 1
+    msg = messages[0]
+    assert msg.holder == "hr@ubcsis.com"
+    assert msg.holder_name == "Mohamed Ali"
+    assert msg.cc == ["accounts@ubcsis.com"]
+    assert msg.rule_ids == ["STAT-REG"]
+    assert "1 item" in msg.subject and "1 items" not in msg.subject
+
+
+def test_the_sent_body_and_the_page_are_the_same_text():
+    """§13.1 bilingual equivalence has one cheap enforcement: a single
+    source. If the page and the email could drift, the page would stop
+    being a record of what went out."""
+    from control.statutory_digest import ask_messages, render_ask
+
+    rows = [dict(PENDING, answer_held_by="hr@ubcsis.com")]
+    messages, _ = ask_messages(calendar(rows), TODAY, PEOPLE)
+    page = render_ask(calendar(rows), TODAY, PEOPLE)
+
+    assert messages[0].body in page
+    assert "النص العربي هو النص المعتمد" in messages[0].body
+
+
+def test_an_unrouted_row_produces_no_message():
+    from control.statutory_digest import ask_messages
+
+    rows = [{"id": "STAT-X", "name": "Something",
+             "rule": "UNVERIFIED — pending (Mohamed Ali)",
+             "open_question": "the date"}]
+    messages, unrouted = ask_messages(calendar(rows), TODAY, PEOPLE)
+
+    assert messages == []
+    assert [r.get("id") for r in unrouted] == ["STAT-X"]
+
+
+def test_gate_row_sends_in_supervised_and_drafts_in_dry_run():
+    from control.outbox import decide
+
+    assert decide("REGISTER_GAP_REQUEST", "DRY_RUN") == "DRAFT"
+    assert decide("REGISTER_GAP_REQUEST", "SUPERVISED") == "SEND"
+    assert decide("REGISTER_GAP_REQUEST", "LIVE") == "SEND"
+    assert decide("REGISTER_GAP_REQUEST", "DISCOVERY") == "DRAFT"
+
+
+def _cycle_config(rows):
+    return {"statutory-calendar": calendar(rows), "people": PEOPLE}
+
+
+def test_gap_requests_are_internal_only_and_external_holders_are_refused():
+    """D-62 changed who sends, not who may receive. A holder outside
+    ubcsis.com gets nothing, and the refusal is reported rather than
+    silent — the block stays on the page to forward by hand."""
+    from control.__main__ import _gap_request_messages
+
+    rows = [dict(PENDING, answer_held_by="hr@ubcsis.com"),
+            {"id": "STAT-Y", "name": "Other", "rule": "UNVERIFIED — pending",
+             "open_question": "the date",
+             "answer_held_by": "advisor@taxfirm-egypt.com"}]
+    messages, notes = _gap_request_messages(_cycle_config(rows), TODAY)
+
+    assert [m.recipients for m in messages] == [["hr@ubcsis.com"]]
+    assert any("advisor@taxfirm-egypt.com" in n and "refused" in n
+               for n in notes)
+
+
+def test_gap_request_cc_never_carries_an_external_address():
+    from control.__main__ import _gap_request_messages
+
+    rows = [dict(PENDING, owner="outside@gmail.com",
+                 answer_held_by="hr@ubcsis.com")]
+    messages, _ = _gap_request_messages(_cycle_config(rows), TODAY)
+
+    assert messages[0].cc == []
+
+
+def test_gap_requests_ask_weekly_not_daily():
+    """Same week, same key — the outbox dedupe holds it. Next week, a
+    new key — the question asks again. A daily nag teaches people to
+    filter the sender, which silences the class 1 alerts travelling
+    under the same name."""
+    from control.__main__ import _gap_request_messages
+
+    rows = [dict(PENDING, answer_held_by="hr@ubcsis.com")]
+    config = _cycle_config(rows)
+
+    monday, _ = _gap_request_messages(config, date(2026, 8, 31))
+    thursday, _ = _gap_request_messages(config, date(2026, 9, 3))
+    next_week, _ = _gap_request_messages(config, date(2026, 9, 7))
+
+    assert monday[0].dedupe_key == thursday[0].dedupe_key
+    assert monday[0].dedupe_key != next_week[0].dedupe_key
+    assert "GAPASK/hr@ubcsis.com/STAT-REG/" in monday[0].dedupe_key
+
+
+def test_gap_requests_stop_the_moment_the_register_gains_the_date():
+    from control.__main__ import _gap_request_messages
+
+    answered = dict(PENDING, rule="15 January",
+                    answer_held_by="hr@ubcsis.com")
+    messages, _ = _gap_request_messages(_cycle_config([answered]), TODAY)
+
+    assert messages == []
+
+
+def test_a_rule_with_a_question_and_no_holder_is_a_reported_gap():
+    from control.__main__ import _gap_request_messages
+
+    rows = [{"id": "STAT-X", "name": "Something",
+             "rule": "UNVERIFIED — pending", "open_question": "the date"}]
+    _, notes = _gap_request_messages(_cycle_config(rows), TODAY)
+
+    assert any("STAT-X" in n and "answer_held_by" in n for n in notes)

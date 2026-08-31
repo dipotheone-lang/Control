@@ -122,7 +122,7 @@ def summary(scope: str) -> list[str]:
     if normalise(scope) == FULL:
         return ["OPERATING_SCOPE=FULL — the charter as written."]
     return [
-        "OPERATING_SCOPE=STATUTORY_ONLY (D-15, charter v4.14)",
+        "OPERATING_SCOPE=STATUTORY_ONLY (D-15, charter v4.15)",
         "  Doing:     class 1 statutory deadlines — §0's first priority,",
         "             'no statutory deadline is missed'.",
         "  Not doing: report chasing, external SLA, verdicts, anomaly and",
@@ -131,7 +131,9 @@ def summary(scope: str) -> list[str]:
         "             evaluated — that is the basis for operating without",
         "             the §12 pre-conditions, and it is enforced rather",
         "             than remembered.",
-        "  Sends via: Outlook on this machine (D-58), class 1 alerts only.",
+        "  Sends via: Outlook on this machine (D-58): class 1 alerts, and",
+        "             the D-62 register-gap requests — internal holders,",
+        "             weekly, until the register gains the date.",
         "             Opening the transport to send is not reading: no",
         "             message comes back in. An alert only leaves while",
         "             the laptop is awake and Outlook is running — when it",

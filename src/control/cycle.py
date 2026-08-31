@@ -187,6 +187,7 @@ def run_cycle(
     class3_state: dict[str, Class3State] | None = None,
     enforcer: Enforcer | None = None,
     watchdog: Watchdog | None = None,
+    gap_requests: list[OutboundMessage] | None = None,
     today: date | None = None,
     ceo: str,
     cfo: str,
@@ -472,6 +473,15 @@ def run_cycle(
                 for action in actions:
                     _dispatch(outbox, transport, _action_to_message(action), known,
                               report, audit)
+
+        # ---- register-gap requests (D-62) ------------------------------
+        # Built by the caller from the statutory register, already
+        # bounded to internal addresses there. Dispatched through the
+        # same gate, dedupe and UNDELIVERED machinery as every other
+        # outbound — a request that bypassed the outbox would be the
+        # first message with no record of being sent.
+        for msg in gap_requests or []:
+            _dispatch(outbox, transport, msg, known, report, audit)
 
         # ---- external watchdog (§8.5) ----------------------------------
         # After enforcement, so a breach notice reflects the replies this
