@@ -122,7 +122,7 @@ def summary(scope: str) -> list[str]:
     if normalise(scope) == FULL:
         return ["OPERATING_SCOPE=FULL — the charter as written."]
     return [
-        "OPERATING_SCOPE=STATUTORY_ONLY (D-15, charter v4.13)",
+        "OPERATING_SCOPE=STATUTORY_ONLY (D-15, charter v4.14)",
         "  Doing:     class 1 statutory deadlines — §0's first priority,",
         "             'no statutory deadline is missed'.",
         "  Not doing: report chasing, external SLA, verdicts, anomaly and",

@@ -1574,6 +1574,41 @@ def cmd_statutory(args) -> int:
     return 0
 
 
+def cmd_purge(args) -> int:
+    """Deliberate, logged deletion — §12.5.
+
+    Not a `Remove-Item`. Personal data removed without a record leaves
+    the same evidence as personal data never collected, and only a log
+    tells them apart afterwards.
+    """
+    import yaml
+
+    from . import purge as purge_mod
+    from .audit import AuditLog
+
+    control_root = Path(args.control_root)
+    today = date.fromisoformat(args.today) if args.today else date.today()
+
+    backup_config = None
+    backup_path = control_root / "config" / "backup.yaml"
+    if backup_path.is_file():
+        backup_config = yaml.safe_load(
+            backup_path.read_text(encoding="utf-8")) or {}
+
+    audit = AuditLog(control_root / "logs")
+    ok, detail = audit.verify()
+    if not ok:
+        raise HaltError(
+            f"audit hash chain broken — refusing to delete anything while "
+            f"the record of deletions cannot be trusted (§13.3): {detail}")
+
+    result = purge_mod.purge_discovery(
+        control_root, reason=args.reason, ordered_by=args.ordered_by,
+        audit=audit, backup_config=backup_config)
+    print(purge_mod.render(result, today))
+    return 0
+
+
 def cmd_status(args) -> int:
     """One page of what the runs actually found.
 
@@ -3195,6 +3230,20 @@ def main(argv: list[str] | None = None) -> int:
     statutory.add_argument("--today", default="", help="ISO date, for testing")
     statutory.set_defaults(fn=cmd_statutory)
 
+    purge = sub.add_parser(
+        "purge",
+        help="§12.5: delete Phase 0 discovery output, deliberately and "
+             "logged")
+    purge.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    purge.add_argument("--discovery", action="store_true",
+                       help="delete everything under discovery/")
+    purge.add_argument("--reason", default="",
+                       help="why, in words. Written to the audit log")
+    purge.add_argument("--ordered-by", default="",
+                       help="who ordered it. Written to the audit log")
+    purge.add_argument("--today", default="", help="ISO date, for testing")
+    purge.set_defaults(fn=cmd_purge)
+
     status = sub.add_parser(
         "status",
         help="one page of what the runs actually found — reads what is on "
@@ -3280,7 +3329,7 @@ def main(argv: list[str] | None = None) -> int:
                      "(or set CONTROL_ROOT / UB_ROOT)")
     if (args.command in ("verify", "analyse", "init", "contracts", "registers",
                          "classify", "classify-scan", "backup", "manuals",
-                         "terms", "golden", "disputes", "diagnose-dates", "authority", "ocr-floor", "status", "statutory")
+                         "terms", "golden", "disputes", "diagnose-dates", "authority", "ocr-floor", "status", "statutory", "purge")
             and not args.control_root):
         parser.error("--control-root is required (or set CONTROL_ROOT)")
     try:
