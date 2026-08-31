@@ -28,49 +28,53 @@
 > chartered behaviour — erring early beats silence. Nobody qualified has
 > checked them, and time passing does not check them.
 
-## LAUNCH — do these once, in this order (30-Aug-2026)
+## LAUNCHED — 31-Aug-2026
 
-Everything else on this page is background. This is the list.
+The system is running. What was done, so nobody repeats it:
 
-1. **`git pull`** — or just double-click `Run Control.cmd`, which pulls first.
-2. **Bring the decisions across.** `git pull` updates the *repository's*
-   config; Control reads `CONTROL_ROOT`'s. They are different folders
-   (see the paths section below), so a decision committed here does not
-   reach the running system by itself. `python -m control doctor`
-   reports the distance; `python -m control init --adopt` closes what it
-   can safely close and names what it cannot. **A renamed register row
-   needs a hand edit** — adopt only ever adds, so the superseded row
-   stays until it is removed.
-3. **`python -m control backup --init-key`** — creates the backup
-   encryption key in Windows Credential Manager. **Write the key it
-   prints somewhere off this laptop.** A key that exists only on the
-   machine the backup protects against is a coin flip. Until this is
-   done, every run reports `BACKUP DID NOT RUN` and continues.
-4. **Plug in E:.** The backup destination is
-   `E:\UBCSIS Co Date Jan 2026\Control-Backup` (D-59). On days the
-   drive is out, the run says so and carries on.
-5. **Open classic Outlook and leave it signed in.** Under D-58 it is the
-   route the class 1 alerts leave by. Closed Outlook is not fatal — the
-   alert is written `UNDELIVERED` and retried on the next run — but
-   nothing reaches anybody while it is shut.
-6. **Double-click `Run Control.cmd`.** Read the horizon; check for
-   `NOT DELIVERED` and `REPEATED FAILURE`.
-7. **`scripts\Install-DailyRun.cmd`**, as administrator — registers the
-   7am task.
-8. **Forward `reports\statutory-ask-DATE.txt`** — two messages, to
-   Hadeer and Mohamed Ali, already written in both languages.
+| | |
+|---|---|
+| Repository | Up to date. The branch had been tracking `origin/claude/reconcile` and sat 28 commits behind for days while reporting "Already up to date" |
+| Config | Every decision adopted into `CONTROL_ROOT`. `doctor` reports nothing differing |
+| Class 1 register | **13 rules, 7 counting down, 6 silent.** Payroll split, withholding lead, PDPL anchor all live |
+| Backup | OneDrive, encrypted. **Restore test PASS on 31-Aug-2026** — 2,428 files, database OK, hash chain intact across 309 entries |
+| Transport | Outlook on this machine (D-58). `control@ubcsis.com` confirmed present among the profile's 18 stores |
+| Daily run | `Run Control.cmd` — three steps, seconds, writes three pages to `reports\` |
 
-**First alert:** social insurance on 15-Sep enters the T−7 window on
-**8 September**. Before then the run is quiet by design.
+**The next date that matters is 8 September.** Social insurance reaches
+T−7 and the chain gets its first live test: either Outlook sends, or the
+alert is written `UNDELIVERED` and retried. Either way the run says
+which. Nothing fires before then.
 
-### What is still open after that
+### What is left, and none of it is code
 
 | Item | Who | Effect |
 |---|---|---|
-| Verify the 13 statutory rules | a tax advisor — none engaged | Removes `[UNVERIFIED]`. O-03. The two payroll rows go first: a wrong monthly date fires twelve wrong alerts a year |
-| Payroll quarters, register and licence renewals | Hadeer, Mohamed Ali | 7 of 13 → 9 of 13 |
-| Moveable Islamic holidays | Mohamed Ali, from the Official Gazette | Only affects the operative lead on VAT and withholding, by one day, in the safe direction |
-| A restore test | you | §13.3. An untested backup is a hope |
+| Install the 7am task | you | `scripts\Install-DailyRun.cmd`, as administrator |
+| Forward `reports\statutory-ask-*.txt` | you | Two ready bilingual messages. Hadeer and Mohamed Ali's answers take coverage 7 of 13 → 9 of 13 |
+| Verify the 13 rules | a tax advisor — none engaged | O-03. Removes `[UNVERIFIED]` from every line. The two payroll rows first: a wrong monthly date fires twelve wrong alerts a year |
+| The Gmail continuity CC | you | D-04. Goes from draft to real traffic on 8 September. Leave, narrow, or replace |
+| Business OneDrive for ubcsis.com | admin | Returns the backup to D-11 as written. The personal account is an accepted interim (D-60) |
+| Escrow the backup key | you | It is in Windows Credential Manager on the laptop. The archives sync off the machine; the key does not |
+| `united_brothers_outreach` | you | A weekly job on this laptop fired unattended on 31-Aug against `contacts_all.csv` with a "followup" template. Nothing in this repository created or schedules it, and neither of us knows what it sends |
+
+### Defects found on the day, all fixed
+
+Recorded because each was invisible in a different way, and the pattern
+is the point: **every one of them looked like success.**
+
+- A branch tracking the wrong remote — "Already up to date" for 28 commits
+- A parenthesis in an `echo` inside an `if` block — the script printed the
+  horizon, died on `. was unexpected at this time.`, and the cycle,
+  the missing-dates page and the requests never ran
+- An `UNDELIVERED` alert counted as a duplicate — a closed laptop on T−7
+  would have silenced T−3, T−1 and the deadline itself
+- A closed Outlook aborting the whole run instead of retrying
+- Drift blind to nested mappings — D-13's narrowing was in the template,
+  not in force, and the report said "nothing differing"
+- Drift offering to erase the restore test it had just recorded
+- `E:` recorded as surviving the laptop; it is a partition of the same
+  physical disk (D-60 withdraws the claim)
 
 ---
 
