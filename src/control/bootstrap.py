@@ -146,6 +146,24 @@ _NAMED_LISTS = {
 _TEMPLATE_ONLY_KEYS = {"retired_ids"}
 
 
+# Keys that record what happened ON THIS MACHINE. The template has
+# nothing to say about them and never will, so a difference is not
+# drift — it is the machine having done something the template cannot
+# know about.
+#
+# Reporting them was actively dangerous. `restore_test.last_tested` is
+# null in the template forever, because a template must not claim a
+# restore was tested. So it conflicted on every machine that had ever
+# run the test, and the tool's own suggested fix — accept the template
+# for backup.yaml — would have erased the §13.3 evidence that
+# continuity works. A drift report that tells you to destroy a control
+# is worse than no drift report.
+_MACHINE_ONLY_PATHS = {
+    "restore_test.last_tested",
+    "restore_test.last_result",
+}
+
+
 def _retired_ids(template: dict) -> set:
     """Rows the template explicitly says are superseded.
 
@@ -277,6 +295,8 @@ def _dict_differences(name: str, prefix: str, template: dict, live: dict,
         if key in _TEMPLATE_ONLY_KEYS:
             continue
         label = f"{prefix}{key}"
+        if label in _MACHINE_ONLY_PATHS:
+            continue
         if key not in live:
             out.append(Difference(
                 name, "key",
@@ -523,6 +543,8 @@ def _adopt_dict(name: str, prefix: str, template: dict, live: dict, *,
         if key in _TEMPLATE_ONLY_KEYS:
             continue
         label = f"{prefix}{key}"
+        if label in _MACHINE_ONLY_PATHS:
+            continue
         if key not in live:
             live[key] = value
             applied.append(f"{name}: key {label!r} added")

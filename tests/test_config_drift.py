@@ -726,13 +726,13 @@ def test_a_nested_placeholder_is_filled_without_asking(tmp_path):
 
     machine, templates = _pair(
         tmp_path,
-        {"restore_test": {"last_result": None}},
-        {"restore_test": {"last_result": "PASS"}}, name="backup.yaml")
+        {"destination": {"auto_detect": None}},
+        {"destination": {"auto_detect": "onedrive"}}, name="backup.yaml")
 
     adopt_drift(machine, templates)
     body = yaml.safe_load(
         (machine / "config" / "backup.yaml").read_text(encoding="utf-8"))
-    assert body["restore_test"]["last_result"] == "PASS"
+    assert body["destination"]["auto_detect"] == "onedrive"
 
 
 def test_every_reported_difference_can_be_closed(tmp_path):
@@ -747,3 +747,32 @@ def test_every_reported_difference_can_be_closed(tmp_path):
     assert config_drift(machine, templates)
     adopt_drift(machine, templates, accept_template=["distribution.yaml"])
     assert config_drift(machine, templates) == []
+
+
+def test_what_this_machine_recorded_is_never_reported_as_drift(tmp_path):
+    """`restore_test.last_tested` is null in the template forever — a
+    template must not claim a restore was tested. So it conflicted on
+    every machine that had ever run the test, and the tool's own
+    suggested fix, accepting the template for backup.yaml, would have
+    erased the §13.3 evidence that continuity works.
+
+    A drift report that tells you to destroy a control is worse than no
+    drift report.
+    """
+    import yaml
+
+    machine, templates = _pair(
+        tmp_path,
+        {"restore_test": {"last_tested": "2026-08-31", "last_result": "PASS",
+                          "every_days": 30}},
+        {"restore_test": {"last_tested": None, "last_result": None,
+                          "every_days": 30}}, name="backup.yaml")
+
+    assert config_drift(machine, templates) == []
+
+    # And not even an explicit acceptance may take them.
+    adopt_drift(machine, templates, accept_template=["backup.yaml"])
+    body = yaml.safe_load(
+        (machine / "config" / "backup.yaml").read_text(encoding="utf-8"))
+    assert body["restore_test"]["last_tested"] == "2026-08-31"
+    assert body["restore_test"]["last_result"] == "PASS"
