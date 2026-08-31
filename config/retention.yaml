@@ -1,0 +1,176 @@
+# Retention schedule — charter §12.5, precondition O-10
+#
+# DRAFT of 31-Aug-2026, entered by Control at the CEO's instruction as a
+# document to put to counsel. It is NOT a closed precondition: O-10 in
+# mailbox-scope.yaml stays open until `confirmed_with_counsel` below is a
+# real date set by a human after counsel has reviewed it. Control never
+# sets that field itself — a schedule the system approved for itself is
+# not the counsel confirmation §12.5 asks for.
+#
+# WHY A SCHEDULE IS A CONTROL, NOT PAPERWORK. §12.5: deletion is
+# deliberate and logged, never a background sweep. PDPL 151/2020 (executive
+# regulations issued 1-Nov-2025, full enforcement ~Oct-2026) requires
+# personal data to be kept no longer than the purpose needs. Egyptian
+# commercial and tax law impose MINIMUMS — commonly five years — on
+# commercial books and their supporting documents. So each class has two
+# forces pulling opposite ways: a legal floor below which you may not
+# delete, and a data-protection ceiling above which you should not keep.
+# The schedule names both and sets a period between them.
+#
+# Every period below is a baseline for counsel to confirm or correct. The
+# numbers erring longer are the commercial-record floors; the numbers
+# erring shorter are the personal-data minimisation cases. Where the two
+# genuinely conflict for one record — a document that is both a commercial
+# book and dense with personal data — the commercial floor wins for the
+# statutory period and the class is flagged for counsel (see `review`).
+
+confirmed_with_counsel: null      # ISO date; O-10 does not close until set
+confirmed_by: null                # the person who took counsel's confirmation
+drafted: 2026-08-31
+basis_notes:
+  commercial_floor_years: 5       # Egyptian commercial/tax minimum, per counsel
+  pdpl_principle: >
+    Personal data kept no longer than the purpose requires; the purpose
+    here is obligation and deadline control, not an indefinite archive of
+    who wrote what.
+
+# Deletion is deliberate and logged (§12.5). Nothing here runs on a timer
+# without a record: when a class reaches its period, Control lists the
+# candidates for a human to authorise, and every deletion writes to the
+# hash-chained audit log with the reason and the authoriser — the same
+# shape as the D-61 discovery purge.
+deletion:
+  mode: proposed_then_authorised   # never automatic
+  log_event: retention.delete
+  keep_until_backup_confirmed: true  # a class is not deleted from live
+                                     # storage while the only copy is an
+                                     # unverified backup (§13.3)
+
+classes:
+
+  # ---- the record that must outlive everything -------------------------
+  audit_log:
+    what: Hash-chained JSONL logs — the proof the record was never altered.
+    keep_years: 7
+    minimum_basis: >
+      Evidentiary. §13.3 makes a chain break a critical incident, and §1.9
+      makes the log the definition of what happened. A chain cannot be
+      truncated at one end without breaking, so this is retained WHOLE for
+      the period — never trimmed row by row.
+    contains_personal_data: true
+    review: >
+      Counsel to confirm the evidentiary period against the labour-dispute
+      and commercial limitation periods; the chain integrity means it
+      cannot be partially minimised, so the ceiling and floor must be
+      reconciled at the class level, not the row.
+
+  # ---- commercial and financial: the five-year floor governs -----------
+  obligations_submissions_findings:
+    what: Obligations, submissions, verdicts, findings (DB rows + files).
+    keep_years: 7
+    minimum_basis: Commercial supporting documents — five-year floor + margin.
+    contains_personal_data: true
+
+  registers_commercial:
+    what: >
+      Class 2 registers — contracts, guarantees, accreditations,
+      quotations, financial instruments.
+    keep_years: 7
+    minimum_basis: >
+      Contractual and commercial records; several carry obligations
+      (defects liability, retention release) that themselves run years.
+    contains_personal_data: false
+
+  financial_records:
+    what: Invoice, payment, tax, bank, FX data booked to registers.
+    keep_years: 7
+    minimum_basis: Tax and commercial book minimum is five years; margin added.
+    contains_personal_data: false
+
+  # ---- HR and people: labour law floor, PDPL ceiling -------------------
+  hr_people_absence:
+    what: Roster, reporting lines, absence and delegation records.
+    keep_years: 5
+    keep_after_leaving_years: 5
+    minimum_basis: >
+      Employment and labour records. Retained during employment and for
+      five years after a leaver's deactivation, then deleted — an ex-
+      employee's data has no obligation-control purpose once the limitation
+      period passes.
+    contains_personal_data: true
+    review: >
+      Counsel to set the post-employment period against the 2025 Labour
+      Law limitation periods.
+
+  disputes:
+    what: DISPUTE records and their adjudication outcomes (§8.4).
+    keep_years: 6
+    minimum_basis: >
+      A dispute is evidence in a possible labour matter; retained past the
+      HR baseline for that reason, then deleted.
+    contains_personal_data: true
+
+  # ---- anomaly and fraud signals: sensitive, shorter -------------------
+  anomalies_flags:
+    what: S1–S4 signals and fraud flags raised to the CEO (§7.3).
+    keep_years: 3
+    minimum_basis: >
+      These are signals for human judgement, not findings about people.
+      Kept long enough to show a pattern across periods, then deleted —
+      an unresolved suspicion held indefinitely is the record §1.4 and
+      §12.4 exist to prevent.
+    contains_personal_data: true
+    review: Counsel to confirm; this is the class most exposed under PDPL.
+
+  # ---- mailbox-derived personal data: the O-07 class -------------------
+  mailbox_metadata:
+    what: >
+      Sender, recipients, subject, timestamps and thread position captured
+      from the shared functional mailboxes under Option C (D-07). Bodies of
+      client-confidential items are never stored (D-01); this is metadata.
+    keep_years: 2
+    minimum_basis: >
+      The tightest ceiling in the schedule. This exists only to run the
+      external SLA watchdog (§8.5); once a thread is closed and its period
+      reported, the metadata has served its purpose. PDPL minimisation
+      governs here, not a commercial floor.
+    contains_personal_data: true
+    review: >
+      Counsel to confirm, AND this class does not begin to accumulate at
+      all until O-07 (lawful basis + notification) is closed. A short
+      retention does not substitute for a lawful basis to hold it at all.
+
+  # ---- operational -----------------------------------------------------
+  outbox_sent:
+    what: Sent and pending messages, drafts, approvals (§10).
+    keep_years: 7
+    minimum_basis: >
+      The record of what Control sent and who approved it — evidentiary,
+      matched to the audit log it cross-references.
+    contains_personal_data: true
+
+  learning_records:
+    what: learning_ledger, proposals, applied and rolled-back adaptations.
+    keep_years: 5
+    minimum_basis: >
+      The record of what the system changed about itself and why (§14).
+      Retained so a past adaptation can be explained or reverted.
+    contains_personal_data: false
+
+  backups:
+    what: Encrypted whole-root archives (§5.2, D-60).
+    keep_days: 365
+    keep_minimum: 7
+    minimum_basis: >
+      Governed by backup.yaml's own retention; named here so the schedule
+      is complete. A backup inherits the sensitivity of everything inside
+      it, which is why it is encrypted before it is written.
+    contains_personal_data: true
+
+  discovery_output:
+    what: Phase 0 discovery/ output.
+    keep: none
+    minimum_basis: >
+      Deleted (D-61). Retained only during an active, scope-permitted
+      Phase 0 run and purged on completion — never an archive.
+    contains_personal_data: true
