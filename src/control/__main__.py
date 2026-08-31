@@ -2843,7 +2843,14 @@ def cmd_backup(args) -> int:
     today = date.fromisoformat(args.today) if args.today else date.today()
 
     if args.init_key:
-        stale = existing_archives(config) if args.rotate else []
+        # An archive is named for its date and rewritten in place, so
+        # the one carrying today's date will be REPLACED by the next
+        # backup rather than left behind. Listing it as something to
+        # delete afterwards would have the reader delete the only
+        # readable archive they have — the opposite of the point.
+        stale = [a for a in existing_archives(config)
+                 if a.name != f"control-backup-{today.isoformat()}.enc"
+                 ] if args.rotate else []
         try:
             key = create_key(config, rotate=args.rotate)
         except HaltError as exc:
@@ -2856,19 +2863,23 @@ def cmd_backup(args) -> int:
         print("exists only on the laptop the backup protects against is not")
         print("a key. Without it the backups cannot be restored by anyone,")
         print("including you.")
+        print("\nEVERY ARCHIVE ALREADY WRITTEN NO LONGER OPENS. They were")
+        print("encrypted with the key just replaced, so there is no")
+        print("restorable backup at all until a new one is written.")
+        print("\nIn this order, and not a different one:")
+        print("  1. python -m control backup")
+        print("  2. python -m control backup --test --record")
         if stale:
-            print("\nTHE ARCHIVES ALREADY WRITTEN NO LONGER OPEN.")
-            print("They were encrypted with the key just replaced:")
+            print("  3. delete these, and empty the recycle bin of")
+            print("     wherever they were synced:")
             for path in stale:
-                print(f"  {path.name}")
-            print("\nSo there is no restorable backup until a new one is")
-            print("written. In this order, and not a different one:")
-            print("  1. python -m control backup")
-            print("  2. python -m control backup --test --record")
-            print("  3. delete the archives listed above, and empty the")
-            print("     recycle bin of wherever they were synced")
-            print("\nStep 2 before step 3, because §13.3 counts a backup")
-            print("as continuity only once a restore of it has been proved.")
+                print(f"       {path.name}")
+        else:
+            print("  3. nothing to delete: the only archive on disk "
+                  "carries")
+            print("     today's date and step 1 rewrites it in place.")
+        print("\nStep 2 before step 3, because §13.3 counts a backup as")
+        print("continuity only once a restore of it has been proved.")
         return 0
 
     destination = resolve_destination(config)
