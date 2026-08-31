@@ -251,40 +251,69 @@ def differences(control_root: Path, template_config: Path) -> list[Difference]:
         if not isinstance(template, dict) or not isinstance(live, dict):
             continue
 
-        for key, value in template.items():
-            if key in _TEMPLATE_ONLY_KEYS:
-                continue
-            if key not in live:
-                out.append(Difference(
-                    name, "key",
-                    f"{name}: key {key!r} is in the template and not in "
-                    "your copy", True))
-                continue
+        out += _dict_differences(name, "", template, live,
+                                 _retired_ids(template))
+    return out
 
-            if key in _NAMED_LISTS and isinstance(value, list) \
-                    and isinstance(live.get(key), list):
-                out += _list_differences(name, key, value, live[key],
-                                         _retired_ids(template))
-                continue
 
-            if value != live[key] and _is_placeholder(live[key]):
-                out.append(Difference(
-                    name, "placeholder",
-                    f"{name}: {key} is {live[key]!r} locally and "
-                    f"{value!r} in the template", True))
-            elif value != live[key] and not isinstance(value, (list, dict)):
-                out.append(Difference(
-                    name, "conflict",
-                    f"{name}: {key} is {live[key]!r} locally and "
-                    f"{value!r} in the template — two decisions, and "
-                    "which is current is yours to say", False))
+def _dict_differences(name: str, prefix: str, template: dict, live: dict,
+                      retired: set) -> list[Difference]:
+    """Compare one mapping, descending into nested ones.
+
+    The recursion is the whole point. Before it, a top-level key whose
+    value was a dict was compared as a single value and any difference
+    inside it was invisible — `_is_placeholder` is False for a dict, and
+    the conflict branch skipped dicts explicitly.
+
+    That hid a live CEO decision. D-13 narrows the management report to
+    the CEO and COO for Phase 2; `distribution.yaml` carries it as
+    `management_reports.phase`, one level down. The operating machine
+    ran with the wider steady-state list while `doctor` reported
+    "nothing left differing" — the decision was in the template, not in
+    force, and the tool built to catch exactly that said nothing.
+    """
+    out: list[Difference] = []
+    for key, value in template.items():
+        if key in _TEMPLATE_ONLY_KEYS:
+            continue
+        label = f"{prefix}{key}"
+        if key not in live:
+            out.append(Difference(
+                name, "key",
+                f"{name}: key {label!r} is in the template and not in "
+                "your copy", True))
+            continue
+
+        if key in _NAMED_LISTS and isinstance(value, list) \
+                and isinstance(live.get(key), list):
+            out += _list_differences(name, label, value, live[key], retired)
+            continue
+
+        if isinstance(value, dict) and isinstance(live[key], dict):
+            out += _dict_differences(name, f"{label}.", value, live[key],
+                                     retired)
+            continue
+
+        if value == live[key]:
+            continue
+        if _is_placeholder(live[key]):
+            out.append(Difference(
+                name, "placeholder",
+                f"{name}: {label} is {live[key]!r} locally and "
+                f"{value!r} in the template", True))
+        elif not isinstance(value, list):
+            out.append(Difference(
+                name, "conflict",
+                f"{name}: {label} is {live[key]!r} locally and "
+                f"{value!r} in the template — two decisions, and "
+                "which is current is yours to say", False))
     return out
 
 
 def _list_differences(name: str, key: str, template_list: list,
                       live_list: list,
                       retired: set | None = None) -> list[Difference]:
-    field_name = _NAMED_LISTS[key]
+    field_name = _NAMED_LISTS[key.rsplit(".", 1)[-1]]
     out: list[Difference] = []
 
     have = {_entry_key(e, field_name) for e in live_list}
@@ -464,25 +493,9 @@ def adopt_drift(control_root: Path, template_config: Path,
         # leave a `.superseded/` copy on every run, for no change.
         before = len(applied)
 
-        for key, value in template.items():
-            if key in _TEMPLATE_ONLY_KEYS:
-                continue
-            if key not in live:
-                live[key] = value
-                applied.append(f"{name}: key {key!r} added")
-                continue
-            if key in _NAMED_LISTS and isinstance(value, list) \
-                    and isinstance(live.get(key), list):
-                applied += _adopt_list(
-                    name, key, value, live[key],
-                    take_template=name in accepted,
-                    retired=_retired_ids(template))
-                continue
-            if value != live[key] and (
-                    name in accepted or _is_placeholder(live[key])):
-                applied.append(
-                    f"{name}: {key} {live[key]!r} -> {value!r}")
-                live[key] = value
+        applied += _adopt_dict(name, "", template, live,
+                               take_template=name in accepted,
+                               retired=_retired_ids(template))
 
         if len(applied) == before:
             continue
@@ -496,10 +509,45 @@ def adopt_drift(control_root: Path, template_config: Path,
     return applied
 
 
+def _adopt_dict(name: str, prefix: str, template: dict, live: dict, *,
+                take_template: bool, retired: set) -> list[str]:
+    """Adopt one mapping, descending into nested ones.
+
+    Mirrors `_dict_differences`. If adoption did not recurse, drift
+    would report a nested difference that no command could close, and a
+    reported-but-unclosable difference is worse than an unreported one:
+    it turns the adoption step into homework that never finishes.
+    """
+    applied: list[str] = []
+    for key, value in template.items():
+        if key in _TEMPLATE_ONLY_KEYS:
+            continue
+        label = f"{prefix}{key}"
+        if key not in live:
+            live[key] = value
+            applied.append(f"{name}: key {label!r} added")
+            continue
+        if key in _NAMED_LISTS and isinstance(value, list) \
+                and isinstance(live.get(key), list):
+            applied += _adopt_list(name, label, value, live[key],
+                                   take_template=take_template,
+                                   retired=retired)
+            continue
+        if isinstance(value, dict) and isinstance(live[key], dict):
+            applied += _adopt_dict(name, f"{label}.", value, live[key],
+                                   take_template=take_template,
+                                   retired=retired)
+            continue
+        if value != live[key] and (take_template or _is_placeholder(live[key])):
+            applied.append(f"{name}: {label} {live[key]!r} -> {value!r}")
+            live[key] = value
+    return applied
+
+
 def _adopt_list(name: str, key: str, template_list: list,
                 live_list: list, take_template: bool = False,
                 retired: set | None = None) -> list[str]:
-    field_name = _NAMED_LISTS[key]
+    field_name = _NAMED_LISTS[key.rsplit(".", 1)[-1]]
     applied: list[str] = []
 
     have = {_entry_key(e, field_name) for e in live_list}

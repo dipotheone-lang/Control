@@ -643,3 +643,107 @@ def test_an_acceptance_with_nothing_to_do_rewrites_nothing(tmp_path):
     assert not (machine / "config" / ".superseded").exists()
     assert "# a comment worth keeping" in (
         machine / "config" / "filing-evidence.yaml").read_text(encoding="utf-8")
+
+
+# ---- nested mappings ---------------------------------------------------
+
+def _pair(tmp_path, live_body, template_body, name="distribution.yaml"):
+    import yaml
+
+    machine = tmp_path / "CONTROL"
+    (machine / "config").mkdir(parents=True)
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (machine / "config" / name).write_text(
+        yaml.safe_dump(live_body), encoding="utf-8")
+    (templates / name).write_text(
+        yaml.safe_dump(template_body), encoding="utf-8")
+    return machine, templates
+
+
+def test_a_decision_one_level_down_is_reported(tmp_path):
+    """The hole this closes, found on the operating machine.
+
+    D-13 narrows the management report to the CEO and COO for Phase 2,
+    and distribution.yaml carries it as `management_reports.phase` — one
+    level down. A nested dict was compared as a single value, and
+    `_is_placeholder` is False for a dict, so the difference was
+    invisible. The machine ran with the wider steady-state list while
+    drift reported "nothing left differing": the decision was in the
+    template and not in force, and the tool built to catch exactly that
+    said nothing.
+    """
+    machine, templates = _pair(
+        tmp_path,
+        {"management_reports": {"phase": "STEADY_STATE", "format": "xlsx"}},
+        {"management_reports": {"phase": "PHASE_2", "format": "xlsx"}})
+
+    drift = config_drift(machine, templates)
+    assert len(drift) == 1, drift
+    assert "management_reports.phase" in drift[0]
+    assert "two decisions" in drift[0]
+
+
+def test_a_nested_key_the_local_copy_lacks_is_added(tmp_path):
+    import yaml
+
+    machine, templates = _pair(
+        tmp_path,
+        {"management_reports": {"phase": "PHASE_2"}},
+        {"management_reports": {"phase": "PHASE_2",
+                                "standing_cc": "contact.ubcsis@gmail.com"}})
+
+    applied = adopt_drift(machine, templates)
+    assert any("standing_cc" in line for line in applied)
+    body = yaml.safe_load(
+        (machine / "config" / "distribution.yaml").read_text(encoding="utf-8"))
+    assert body["management_reports"]["standing_cc"] == "contact.ubcsis@gmail.com"
+
+
+def test_a_nested_conflict_needs_the_explicit_acceptance(tmp_path):
+    """Same rule at depth as at the top: two real values disagreeing is
+    two decisions, and Control saying which is current would be Control
+    deciding."""
+    import yaml
+
+    live = {"management_reports": {"phase": "STEADY_STATE"}}
+    template = {"management_reports": {"phase": "PHASE_2"}}
+    machine, templates = _pair(tmp_path, live, template)
+
+    adopt_drift(machine, templates)
+    body = yaml.safe_load(
+        (machine / "config" / "distribution.yaml").read_text(encoding="utf-8"))
+    assert body["management_reports"]["phase"] == "STEADY_STATE"
+
+    adopt_drift(machine, templates, accept_template=["distribution.yaml"])
+    body = yaml.safe_load(
+        (machine / "config" / "distribution.yaml").read_text(encoding="utf-8"))
+    assert body["management_reports"]["phase"] == "PHASE_2"
+
+
+def test_a_nested_placeholder_is_filled_without_asking(tmp_path):
+    import yaml
+
+    machine, templates = _pair(
+        tmp_path,
+        {"restore_test": {"last_result": None}},
+        {"restore_test": {"last_result": "PASS"}}, name="backup.yaml")
+
+    adopt_drift(machine, templates)
+    body = yaml.safe_load(
+        (machine / "config" / "backup.yaml").read_text(encoding="utf-8"))
+    assert body["restore_test"]["last_result"] == "PASS"
+
+
+def test_every_reported_difference_can_be_closed(tmp_path):
+    """A reported-but-unclosable difference is worse than an unreported
+    one: it turns the adoption step into homework that never finishes.
+    So adoption has to recurse wherever detection does."""
+    machine, templates = _pair(
+        tmp_path,
+        {"a": {"b": {"c": "old", "d": None}}},
+        {"a": {"b": {"c": "new", "d": "filled", "e": "added"}}})
+
+    assert config_drift(machine, templates)
+    adopt_drift(machine, templates, accept_template=["distribution.yaml"])
+    assert config_drift(machine, templates) == []
