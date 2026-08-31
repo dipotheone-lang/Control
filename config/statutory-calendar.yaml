@@ -25,6 +25,19 @@ source: Execution order 18-Aug-2026 §2.3
 last_verified: null
 next_annual_verification: null   # set to January after first verification
 
+# Rows this register has superseded. Named here because a split leaves
+# the original behind on every machine that already had it, and a
+# one-directional drift cannot see it — the local copy simply holds one
+# row more. Set difference cannot tell that from a row somebody added on
+# purpose, so only this list may cause a removal, and only under
+# `--accept-template` (bootstrap.py).
+#
+#   STAT-PAYROLL  -> STAT-PAYROLL-REM + STAT-PAYROLL-RET   (D-59)
+#   STAT-ETA      -> STAT-ETA-SUB + STAT-ETA-REJ           (D-16, D-31)
+retired_ids:
+  - STAT-PAYROLL
+  - STAT-ETA
+
 obligations:
   # D-15, D-19. Two dates, deliberately: the statutory one is when the
   # law falls due, the operative one is when Control acts. The lead is

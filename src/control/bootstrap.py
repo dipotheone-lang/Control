@@ -139,6 +139,26 @@ _NAMED_LISTS = {
 }
 
 
+# Keys that are instructions TO the adoption, not configuration for
+# the machine. They must not be reported as missing or copied across:
+# a live file carrying a list of rows it has already dropped states
+# nothing true about that machine.
+_TEMPLATE_ONLY_KEYS = {"retired_ids"}
+
+
+def _retired_ids(template: dict) -> set:
+    """Rows the template explicitly says are superseded.
+
+    A register that splits a row leaves the original behind on every
+    machine that already had it, and nothing in a one-directional
+    drift can see it. Naming the retirement in the template is how a
+    removal stays a decision somebody took rather than an inference
+    from a set difference — which cannot tell a superseded row from a
+    new joiner added locally.
+    """
+    return {str(x) for x in (template.get('retired_ids') or [])}
+
+
 def _entry_key(entry, field_name: str | None) -> str:
     if field_name and isinstance(entry, dict):
         return str(entry.get(field_name) or entry)
@@ -232,6 +252,8 @@ def differences(control_root: Path, template_config: Path) -> list[Difference]:
             continue
 
         for key, value in template.items():
+            if key in _TEMPLATE_ONLY_KEYS:
+                continue
             if key not in live:
                 out.append(Difference(
                     name, "key",
@@ -241,7 +263,8 @@ def differences(control_root: Path, template_config: Path) -> list[Difference]:
 
             if key in _NAMED_LISTS and isinstance(value, list) \
                     and isinstance(live.get(key), list):
-                out += _list_differences(name, key, value, live[key])
+                out += _list_differences(name, key, value, live[key],
+                                         _retired_ids(template))
                 continue
 
             if value != live[key] and _is_placeholder(live[key]):
@@ -259,11 +282,25 @@ def differences(control_root: Path, template_config: Path) -> list[Difference]:
 
 
 def _list_differences(name: str, key: str, template_list: list,
-                      live_list: list) -> list[Difference]:
+                      live_list: list,
+                      retired: set | None = None) -> list[Difference]:
     field_name = _NAMED_LISTS[key]
     out: list[Difference] = []
 
     have = {_entry_key(e, field_name) for e in live_list}
+
+    # A row the template says is superseded and this machine still holds.
+    # Reported so `doctor` names it: otherwise the only place a pending
+    # retirement appears is in the output of the command that performs
+    # it, which is too late to be a warning. Not adoptable — removal
+    # needs the explicit per-file acceptance.
+    lingering = sorted(retired & have) if retired else []
+    if lingering:
+        out.append(Difference(
+            name, "retired",
+            f"{name}: {key} still has {', '.join(lingering)}, which the "
+            "template retires. Removed by --accept-template " + name, False))
+
     missing = [_entry_key(e, field_name) for e in template_list
                if _entry_key(e, field_name) not in have]
     if missing:
@@ -400,27 +437,55 @@ def adopt_drift(control_root: Path, template_config: Path,
     for item in pending:
         by_file.setdefault(item.file, []).append(item)
 
+    # An explicit acceptance is an instruction about the FILE, not a
+    # filter on what drift happened to report. A superseded local-only
+    # row is invisible to `differences` by design — drift is
+    # one-directional — so a file whose ONLY problem is such a row has no
+    # difference to bring it into this loop, and the one thing
+    # `--accept-template` exists to remove is the one thing it could not
+    # reach. Found on the operating machine: the second run reported
+    # "config left untouched" while the stale rule was still sitting in
+    # it, ahead of its replacement, silently claiming every document.
+    for name in accepted:
+        if only and name != only:
+            continue
+        if (template_config / name).is_file() \
+                and (control_root / "config" / name).is_file():
+            by_file.setdefault(name, [])
+
     for name, items in by_file.items():
         source = template_config / name
         target = control_root / "config" / name
         template = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
         live = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+        # A file can now enter this loop with nothing to do — an
+        # acceptance is seeded above whether or not drift reported
+        # anything. Rewriting it regardless would strip its comments and
+        # leave a `.superseded/` copy on every run, for no change.
+        before = len(applied)
 
         for key, value in template.items():
+            if key in _TEMPLATE_ONLY_KEYS:
+                continue
             if key not in live:
                 live[key] = value
                 applied.append(f"{name}: key {key!r} added")
                 continue
             if key in _NAMED_LISTS and isinstance(value, list) \
                     and isinstance(live.get(key), list):
-                applied += _adopt_list(name, key, value, live[key],
-                                       take_template=name in accepted)
+                applied += _adopt_list(
+                    name, key, value, live[key],
+                    take_template=name in accepted,
+                    retired=_retired_ids(template))
                 continue
             if value != live[key] and (
                     name in accepted or _is_placeholder(live[key])):
                 applied.append(
                     f"{name}: {key} {live[key]!r} -> {value!r}")
                 live[key] = value
+
+        if len(applied) == before:
+            continue
 
         kept = _backup(target)
         target.write_text(
@@ -432,7 +497,8 @@ def adopt_drift(control_root: Path, template_config: Path,
 
 
 def _adopt_list(name: str, key: str, template_list: list,
-                live_list: list, take_template: bool = False) -> list[str]:
+                live_list: list, take_template: bool = False,
+                retired: set | None = None) -> list[str]:
     field_name = _NAMED_LISTS[key]
     applied: list[str] = []
 
@@ -462,33 +528,31 @@ def _adopt_list(name: str, key: str, template_list: list,
                     f"{local[field_key]!r} -> {value!r}")
                 local[field_key] = value
 
-    # Removal, and ONLY under an explicit per-file acceptance.
+    # Removal happens only where the template NAMES the row as retired,
+    # and only under an explicit per-file acceptance. Two locks, because
+    # this is the one operation that destroys a local decision.
     #
-    # Adoption is otherwise one-directional: a local-only entry is where
-    # decisions live, and dropping one would discard a decision nobody
-    # asked about. But `--accept-template` is a human saying the template
-    # side of THIS file is current, and a register's identity is its list
-    # of rows — so an entry the template no longer carries is a
-    # superseded decision, not a local one.
+    # A first attempt removed any local row the template lacked. That is
+    # wrong, and a test caught it: a new joiner added to people.yaml is
+    # also "local, not in template", and set difference cannot tell a
+    # superseded row from an addition somebody made on purpose. Only the
+    # template can say which, so it has to say it.
     #
-    # The case that forced this: STAT-PAYROLL was split into
+    # The case this exists for: STAT-PAYROLL was split into
     # STAT-PAYROLL-REM and STAT-PAYROLL-RET on 30-Aug-2026. Adoption
     # added both and kept the original, leaving three payroll rules where
-    # the register says two — and the third would have gone on asking
-    # Hadeer a question the split had already answered.
-    #
-    # Every removal is named, and the whole file is copied to
-    # config/.superseded/ before it is rewritten.
-    if take_template:
-        template_keys = {_entry_key(e, field_name) for e in template_list}
+    # the register says two — and the third went on asking Hadeer a
+    # question the split had already answered. STAT-ETA had left the same
+    # residue from an earlier split, so a third will happen.
+    if take_template and retired:
         for entry in list(live_list):
             label = _entry_key(entry, field_name)
-            if label in template_keys:
+            if label not in retired:
                 continue
             live_list.remove(entry)
             applied.append(
-                f"{name}: {key} -= {label} (the template no longer carries "
-                "it; removed because you accepted the template for this file)")
+                f"{name}: {key} -= {label} (retired in the template, and you "
+                "accepted the template for this file)")
     return applied
 
 

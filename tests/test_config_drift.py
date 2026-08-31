@@ -493,16 +493,20 @@ def test_accepting_the_template_never_removes_a_local_only_value(machine):
 
 # ---- removal under an explicit acceptance -----------------------------
 
-def _root_with(tmp_path, live_rows, template_rows):
+def _root_with(tmp_path, live_rows, template_rows, retired=()):
     import yaml
 
     machine = tmp_path / "CONTROL"
     (machine / "config").mkdir(parents=True)
     templates = tmp_path / "templates"
     templates.mkdir()
-    for base, rows in ((machine / "config", live_rows), (templates, template_rows)):
-        (base / "statutory-calendar.yaml").write_text(
-            yaml.safe_dump({"obligations": rows}), encoding="utf-8")
+    (machine / "config" / "statutory-calendar.yaml").write_text(
+        yaml.safe_dump({"obligations": live_rows}), encoding="utf-8")
+    body = {"obligations": template_rows}
+    if retired:
+        body["retired_ids"] = list(retired)
+    (templates / "statutory-calendar.yaml").write_text(
+        yaml.safe_dump(body), encoding="utf-8")
     return machine, templates
 
 
@@ -520,7 +524,8 @@ def test_a_superseded_row_is_removed_only_when_the_template_is_accepted(tmp_path
     template = [{"id": "STAT-PAYROLL-REM", "rule": "end of the following month"},
                 {"id": "STAT-PAYROLL-RET", "rule": "end of the month after each quarter"},
                 {"id": "STAT-VAT", "rule": "day 20"}]
-    machine, templates = _root_with(tmp_path, live, template)
+    machine, templates = _root_with(tmp_path, live, template,
+                                    retired=["STAT-PAYROLL"])
 
     applied = adopt_drift(machine, templates,
                           accept_template=["statutory-calendar.yaml"])
@@ -562,7 +567,8 @@ def test_the_file_is_kept_before_a_removal_rewrites_it(tmp_path):
 
     live = [{"id": "STAT-PAYROLL", "rule": "UNVERIFIED — pending"}]
     template = [{"id": "STAT-PAYROLL-REM", "rule": "day 5"}]
-    machine, templates = _root_with(tmp_path, live, template)
+    machine, templates = _root_with(tmp_path, live, template,
+                                    retired=["STAT-PAYROLL"])
 
     adopt_drift(machine, templates,
                 accept_template=["statutory-calendar.yaml"])
@@ -570,3 +576,70 @@ def test_the_file_is_kept_before_a_removal_rewrites_it(tmp_path):
     kept = list((machine / "config" / ".superseded").glob("*"))
     assert kept, "the previous version was not kept"
     assert "STAT-PAYROLL" in kept[0].read_text(encoding="utf-8")
+
+
+def test_an_acceptance_reaches_a_file_drift_reports_nothing_about(tmp_path):
+    """The bug the first version shipped with.
+
+    A superseded local-only row is invisible to `differences` — drift is
+    one-directional — so a file whose ONLY problem is such a row had no
+    difference to bring it into the adopt loop. `--accept-template`
+    reported "config left untouched" while the stale rule sat in the
+    file ahead of its replacement, claiming every document that should
+    have matched the new one.
+    """
+    import yaml
+
+    from control.bootstrap import adopt_drift, config_drift
+
+    live = [{"id": "STAT-PAYROLL", "markers": ["payroll tax"]},
+            {"id": "STAT-PAYROLL-REM", "markers": ["payroll tax"]}]
+    template = [{"id": "STAT-PAYROLL-REM", "markers": ["payroll tax"]}]
+    machine = tmp_path / "CONTROL"
+    (machine / "config").mkdir(parents=True)
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (machine / "config" / "filing-evidence.yaml").write_text(
+        yaml.safe_dump({"obligations": live}), encoding="utf-8")
+    (templates / "filing-evidence.yaml").write_text(
+        yaml.safe_dump({"obligations": template,
+                        "retired_ids": ["STAT-PAYROLL"]}), encoding="utf-8")
+
+    # Nothing is missing and nothing conflicts — the only finding is the
+    # retirement, which is reported so `doctor` names it and is not
+    # adoptable without the explicit acceptance.
+    drift = config_drift(machine, templates)
+    assert len(drift) == 1, drift
+    assert "which the template retires" in drift[0]
+
+    applied = adopt_drift(machine, templates,
+                          accept_template=["filing-evidence.yaml"])
+    rows = yaml.safe_load(
+        (machine / "config" / "filing-evidence.yaml").read_text(
+            encoding="utf-8"))["obligations"]
+    assert [r["id"] for r in rows] == ["STAT-PAYROLL-REM"]
+    assert any("-= STAT-PAYROLL" in line for line in applied)
+
+
+def test_an_acceptance_with_nothing_to_do_rewrites_nothing(tmp_path):
+    """Seeding every accepted file into the loop must not mean rewriting
+    it on every run — `safe_dump` strips comments, and a `.superseded/`
+    copy per run for no change is noise that hides the real ones."""
+    import yaml
+
+    from control.bootstrap import adopt_drift
+
+    rows = [{"id": "STAT-VAT", "markers": ["vat"]}]
+    machine = tmp_path / "CONTROL"
+    (machine / "config").mkdir(parents=True)
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    body = "# a comment worth keeping\n" + yaml.safe_dump({"obligations": rows})
+    for base in (machine / "config", templates):
+        (base / "filing-evidence.yaml").write_text(body, encoding="utf-8")
+
+    assert adopt_drift(machine, templates,
+                       accept_template=["filing-evidence.yaml"]) == []
+    assert not (machine / "config" / ".superseded").exists()
+    assert "# a comment worth keeping" in (
+        machine / "config" / "filing-evidence.yaml").read_text(encoding="utf-8")

@@ -51,6 +51,15 @@
 # small language, and §13.2's rule that config is data rather than code
 # applies to the matcher as much as to the checks.
 
+# Superseded evidence rules. STAT-PAYROLL became STAT-PAYROLL-REM when
+# the register split the row (D-59); a machine that adopted the new rule
+# without dropping the old one matches every payroll document against
+# the dead id first, because matching stops at the first rule that
+# claims a document — so the live row would show "no filing evidence"
+# while the evidence sat under a name nothing reads.
+retired_ids:
+  - STAT-PAYROLL
+
 obligations:
   - id: STAT-VAT
     markers:
