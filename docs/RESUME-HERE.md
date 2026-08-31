@@ -48,16 +48,21 @@ which. Nothing fires before then.
 
 ### What is left, and none of it is code
 
+Closed on 31-Aug-2026, evening: the OneDrive online recycle bin was
+emptied of the four purged archives, so the D-61 deletion is complete —
+the discovery data now exists nowhere. The 07:00 scheduled task is
+registered with catch-up. The backup key was rotated after appearing in
+a screenshot, the restore test passed under the new key (2,371 files,
+chain intact at 328 entries), and the CEO confirmed the new key is
+written down off the laptop.
+
 | Item | Who | Effect |
 |---|---|---|
-| Empty the OneDrive online recycle bin | you | The four archives deleted on 31-Aug are recoverable there for 30 days. Until that is done D-61's deletion is a move, not a removal |
-| Install the 7am task | you | `scripts\Install-DailyRun.cmd`, as administrator. It now registers with `StartWhenAvailable`, so a 07:00 the laptop slept through runs when it next wakes rather than being skipped |
 | Forward `reports\statutory-ask-*.txt` | you | One ready bilingual message, to Mohamed Ali. His answer on STAT-REG and STAT-LIC takes coverage 7 of 13 → 9 of 13. D-59 closed the rows Hadeer held |
 | Verify the 13 rules | a tax advisor — none engaged | O-03. Removes `[UNVERIFIED]` from every line. The two payroll rows first: a wrong monthly date fires twelve wrong alerts a year |
 | The Gmail continuity CC | you | D-04. Goes from draft to real traffic on 8 September. Leave, narrow, or replace |
 | Business OneDrive for ubcsis.com | admin | Returns the backup to D-11 as written. The personal account is an accepted interim (D-60) |
-| Escrow the backup key | you | It is in Windows Credential Manager on the laptop. The archives sync off the machine; the key does not. It also needs rotating — the current one appeared in a screenshot. `backup --init-key --rotate`, which now refuses without the flag and names the archives that stop opening |
-| `united_brothers_outreach` | you | A weekly job on this laptop fired unattended on 31-Aug against `contacts_all.csv` with a "followup" template. Nothing in this repository created or schedules it, and neither of us knows what it sends |
+| `united_brothers_outreach` | — | A weekly job on this laptop, outside this repository, sending from the continuity Gmail. The CEO instructed on 31-Aug-2026 that it be ignored; recorded here so the instruction is visible rather than the job forgotten |
 
 ### Defects found on the day, all fixed
 
