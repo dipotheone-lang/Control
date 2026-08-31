@@ -41,6 +41,24 @@ def holiday_calendar_status(sla: dict | None, as_of: date,
         )
         return lines
 
+    # Present but knowingly incomplete — the most misleading state of the
+    # three, because a non-empty list reads as a filled one and the
+    # "empty" warning above has stopped firing. Said in words, with the
+    # direction of the error, because "some holidays" and "the holidays"
+    # are different facts (§1.1).
+    if calendar.get("holidays_complete") is False:
+        lines.append(
+            f"HOLIDAY CALENDAR: {len(holidays)} dates on file and the list "
+            "is marked INCOMPLETE. The moveable Islamic holidays are absent "
+            "by decision — they are announced by decree, so a published "
+            "estimate would be a guess Control treats as fact. A holiday "
+            "Control does not know is counted as a working day, so an "
+            "operative lead lands one day later than intended — closer to "
+            "the statutory date, never past it. Class 1 deadlines ignore "
+            "holidays entirely (§8.3). Owner: HR, from the Official "
+            "Gazette."
+        )
+
     updated = calendar.get("holidays_last_updated")
     if not updated:
         lines.append(

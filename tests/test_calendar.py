@@ -90,7 +90,28 @@ def test_the_repo_config_reports_the_gap_honestly():
 
     path = Path(__file__).resolve().parent.parent / "config" / "sla.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    lines = holiday_calendar_status(data, date(2026, 8, 16))
+    lines = holiday_calendar_status(data, date(2026, 8, 30))
+    # Was "empty". The CEO asked for a list on 30-Aug-2026 and the fixed
+    # national holidays went in; the moveable Islamic ones did not,
+    # because they are announced by decree and a published estimate would
+    # be a guess Control treats as fact. The list is therefore PRESENT
+    # and INCOMPLETE, which is the state that most looks like being done.
+    assert lines, "a knowingly incomplete list reported nothing at all"
+    assert "INCOMPLETE" in lines[0]
+    assert "announced by decree" in lines[0]
+    # And the direction of the error, since an incomplete list is not
+    # neutral.
+    assert "counted as a working day" in lines[0]
+
+
+def test_an_empty_list_still_reports_as_empty():
+    """The case above must not have replaced this one: nothing on file
+    and a list marked incomplete are different findings."""
+    from control.calendar import holiday_calendar_status
+
+    lines = holiday_calendar_status(
+        {"working_calendar": {"holidays": [], "holidays_complete": False}},
+        date(2026, 8, 30))
     assert lines and "empty" in lines[0]
 
 

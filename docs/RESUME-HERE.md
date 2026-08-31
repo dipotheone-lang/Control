@@ -1,6 +1,6 @@
 # RESUME HERE — state as at 30-Aug-2026
 
-> **The project was narrowed on 30-Aug-2026. Decision D-15, charter 4.11:
+> **The project was narrowed on 30-Aug-2026. Decision D-15, charter 4.12:
 > Control operates on class 1 statutory obligations alone and reads no
 > mailbox.** Read `docs/decisions/D15-STATUTORY-ONLY.md` before anything
 > else here — most of what follows describes capabilities that are built,
@@ -12,21 +12,59 @@
 > narrowed scope's whole operating output and it needs nothing from
 > anybody first.
 >
-> **Two things still separate a page from an alert, and neither is code:**
-> 1. **O-03 — the tax advisor confirms the twelve rules.**
->    `discovery/TAX-ADVISOR-BRIEF.md` is generated and waiting. The dates
->    alert today and say `[UNVERIFIED]` on every line, which is §2.1's
->    chartered behaviour — erring early beats silence. Nobody qualified
->    has checked them, and time passing does not check them.
-> 2. **Graph provisioned** — `scripts/provision-graph.ps1`. D-08 is
->    enforced in code and refuses Outlook in SUPERVISED, because a
->    transport needing a powered laptop cannot carry a class 1 alert.
+> **It also sends now.** Decision D-58 (30-Aug-2026) ended the wait for
+> Graph: class 1 alerts go out through classic Outlook on this laptop.
+> The cost is written into the decision — a transport needing a powered
+> machine cannot hold a schedule, so on the day a filing falls due with
+> the laptop asleep, nobody is told. It is mitigated, not solved: an
+> alert that cannot leave is written `UNDELIVERED`, never marked sent,
+> and **retried on the next run**, so missing T−7 does not silence T−3,
+> T−1 and the day itself.
 >
-> Until Graph, the horizon is a page somebody reads, not an alert
-> somebody receives. `scripts\Install-DailyRun.cmd` puts it on screen
-> every morning — that is a habit, not a control. Once Graph is
-> provisioned: `python -m control cycle --scope STATUTORY_ONLY` with
-> `RUN_MODE=SUPERVISED`, and the alerts send.
+> **What still separates this from a verified system is not code:** O-03,
+> the tax advisor confirming the thirteen rules.
+> `discovery/TAX-ADVISOR-BRIEF.md` is generated and waiting. The dates
+> alert today and say `[UNVERIFIED]` on every line, which is §2.1's
+> chartered behaviour — erring early beats silence. Nobody qualified has
+> checked them, and time passing does not check them.
+
+## LAUNCH — do these once, in this order (30-Aug-2026)
+
+Everything else on this page is background. This is the list.
+
+1. **`git pull`** — or just double-click `Run Control.cmd`, which pulls first.
+2. **`python -m control backup --init-key`** — creates the backup
+   encryption key in Windows Credential Manager. **Write the key it
+   prints somewhere off this laptop.** A key that exists only on the
+   machine the backup protects against is a coin flip. Until this is
+   done, every run reports `BACKUP DID NOT RUN` and continues.
+3. **Plug in E:.** The backup destination is
+   `E:\UBCSIS Co Date Jan 2026\Control-Backup` (D-59). On days the
+   drive is out, the run says so and carries on.
+4. **Open classic Outlook and leave it signed in.** Under D-58 it is the
+   route the class 1 alerts leave by. Closed Outlook is not fatal — the
+   alert is written `UNDELIVERED` and retried on the next run — but
+   nothing reaches anybody while it is shut.
+5. **Double-click `Run Control.cmd`.** Read the horizon; check for
+   `NOT DELIVERED` and `REPEATED FAILURE`.
+6. **`scripts\Install-DailyRun.cmd`**, as administrator — registers the
+   7am task.
+7. **Forward `reports\statutory-ask-DATE.txt`** — two messages, to
+   Hadeer and Mohamed Ali, already written in both languages.
+
+**First alert:** social insurance on 15-Sep enters the T−7 window on
+**8 September**. Before then the run is quiet by design.
+
+### What is still open after that
+
+| Item | Who | Effect |
+|---|---|---|
+| Verify the 13 statutory rules | a tax advisor — none engaged | Removes `[UNVERIFIED]`. O-03. The two payroll rows go first: a wrong monthly date fires twelve wrong alerts a year |
+| Payroll quarters, register and licence renewals | Hadeer, Mohamed Ali | 7 of 13 → 9 of 13 |
+| Moveable Islamic holidays | Mohamed Ali, from the Official Gazette | Only affects the operative lead on VAT and withholding, by one day, in the safe direction |
+| A restore test | you | §13.3. An untested backup is a hope |
+
+---
 
 `docs/RUNBOOK.md` says how to run each thing. This file says **where the
 build actually is and what the next action is**, so a new session — a

@@ -25,9 +25,48 @@ working_calendar:
     hr_countersign_pending: true    # O-06, IWR alignment
   # Deadlines move to the next working day; no class 3 reminders on
   # non-working days.
-  holidays: []
   # Egyptian public holidays — populate and maintain. Stale by 60+ days -> flag.
-  holidays_last_updated: null
+  #
+  # HALF a list, and which half matters (30-Aug-2026).
+  #
+  # Searched at the CEO's instruction. The public sources disagree with
+  # each other on the count — 13, 29 and 35 holidays for the same year —
+  # because they mix official public holidays with observances and bank
+  # holidays. What follows is only the fixed-date NATIONAL holidays,
+  # which every source agrees on and which do not move with the lunar
+  # calendar.
+  #
+  # DELIBERATELY ABSENT: the moveable Islamic holidays — Eid al-Fitr,
+  # Eid al-Adha, Islamic New Year, the Prophet's Birthday — and Coptic
+  # Christmas. Those are announced by decree, often confirmed only weeks
+  # ahead, and third-party sites publish estimates. An estimate written
+  # here would be a date Control treats as fact (§1.1). Egypt also moves
+  # midweek holidays to the nearest Thursday by cabinet decision, which
+  # no list can predict.
+  #
+  # WHICH WAY THIS ERRS, because an incomplete list is not neutral: a
+  # holiday Control does not know about is counted as a working day, so
+  # VAT's 5-working-day lead lands one day LATER than intended — closer
+  # to the statutory date, never past it. Class 1 deadlines themselves
+  # ignore holidays entirely (§8.3), so nothing else is affected.
+  #
+  # OWNER: Mohamed Ali (HR). The complete list belongs in the IWR under
+  # O-06 and should come from the Official Gazette, not from here.
+  holidays:
+    - { date: 2026-10-06, name: Armed Forces Day }
+    - { date: 2027-01-25, name: Revolution Day / National Police Day }
+    - { date: 2027-04-25, name: Sinai Liberation Day }
+    - { date: 2027-05-01, name: Labour Day }
+    - { date: 2027-06-30, name: 30 June Day }
+    - { date: 2027-07-23, name: Revolution Day (1952) }
+    - { date: 2027-10-06, name: Armed Forces Day }
+  holidays_source: >
+    Fixed-date national holidays only, from public sources on
+    30-Aug-2026. Not from the Official Gazette and not confirmed by HR.
+    Moveable Islamic holidays and Coptic Christmas are absent by
+    decision, not by oversight.
+  holidays_complete: false
+  holidays_last_updated: 2026-08-30
 
 # External watchdog SLAs — §8.5. first_response / final. Notices go ONLY to
 # the internal owner (manager after first breach), never to the external party.
