@@ -54,7 +54,7 @@ from a calendar, not an inbox.
 > e-invoicing, licences.
 
 Four obligations carry a usable date today: VAT, withholding tax, social
-insurance, and corporate income tax. The rest of the twelve fire no
+insurance, and corporate income tax. The rest fire no
 countdown and are reported as gaps, unchanged.
 
 ## What this gives up, stated plainly
@@ -114,7 +114,7 @@ pre-conditions and moving the scope back — not rebuilding.
 | | Owner |
 |---|---|
 | Adopt this decision into Appendix B | Ahmed Diab |
-| Confirm the twelve statutory rules — `advisor-brief` is generated and waiting | Tax advisor, none engaged (O-03) |
+| Confirm the statutory rules — thirteen since the D-59 payroll split; `advisor-brief` is generated and waiting | Tax advisor, none engaged (O-03) |
 | Provision Graph: Entra app, certificate auth, Application Access Policy scoped to control@ | Tenant admin — `scripts/provision-graph.ps1` |
 
 Control closes none of the three.

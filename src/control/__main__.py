@@ -1930,7 +1930,8 @@ def cmd_gate(args) -> int:
 
     phase0 = gate.assess_phase0(evidence)
     phase1_items = gate.assess_phase1(evidence)
-    for line in gate.console_lines(phase0, phase1_items):
+    for line in gate.console_lines(phase0, phase1_items,
+                                   getattr(args, "scope", "FULL")):
         print(line)
 
     out_dir = control_root / "reports"

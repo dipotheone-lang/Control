@@ -3,9 +3,16 @@
 Adaptive obligation & deadline control engine for **United Brothers Co.
 (UBCSIS)** — the automated controller behind `control@ubcsis.com`.
 
-The single source of truth is the operating charter: **[`CLAUDE.md`](CLAUDE.md)**
-(v4.10). Everything in this repository implements it or feeds it. The two
-review documents that shaped it are in [`docs/`](docs/).
+The single source of truth is the operating charter:
+**[`CLAUDE.md`](CLAUDE.md)** — read the version from its own header
+rather than from here, because a number copied into a second file goes
+stale the next time the charter is amended and this one did. Everything
+in this repository implements it or feeds it. The two review documents
+that shaped it are in [`docs/`](docs/).
+
+**Currently operating on decision D-15:** class 1 statutory obligations
+only, no mailbox read. `docs/RESUME-HERE.md` is the state of the
+machine; `docs/decisions/D15-STATUTORY-ONLY.md` is why.
 
 ## What this system is
 

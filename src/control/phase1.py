@@ -489,24 +489,73 @@ def render(phase0: list[GateItem], phase1: list[GateItem], e: Evidence,
     return "\n".join(lines) + "\n"
 
 
+# Gate rows a narrowed scope does not require. D-15 names three of them
+# in terms — no usage policy, PDPL notification or IWR amendment,
+# because §12.4 governs a system measuring named individuals' process
+# compliance and §12.2 governs mailbox-derived personal data, and
+# STATUTORY_ONLY does neither. The rest follow from the same fact: a
+# golden set judges verdicts nobody issues, a dispute path appeals them,
+# and the confidential scope governs documents nothing reads.
+#
+# The state is NOT changed to CLOSED. They are open, and they are what
+# widening would have to close — saying otherwise would be the gate
+# lying about a §12 pre-condition, which is the one thing it exists not
+# to do. What changes is that the reader is told which of them the scope
+# actually needs. Without this the gate read "5 open, 1 blocked" at a
+# moment when the running scope required none of the six, and a gate
+# that overstates what is blocking is a gate people stop reading.
+_NOT_REQUIRED_BY_STATUTORY_ONLY = {
+    "usage_policy": "§12.4 governs evaluating people's work; this scope "
+                    "evaluates none",
+    "pdpl": "§12.2 governs mailbox-derived personal data; this scope reads "
+            "no mailbox",
+    "iwr": "monitoring authority, for monitoring this scope does not do",
+    "golden_set": "judges verdicts; this scope issues none",
+    "dispute_path": "appeals verdicts; this scope issues none",
+    "confidential_scope": "governs reading confidential documents; this "
+                          "scope reads none",
+    "authority_matrix": "§7.3 S2 authority checks; out of scope under D-15",
+}
+
+
+def not_required(item: "GateItem", scope: str) -> str:
+    """Why the running scope does not need this row, or empty."""
+    from .scope_statutory import MAILBOX_READ
+    from .scope_statutory import permits as scope_permits
+
+    if scope_permits(scope, MAILBOX_READ):
+        return ""
+    return _NOT_REQUIRED_BY_STATUTORY_ONLY.get(item.key, "")
+
+
 def _ordered(items: list[GateItem]) -> list[GateItem]:
     return sorted(items, key=lambda i: (STATE_ORDER.index(i.state), i.key))
 
 
-def console_lines(phase0: list[GateItem], phase1: list[GateItem]) -> list[str]:
+def console_lines(phase0: list[GateItem], phase1: list[GateItem],
+                  scope: str = "FULL") -> list[str]:
     """The same gate, short enough to read at the end of a run."""
     out = []
     for title, items in (("PHASE 0 GATE", phase0), ("PHASE 1 GATE", phase1)):
         counts = summary(items)
-        out.append(
-            f"{title} — {counts[CLOSED]} closed, {counts[OPEN]} open, "
-            f"{counts[BLOCKED]} blocked")
+        spare = sum(1 for i in items
+                    if i.state != CLOSED and not_required(i, scope))
+        head = (f"{title} — {counts[CLOSED]} closed, {counts[OPEN]} open, "
+                f"{counts[BLOCKED]} blocked")
+        if spare:
+            head += f" — {spare} of them not required by this scope"
+        out.append(head)
         for item in _ordered(items):
             mark = {CLOSED: "ok  ", OPEN: "OPEN", BLOCKED: "BLOCK"}[item.state]
             out.append(f"  [{mark}] {item.requirement}")
             if item.state != CLOSED:
                 out.append(f"         {item.evidence}")
                 out.append(f"         -> {item.owner}")
+                reason = not_required(item, scope)
+                if reason:
+                    out.append(f"         NOT REQUIRED BY THIS SCOPE: "
+                               f"{reason}. Still open, and still what "
+                               "widening would have to close.")
     return out
 
 

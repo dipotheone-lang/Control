@@ -1,6 +1,6 @@
 # RESUME HERE — state as at 30-Aug-2026
 
-> **The project was narrowed on 30-Aug-2026. Decision D-15, charter 4.12:
+> **The project was narrowed on 30-Aug-2026. Decision D-15, in the charter since 4.11:
 > Control operates on class 1 statutory obligations alone and reads no
 > mailbox.** Read `docs/decisions/D15-STATUTORY-ONLY.md` before anything
 > else here — most of what follows describes capabilities that are built,

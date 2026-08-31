@@ -1,6 +1,19 @@
 # Control — the runbook
 
 > **Where the build is right now, and the next command to run: `docs/RESUME-HERE.md`.** This runbook is how to run each thing; that file is where we are.
+>
+> **Most of what follows is out of scope today.** Decision D-15 narrowed
+> Control to class 1 statutory obligations with no mailbox read, so the
+> daily operation is `Run Control.cmd` — three steps, seconds. The
+> mailbox scan, the contract extraction, the evaluation cycle and the
+> golden set are all built and tested and none of them runs. They are
+> documented here because widening means closing the §12 pre-conditions
+> and moving the scope back, not rebuilding.
+>
+> **One line is superseded throughout:** this document was written while
+> Control sent nothing. Under D-58 class 1 alerts now leave through
+> Outlook. The external gate is untouched — nothing goes to an address
+> outside ubcsis.com, by any route, in any mode.
 
 Everything you need to run, in order, from a machine with nothing on it.
 

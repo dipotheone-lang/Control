@@ -1,103 +1,67 @@
-> **Superseded for day-to-day use by `docs/RUNBOOK.md`**, which carries the current commands end to end. This file is kept for the background it records.
+> **Historical record, 17-Aug-2026. Do not follow it.**
+>
+> This was the orientation brief while Control was in Phase 0 discovery.
+> Almost every operational statement in it is now false: the phase, the
+> run mode, the test count, the paths, the list of what is built, and
+> the list of what is outstanding. `docs/RESUME-HERE.md` is the current
+> state; `CLAUDE.md` is the authority.
+>
+> It is kept, trimmed to the two things it records that nothing else
+> does: what the first real mailbox scan found, and the charter
+> deviation it flagged — which was resolved, in the way it asked for.
 
-# Handoff brief — for a Claude Code session running on the UBCSIS laptop
-
-You are picking up a build already in progress. This file is the
-orientation; the charter (`CLAUDE.md`) is the authority. Read §0–§2 and
-§10 of the charter before changing anything.
-
-## Where the project is
-
-Phase 0 (Discovery), Level 0, `RUN_MODE=DISCOVERY`, `LEARNING_MODE=OBSERVE`.
-**The engine sends nothing**, by design, and must not be made to.
-
-Built and merged (202 tests, `python -m pytest`):
-
-| Area | Module | Status |
-|---|---|---|
-| Startup, legal states, halt semantics | `startup.py`, `states.py` | done |
-| Append-only store, hash-chained log | `db.py`, `audit.py` | done |
-| Classification (§9) | `classify.py` | done |
-| Evaluation C1–C7, verdicts (§7) | `evaluate.py` | done |
-| Bilingual replies (§7.5, §4) | `render.py` | done |
-| Enforcement, ladder, absence (§8) | `enforce.py` | done |
-| Anomaly signals S1–S4 (§7.3) | `anomaly.py` | done |
-| External watchdog (§8.5) | `watchdog.py` | done |
-| Attachment security (§5.4) | `attachments.py` | done |
-| Approval gates (§10) | `outbox.py` | done |
-| Weekly report (§11) | `report.py` | done |
-| Golden set (§13.1) | `goldenset.py` | done |
-| Cycle orchestration | `cycle.py` | done |
-| Graph transport | `transport.py` | built, tenant not provisioned |
-| Outlook COM transport | `outlook.py` | **in use** |
-| Discovery scan + analysis | `discovery/` | **in use** |
-
-## How mail is being read, and why it matters
-
-The charter §5.1 specifies Microsoft Graph with certificate auth and a
-*mandatory* Exchange Application Access Policy restricting the engine to
-`control@ubcsis.com` alone. That path is built but the tenant was never
-provisioned — the admin sign-in kept landing on a personal Microsoft
-account (Windows WAM), so the project switched to reading Outlook
-directly over COM.
-
-**This is a live charter deviation.** COM runs as the signed-in Windows
-user and can reach every mailbox in the profile — a *wider* permission
-surface than §5.1 allows, touching §12.2 (PDPL). Two guards are in the
-code: the store is resolved by address and never falls back to another
-mailbox, and sending is disabled unless explicitly enabled and matched
-to the expected mailbox.
-
-For Phase 0 (metadata only, sends nothing) this is a defensible trade.
-**Before Phase 2 it must either move to Graph or be recorded as a CEO
-decision in Appendix B.** Do not let it become permanent by silence.
-
-## Running discovery
-
-```powershell
-$env:CONTROL_ROOT = "$env:USERPROFILE\Documents\Control\CONTROL"
-python -m control phase0          # scan every mailbox, analyse, generate
-python -m control analyse         # re-run analysis alone
-python -m control verify          # DB integrity + audit chain
-```
-
-Requires classic Outlook running (the "new Outlook" has no COM), and
-`pywin32`.
+# Handoff brief — Phase 0, 17-Aug-2026 (historical)
 
 ## What the first real run found
 
-- `control@ubcsis.com` is **new** and holds almost nothing. The company's
-  history lives in `contact.ubcsis@gmail.com` (~10,000 messages),
-  `info@`, `ahmed@`, `hr@`, `sales@`.
-- `invoicing.eta.gov.eg` appears in high volume — direct evidence of the
-  **Class 1 statutory e-invoicing obligation** (§2.1).
-- Several major counterparties appear that are **not** on the charter's
-  §12.1.1 confidential list. They need classification under **O-04**.
-- ~10,000 messages of company correspondence sit in a consumer Gmail
-  account — the exposure review finding **V1** predicted, now quantified.
+The numbers that shaped every decision since:
 
-## Rules that bind you as much as the engine
+- `control@ubcsis.com` is **new** and holds almost nothing. The
+  company's history lives in `contact.ubcsis@gmail.com` (~10,000
+  messages), `info@`, `ahmed@`, `hr@`, `sales@`.
+- `invoicing.eta.gov.eg` appears in high volume — direct evidence of the
+  class 1 statutory e-invoicing obligation (§2.1), and the reason
+  `STAT-ETA-SUB` and `STAT-ETA-REJ` are live rows rather than dormant
+  ones.
+- Several major counterparties appear that are **not** on the charter's
+  §12.1.1 confidential list. They need classification under **O-04**,
+  which is still open.
+- ~10,000 messages of company correspondence sit in a consumer Gmail
+  account — the exposure review finding **V1** predicted, quantified
+  here, and the reason D-09 records what deferring its replacement
+  accepts.
+
+## The charter deviation it flagged, and how it ended
+
+This file said, of reading mail over Outlook COM rather than Graph:
+
+> **Before Phase 2 it must either move to Graph or be recorded as a CEO
+> decision in Appendix B. Do not let it become permanent by silence.**
+
+It did not become permanent by silence. **D-58 (30-Aug-2026)** records
+the decision explicitly: Outlook carries the class 1 alerts, Graph is no
+longer waited on, and the cost is written into the row — a transport
+needing a powered laptop cannot hold a class 1 schedule, so on the day a
+filing falls due with the machine asleep, nobody is told. That was
+raised as advice against the decision, decided anyway, and mitigated:
+an alert that cannot leave is written `UNDELIVERED`, never marked sent,
+and retried on the next run.
+
+The wider objection this file raised — that COM reaches every mailbox in
+the Windows profile — is gone rather than accepted. Under
+`OPERATING_SCOPE=STATUTORY_ONLY` nothing is fetched at all. The profile
+does hold 18 stores, including two on another company's domain; Control
+reads none of them.
+
+## The rules, which have not changed
 
 1. **Never fabricate.** Missing or unreadable → say so. A visible gap is
    a finding; a filled gap is a fabrication (§1.1).
-2. **Metadata only** during discovery. Do not read message bodies; the
-   scan is deliberately built not to (§12.1.2).
-3. **Nothing sends.** The external gate never opens (§10). Phase 0 sends
-   nothing at all (§6).
-4. **Write only inside `CONTROL_ROOT`.** Everything else is read-only
+2. **Nothing goes outside ubcsis.com.** The external gate never opens
+   (§10). The sole scoped exception is the §3.1 continuity CC under
+   D-04.
+3. **Write only inside `CONTROL_ROOT`.** Everything else is read-only
    (§1.13).
-5. **You may not amend the charter.** Only Ahmed Diab does, with a
+4. **You may not amend the charter.** Only Ahmed Diab does, with a
    version and reason (§17). Propose amendments; never edit.
-6. **Findings address the process, never the person** (§1.4).
-
-## What is genuinely outstanding
-
-Human decisions, not code (charter Appendix B): **O-01** reporting lines ·
-**O-02** authority thresholds · **O-03** statutory calendar with the tax
-advisor · **O-04** confidential scope · **O-05** shared-mailbox option ·
-**O-09** `UB_ROOT` path · **O-11** working hours.
-
-Tooling not yet built: Stage C (forms, manuals and **contract date
-extraction** — this feeds `COMMERCIAL-EXPOSURE.md`, the charter calls it
-the highest-value single output), Stage E backfill, Stage F statistical
-baselines, and the folder inventory run against a confirmed `UB_ROOT`.
+5. **Findings address the process, never the person** (§1.4).
