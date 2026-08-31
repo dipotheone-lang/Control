@@ -461,6 +461,34 @@ def _adopt_list(name: str, key: str, template_list: list,
                     f"{name}: {key} {label} {field_key} "
                     f"{local[field_key]!r} -> {value!r}")
                 local[field_key] = value
+
+    # Removal, and ONLY under an explicit per-file acceptance.
+    #
+    # Adoption is otherwise one-directional: a local-only entry is where
+    # decisions live, and dropping one would discard a decision nobody
+    # asked about. But `--accept-template` is a human saying the template
+    # side of THIS file is current, and a register's identity is its list
+    # of rows — so an entry the template no longer carries is a
+    # superseded decision, not a local one.
+    #
+    # The case that forced this: STAT-PAYROLL was split into
+    # STAT-PAYROLL-REM and STAT-PAYROLL-RET on 30-Aug-2026. Adoption
+    # added both and kept the original, leaving three payroll rules where
+    # the register says two — and the third would have gone on asking
+    # Hadeer a question the split had already answered.
+    #
+    # Every removal is named, and the whole file is copied to
+    # config/.superseded/ before it is rewritten.
+    if take_template:
+        template_keys = {_entry_key(e, field_name) for e in template_list}
+        for entry in list(live_list):
+            label = _entry_key(entry, field_name)
+            if label in template_keys:
+                continue
+            live_list.remove(entry)
+            applied.append(
+                f"{name}: {key} -= {label} (the template no longer carries "
+                "it; removed because you accepted the template for this file)")
     return applied
 
 

@@ -489,3 +489,84 @@ def test_accepting_the_template_never_removes_a_local_only_value(machine):
     after = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert after["local_only_key"] == "kept"
     assert any(p["email"] == "newjoiner@ubcsis.com" for p in after["people"])
+
+
+# ---- removal under an explicit acceptance -----------------------------
+
+def _root_with(tmp_path, live_rows, template_rows):
+    import yaml
+
+    machine = tmp_path / "CONTROL"
+    (machine / "config").mkdir(parents=True)
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    for base, rows in ((machine / "config", live_rows), (templates, template_rows)):
+        (base / "statutory-calendar.yaml").write_text(
+            yaml.safe_dump({"obligations": rows}), encoding="utf-8")
+    return machine, templates
+
+
+def test_a_superseded_row_is_removed_only_when_the_template_is_accepted(tmp_path):
+    """STAT-PAYROLL was split into two rows on 30-Aug-2026. Adoption
+    added both and kept the original, leaving three payroll rules where
+    the register says two — and the third went on asking a question the
+    split had already answered."""
+    import yaml
+
+    from control.bootstrap import adopt_drift
+
+    live = [{"id": "STAT-PAYROLL", "rule": "UNVERIFIED — pending"},
+            {"id": "STAT-VAT", "rule": "day 20"}]
+    template = [{"id": "STAT-PAYROLL-REM", "rule": "end of the following month"},
+                {"id": "STAT-PAYROLL-RET", "rule": "end of the month after each quarter"},
+                {"id": "STAT-VAT", "rule": "day 20"}]
+    machine, templates = _root_with(tmp_path, live, template)
+
+    applied = adopt_drift(machine, templates,
+                          accept_template=["statutory-calendar.yaml"])
+
+    rows = yaml.safe_load(
+        (machine / "config" / "statutory-calendar.yaml").read_text(
+            encoding="utf-8"))["obligations"]
+    assert {r["id"] for r in rows} == {
+        "STAT-PAYROLL-REM", "STAT-PAYROLL-RET", "STAT-VAT"}
+    assert any("-= STAT-PAYROLL" in line for line in applied), \
+        "a removal that is not named is a decision taken silently"
+
+
+def test_a_local_only_row_survives_a_plain_adopt(tmp_path):
+    """Without the explicit acceptance, adoption stays one-directional.
+    A local-only entry is where decisions live, and dropping one would
+    discard a decision nobody asked about."""
+    import yaml
+
+    from control.bootstrap import adopt_drift
+
+    live = [{"id": "STAT-LOCAL", "rule": "day 3"},
+            {"id": "STAT-VAT", "rule": "day 20"}]
+    template = [{"id": "STAT-VAT", "rule": "day 20"}]
+    machine, templates = _root_with(tmp_path, live, template)
+
+    adopt_drift(machine, templates)
+
+    rows = yaml.safe_load(
+        (machine / "config" / "statutory-calendar.yaml").read_text(
+            encoding="utf-8"))["obligations"]
+    assert {r["id"] for r in rows} == {"STAT-LOCAL", "STAT-VAT"}
+
+
+def test_the_file_is_kept_before_a_removal_rewrites_it(tmp_path):
+    """§1.1 and the module's own rule: safe_dump does not keep comments,
+    and a removal is the change most worth being able to undo."""
+    from control.bootstrap import adopt_drift
+
+    live = [{"id": "STAT-PAYROLL", "rule": "UNVERIFIED — pending"}]
+    template = [{"id": "STAT-PAYROLL-REM", "rule": "day 5"}]
+    machine, templates = _root_with(tmp_path, live, template)
+
+    adopt_drift(machine, templates,
+                accept_template=["statutory-calendar.yaml"])
+
+    kept = list((machine / "config" / ".superseded").glob("*"))
+    assert kept, "the previous version was not kept"
+    assert "STAT-PAYROLL" in kept[0].read_text(encoding="utf-8")
