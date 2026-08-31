@@ -10,6 +10,12 @@ rem
 rem  It sends no mail. Every outbound message Control produces is a draft
 rem  in outbox\pending-approval, in every mode, with no override for
 rem  urgency or seniority (charter section 10).
+rem  A RULE THIS FILE LEARNED THE HARD WAY: no parentheses in `echo`
+rem  text. Inside a parenthesised block cmd treats the first `)` it meets
+rem  as the end of the block, so `echo ... (section 1.1).` closed the
+rem  block early and left `.` as a stray command. The script died right
+rem  after printing the horizon, and the run, the missing-dates page and
+rem  the requests never happened. Use a dash or a comma instead.
 rem ===========================================================================
 
 setlocal
@@ -130,7 +136,7 @@ echo   Full transcript of this run:
 echo     %LOG%
 echo.
 echo   The gate above names every open item and the one person who can
-echo   close it. Control closes none of them by design (section 16):
+echo   close it. Control closes none of them by design - section 16:
 echo   a gate the system could close alone would not be a gate.
 echo.
 if defined INTERACTIVE pause

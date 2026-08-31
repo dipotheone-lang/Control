@@ -29,7 +29,7 @@ echo Registering "%TASK%" to run every day at %AT%.
 echo   It runs: "%CD%\Run Control.cmd" /scheduled
 echo.
 echo   That reads config\statutory-calendar.yaml and nothing else. No
-echo   mailbox, no drive scan, no OCR (decision D-15), so it does not
+echo   mailbox, no drive scan, no OCR - decision D-15 - so it does not
 echo   need Outlook open or E: plugged in, and it takes seconds.
 echo.
 echo   It writes reports\statutory-YYYY-MM-DD.txt and stops there.

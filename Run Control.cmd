@@ -18,6 +18,12 @@ rem
 rem  The full discovery run is still here, unchanged, in
 rem  "Run full scan.cmd" - widening the scope later means closing the
 rem  section 12 pre-conditions, not rebuilding anything.
+rem  A RULE THIS FILE LEARNED THE HARD WAY: no parentheses in `echo`
+rem  text. Inside a parenthesised block cmd treats the first `)` it meets
+rem  as the end of the block, so `echo ... (section 1.1).` closed the
+rem  block early and left `.` as a stray command. The script died right
+rem  after printing the horizon, and the run, the missing-dates page and
+rem  the requests never happened. Use a dash or a comma instead.
 rem ===========================================================================
 
 setlocal
@@ -53,7 +59,7 @@ echo ===========================================================================
 echo   CONTROL - statutory horizon
 echo ===========================================================================
 echo   CONTROL_ROOT : %CONTROL_ROOT%
-echo   Scope        : STATUTORY_ONLY (D-15) - class 1 only, no mailbox read
+echo   Scope        : STATUTORY_ONLY, decision D-15 - class 1 only, no mailbox read
 echo.
 
 echo == 1 of 3: updating ==
@@ -90,7 +96,7 @@ if errorlevel 1 (
   echo   The run stopped above. Control halts rather than carrying on with
   echo   a partial view - an empty horizon and a horizon that failed to
   echo   build look identical on the page, and only one of them is safe to
-  echo   act on (section 1.1).
+  echo   act on - section 1.1.
   if defined INTERACTIVE pause
   endlocal
   exit /b 1
@@ -110,8 +116,8 @@ python -m control statutory --ask --control-root "%CONTROL_ROOT%" >nul 2>&1
 echo.
 echo == 3 of 3: the run ==
 echo    The horizon above is the page. This is the record: the deadline
-echo    engine plans the section 2.1 alerts (T-7, T-3, T-1 and the day
-echo    itself), writes them, and posts to the database and the
+echo    engine plans the section 2.1 alerts - T-7, T-3, T-1 and the day
+echo    itself - writes them, and posts to the database and the
 echo    hash-chained log.
 echo.
 echo    Nothing is sent. Until Graph is provisioned there is no transport,
@@ -133,7 +139,7 @@ if errorlevel 1 (
 
 echo.
 echo ===========================================================================
-echo   Not one of these dates has been confirmed by a tax advisor (O-03).
+echo   Not one of these dates has been confirmed by a tax advisor - O-03.
 echo   They alert early, which is what the charter asks for - but nobody
 echo   qualified has checked them, and time passing does not check them.
 echo   O-03 is the one open item between this and a verified calendar.
