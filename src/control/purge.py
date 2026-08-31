@@ -132,8 +132,16 @@ def render(result: PurgeResult, today: date) -> str:
             "",
             "  1. python -m control backup        (writes a clean archive)",
             "  2. delete the archives listed above",
+            "  3. empty the recycle bin of wherever they were synced",
             "",
             "In that order — deleting first would leave no backup at all,",
             "and §13.3 counts backup age as a control.",
+            "",
+            "Step 3 is not housekeeping. A cloud sync folder keeps deleted",
+            "files in an online recycle bin for weeks after they leave the",
+            "disk — OneDrive holds them for 30 days — so a deletion that",
+            "stops at step 2 has moved the copies rather than removed them.",
+            "The same is true of the local Recycle Bin for anything deleted",
+            "through Explorer rather than PowerShell.",
         ]
     return "\n".join(lines)

@@ -100,3 +100,21 @@ def test_nothing_to_delete_says_so_rather_than_claiming_success(tmp_path):
 
     assert result.files == 0
     assert "does not exist" in render(result, date(2026, 8, 31))
+
+
+def test_the_sync_recycle_bin_is_named_as_part_of_the_deletion(tmp_path):
+    """A cloud folder keeps deleted files in an online recycle bin for
+    weeks after they leave the disk. A deletion that stops at the folder
+    has moved the copies rather than removed them."""
+    root = _root(tmp_path)
+    dest = tmp_path / "OneDrive" / "UBCSIS-Control-Backup"
+    dest.mkdir(parents=True)
+    (dest / "control-backup-2026-08-16.enc").write_bytes(b"ciphertext")
+
+    text = render(purge_discovery(
+        root, reason="r", ordered_by="Ahmed Diab",
+        backup_config={"destination": {"path": str(dest)}}), date(2026, 8, 31))
+
+    assert "empty the recycle bin" in text
+    assert "30 days" in text
+    assert "moved the copies rather than removed them" in text
