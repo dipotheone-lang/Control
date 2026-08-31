@@ -50,12 +50,13 @@ which. Nothing fires before then.
 
 | Item | Who | Effect |
 |---|---|---|
-| Install the 7am task | you | `scripts\Install-DailyRun.cmd`, as administrator |
-| Forward `reports\statutory-ask-*.txt` | you | Two ready bilingual messages. Hadeer and Mohamed Ali's answers take coverage 7 of 13 → 9 of 13 |
+| Empty the OneDrive online recycle bin | you | The four archives deleted on 31-Aug are recoverable there for 30 days. Until that is done D-61's deletion is a move, not a removal |
+| Install the 7am task | you | `scripts\Install-DailyRun.cmd`, as administrator. It now registers with `StartWhenAvailable`, so a 07:00 the laptop slept through runs when it next wakes rather than being skipped |
+| Forward `reports\statutory-ask-*.txt` | you | One ready bilingual message, to Mohamed Ali. His answer on STAT-REG and STAT-LIC takes coverage 7 of 13 → 9 of 13. D-59 closed the rows Hadeer held |
 | Verify the 13 rules | a tax advisor — none engaged | O-03. Removes `[UNVERIFIED]` from every line. The two payroll rows first: a wrong monthly date fires twelve wrong alerts a year |
 | The Gmail continuity CC | you | D-04. Goes from draft to real traffic on 8 September. Leave, narrow, or replace |
 | Business OneDrive for ubcsis.com | admin | Returns the backup to D-11 as written. The personal account is an accepted interim (D-60) |
-| Escrow the backup key | you | It is in Windows Credential Manager on the laptop. The archives sync off the machine; the key does not |
+| Escrow the backup key | you | It is in Windows Credential Manager on the laptop. The archives sync off the machine; the key does not. It also needs rotating — the current one appeared in a screenshot. `backup --init-key --rotate`, which now refuses without the flag and names the archives that stop opening |
 | `united_brothers_outreach` | you | A weekly job on this laptop fired unattended on 31-Aug against `contacts_all.csv` with a "followup" template. Nothing in this repository created or schedules it, and neither of us knows what it sends |
 
 ### Defects found on the day, all fixed

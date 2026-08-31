@@ -1233,13 +1233,25 @@ def cmd_cycle(args) -> int:
         # and it must not be readable as a clean run.
         print(f"\nNOT DELIVERED:    {len(result.undelivered)} message(s) "
               "§10 required to be SENT")
-        print("                  were written as drafts — no transport is "
-              "provisioned (D-08).")
-        print("                  Nobody was alerted. They are in "
-              "outbox/pending-approval marked")
-        print("                  UNDELIVERED_NO_TRANSPORT, and they stay "
-              "undelivered until Graph")
-        print("                  is provisioned: scripts/provision-graph.ps1")
+        print("                  were written as drafts. Nobody was "
+              "alerted. They are in")
+        print("                  outbox/pending-approval marked "
+              "UNDELIVERED_NO_TRANSPORT,")
+        print("                  and they are attempted again on the "
+              "next run.")
+        # Why, not just what. D-58 made Outlook the whole route under
+        # this scope, and Outlook is closed whenever the laptop is — so
+        # the usual cause is a sleeping machine, not a missing tenant.
+        # Sending the reader to provision Graph, as this line did until
+        # 31-Aug-2026, points at the one thing that is not the problem.
+        if str(getattr(report, "scope", "FULL")) == "STATUTORY_ONLY":
+            print("                  Under D-58 Outlook carries these. "
+                  "The usual cause is that")
+            print("                  Outlook was closed or the laptop "
+                  "asleep when the run fired.")
+        else:
+            print("                  No transport is provisioned (D-08): "
+                  "scripts/provision-graph.ps1")
         for line in result.repeatedly_undelivered:
             print(f"  REPEATED FAILURE: {line} — a single miss is a closed "
                   "laptop; a repeat is the transport.")
@@ -2818,7 +2830,8 @@ def cmd_backup(args) -> int:
 
     from .backup import (
         BackupResult, continuity_lines, create_backup, create_key,
-        latest_backup, prune, resolve_destination, restore, restore_test,
+        existing_archives, latest_backup, prune, resolve_destination,
+        restore, restore_test,
     )
 
     control_root = Path(args.control_root)
@@ -2830,7 +2843,12 @@ def cmd_backup(args) -> int:
     today = date.fromisoformat(args.today) if args.today else date.today()
 
     if args.init_key:
-        key = create_key(config)
+        stale = existing_archives(config) if args.rotate else []
+        try:
+            key = create_key(config, rotate=args.rotate)
+        except HaltError as exc:
+            print(f"REFUSED: {exc}")
+            return 1
         print("A new backup encryption key has been created and stored in "
               "the Windows credential store.\n")
         print(f"  {key}\n")
@@ -2838,6 +2856,19 @@ def cmd_backup(args) -> int:
         print("exists only on the laptop the backup protects against is not")
         print("a key. Without it the backups cannot be restored by anyone,")
         print("including you.")
+        if stale:
+            print("\nTHE ARCHIVES ALREADY WRITTEN NO LONGER OPEN.")
+            print("They were encrypted with the key just replaced:")
+            for path in stale:
+                print(f"  {path.name}")
+            print("\nSo there is no restorable backup until a new one is")
+            print("written. In this order, and not a different one:")
+            print("  1. python -m control backup")
+            print("  2. python -m control backup --test --record")
+            print("  3. delete the archives listed above, and empty the")
+            print("     recycle bin of wherever they were synced")
+            print("\nStep 2 before step 3, because §13.3 counts a backup")
+            print("as continuity only once a restore of it has been proved.")
         return 0
 
     destination = resolve_destination(config)
@@ -3287,6 +3318,10 @@ def main(argv: list[str] | None = None) -> int:
     backup = sub.add_parser(
         "backup", help="§5.2 continuity: encrypted backup of CONTROL_ROOT")
     backup.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    backup.add_argument("--rotate", action="store_true",
+                        help="with --init-key: replace a key that is "
+                             "already stored, knowing every existing "
+                             "archive becomes unreadable")
     backup.add_argument("--init-key", action="store_true",
                         help="create and store the encryption key (once)")
     backup.add_argument("--record", action="store_true",

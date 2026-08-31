@@ -502,3 +502,55 @@ def test_a_last_tested_elsewhere_in_the_file_is_not_touched(tmp_path):
     body = (root / "config" / "backup.yaml").read_text(encoding="utf-8")
     assert "last_tested: 2020-01-01" in body
     assert "last_tested: 2026-08-31" in body
+
+
+# ---- rotating the key -------------------------------------------------
+#
+# `--init-key` reads like setup, so it invites being run twice. The
+# second run is not setup: it destroys every archive written under the
+# first key, silently, with no error at the time and no error until
+# somebody needs a restore. The refusal below is the whole control.
+
+def test_creating_a_second_key_over_a_first_one_is_refused(root, tmp_path, key):
+    from control.backup import create_key
+
+    config, env = cfg(tmp_path / "dest", key)
+    create_backup(root, config, on_date=date(2026, 8, 31), env=env)
+
+    with pytest.raises(HaltError) as e:
+        create_key(config, env=env)
+    message = str(e.value)
+    assert "already stored" in message
+    assert "--rotate" in message
+
+
+def test_the_refusal_names_the_archives_that_would_be_lost(root, tmp_path, key):
+    from control.backup import create_key
+
+    config, env = cfg(tmp_path / "dest", key)
+    create_backup(root, config, on_date=date(2026, 8, 31), env=env)
+
+    with pytest.raises(HaltError) as e:
+        create_key(config, env=env)
+    assert "control-backup-2026-08-31.enc" in str(e.value)
+
+
+def test_no_key_stored_means_init_key_is_ordinary_setup(tmp_path):
+    """The refusal must not block the first run, which has nothing to lose."""
+    from control.backup import key_is_stored
+
+    config, _ = cfg(tmp_path / "dest", "unused")
+    assert key_is_stored(config, {}) is False
+
+
+def test_key_is_stored_never_returns_the_key(tmp_path, key):
+    from control.backup import key_is_stored
+
+    config, env = cfg(tmp_path / "dest", key)
+    assert key_is_stored(config, env) is True
+
+
+def test_existing_archives_is_empty_when_the_destination_does_not_exist():
+    from control.backup import existing_archives
+
+    assert existing_archives({"destination": {"path": "/nowhere/at/all"}}) == []

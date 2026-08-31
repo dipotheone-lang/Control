@@ -11,9 +11,11 @@ rem  It takes seconds. It reads config\statutory-calendar.yaml and
 rem  nothing else - no mailbox, no drive scan, no OCR - so it works on a
 rem  machine where Outlook is closed and E: is unplugged.
 rem
-rem  It sends nothing. Every outbound message Control produces is a draft
-rem  in outbox\pending-approval, in every mode, with no override for
-rem  urgency or seniority (charter section 10).
+rem  Class 1 alerts are sent, through Outlook, to ubcsis.com addresses
+rem  only - decision D-58. Everything the charter holds at DRAFT stays a
+rem  draft in outbox\pending-approval, in every mode, with no override
+rem  for urgency or seniority. The external gate never opens, for any
+rem  route or mode (charter section 10).
 rem
 rem  The full discovery run is still here, unchanged, in
 rem  "Run full scan.cmd" - widening the scope later means closing the
@@ -120,10 +122,14 @@ echo    engine plans the section 2.1 alerts - T-7, T-3, T-1 and the day
 echo    itself - writes them, and posts to the database and the
 echo    hash-chained log.
 echo.
-echo    Nothing is sent. Until Graph is provisioned there is no transport,
-echo    so an alert section 10 asks to SEND is written and reported as
-echo    NOT DELIVERED - which is the honest state, not a failure of this
-echo    run. Watch for that line.
+echo    Class 1 alerts go out through Outlook - decision D-58 - to the
+echo    named owner and the CEO, at ubcsis.com addresses only. Nothing
+echo    leaves for an external address by any route, in any mode.
+echo.
+echo    If Outlook is closed or the laptop was asleep, the alert is
+echo    written NOT DELIVERED and attempted again on the next run. It is
+echo    never marked sent. Watch for that line - one miss is a closed
+echo    laptop, a repeat is the transport.
 echo.
 rem UB_ROOT is not read in this scope. It is passed because the command
 rem requires it, and an unreachable one is reported and stepped past

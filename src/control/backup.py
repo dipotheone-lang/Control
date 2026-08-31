@@ -176,19 +176,53 @@ def _load_key(config: dict | None, env: dict | None = None) -> bytes:
     )
 
 
-def create_key(config: dict) -> str:
+def key_is_stored(config: dict | None, env: dict | None = None) -> bool:
+    """Whether a key can already be found. Never returns the key."""
+    try:
+        _load_key(config, env)
+    except HaltError:
+        return False
+    return True
+
+
+def create_key(config: dict, *, rotate: bool = False,
+               env: dict | None = None) -> str:
     """Generate and store a new key. Returns it once, for escrow.
 
     The caller must record it somewhere outside this machine — a key
     that exists only on the laptop the backup protects against is not a
     key, it is a coin flip.
+
+    Storing a second key over a first one is not a neutral act: every
+    archive already written was encrypted with the old key and becomes
+    unreadable the moment it is overwritten, by anyone, permanently.
+    So this refuses when a key is already stored unless the caller
+    says `rotate` — the refusal is the control, because the damage is
+    silent and irreversible and the command looks like setup.
     """
     from cryptography.fernet import Fernet
 
-    key = Fernet.generate_key().decode()
     service = ((config or {}).get("encryption") or {}).get("keyring_service")
     if not service:
         raise HaltError("backup.yaml: encryption.keyring_service is not set")
+
+    if key_is_stored(config, env) and not rotate:
+        archives = existing_archives(config, env)
+        raise HaltError(
+            "a backup key is already stored. Creating another one "
+            "overwrites it, and "
+            + (f"the {len(archives)} archive(s) already written "
+               f"({', '.join(a.name for a in archives[:3])}"
+               f"{', …' if len(archives) > 3 else ''}) were encrypted "
+               "with the current key — they would become permanently "
+               "unreadable."
+               if archives else
+               "any archive written with the current key would become "
+               "permanently unreadable.")
+            + " If you mean to rotate it, pass --rotate."
+        )
+
+    key = Fernet.generate_key().decode()
     import keyring
 
     keyring.set_password(service, "control", key)
@@ -303,11 +337,17 @@ def prune(config: dict, *, on_date: date, env: dict | None = None) -> list[str]:
 
 # ---- reading back ----------------------------------------------------
 
-def latest_backup(config: dict, env: dict | None = None) -> Path | None:
+def existing_archives(config: dict | None,
+                      env: dict | None = None) -> list[Path]:
+    """Every archive at the destination, oldest first."""
     destination = resolve_destination(config, env)
     if destination is None or not destination.is_dir():
-        return None
-    archives = sorted(destination.glob(f"{ARCHIVE_PREFIX}*{ARCHIVE_SUFFIX}"))
+        return []
+    return sorted(destination.glob(f"{ARCHIVE_PREFIX}*{ARCHIVE_SUFFIX}"))
+
+
+def latest_backup(config: dict, env: dict | None = None) -> Path | None:
+    archives = existing_archives(config, env)
     return archives[-1] if archives else None
 
 
