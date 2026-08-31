@@ -81,6 +81,18 @@ is the point: **every one of them looked like success.**
 - Drift offering to erase the restore test it had just recorded
 - `E:` recorded as surviving the laptop; it is a partition of the same
   physical disk (D-60 withdraws the claim)
+- **The first real send went out as `info@ubcsis.com`, not `control@`.**
+  The identity guard existed and raised correctly — and a
+  `try/except: pass` swallowed the refusal and called `Send()` anyway,
+  so Outlook used the profile default. No test had ever exercised a
+  successful send, which is how a swallowed guard survives. Caught by
+  the CEO on the D-62 test send of 31-Aug; without it, the 8-Sep class
+  1 alerts would all have carried a person's identity. Now: the account
+  is resolved before the mail item exists, the pin is read back and
+  verified, a wrong identity refuses into `UNDELIVERED`-and-retry, and
+  `transport-check` proves the identity without sending. **PASS
+  confirmed on the operating machine, 31-Aug-2026** — control@ is a
+  real account in the profile
 
 ---
 
