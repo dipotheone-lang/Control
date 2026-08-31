@@ -243,6 +243,15 @@ class Outbox:
                                      action="UNDELIVERED")
         return self._write_draft(msg, status="PENDING_APPROVAL", action="DRAFT")
 
+    def record_undelivered(self, msg: OutboundMessage) -> Disposition:
+        """A send the transport refused or failed after `submit` said
+        SEND. Written with the same status as "no transport", so
+        `known_dedupe_keys` keeps excluding it and the next run retries
+        it — a failed send that left no record would be retried never
+        and reported nowhere."""
+        return self._write_draft(msg, status=UNDELIVERED,
+                                 action="UNDELIVERED")
+
     def _write_draft(self, msg: OutboundMessage, *, status: str,
                      action: str) -> Disposition:
         draft_id = f"DRAFT-{datetime.now(timezone.utc):%Y%m%d}-{uuid.uuid4().hex[:8]}"

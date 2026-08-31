@@ -107,6 +107,11 @@ class CycleReport:
     # Keys that have now failed to deliver more than once. A single miss
     # is a closed laptop; a repeat is the transport itself.
     repeatedly_undelivered: list[str] = field(default_factory=list)
+    # Sends the transport itself refused or failed mid-flight, with the
+    # reason — e.g. Outlook holding no account for the control mailbox.
+    # These are also counted in `undelivered`; the reason prints so the
+    # operator fixes the cause instead of rereading a generic count.
+    send_failures: list[str] = field(default_factory=list)
 
 
 def _raise_flag(conn, flag: Flag, report: CycleReport, budget: int | None,
@@ -159,10 +164,34 @@ def _dispatch(outbox: Outbox, transport: MailTransport, msg: OutboundMessage,
             "reason": "no transport available"})
         return
     if disposition.action == "SEND":
-        message_id = transport.send(
-            disposition.message.recipients, disposition.message.cc,
-            disposition.message.subject, disposition.message.body,
-        )
+        try:
+            message_id = transport.send(
+                disposition.message.recipients, disposition.message.cc,
+                disposition.message.subject, disposition.message.body,
+            )
+        except Exception as e:                          # noqa: BLE001
+            # A send the transport refused or dropped mid-flight. The
+            # message is recorded UNDELIVERED — same shape as "no
+            # transport", so the same retry picks it up next run — and
+            # the reason is carried out of the cycle, because "1 not
+            # delivered" without the why sends the operator to check
+            # whether Outlook was open when the real cause may be an
+            # identity refusal that no amount of reopening fixes.
+            failed = outbox.record_undelivered(msg)
+            if msg.dedupe_key:
+                known.add(msg.dedupe_key)
+            attempts = outbox.undelivered_attempts(msg.dedupe_key)
+            report.undelivered.append(failed.draft_id)
+            report.send_failures.append(
+                f"{msg.dedupe_key or msg.kind}: {str(e)[:300]}")
+            if attempts > 1:
+                report.repeatedly_undelivered.append(
+                    f"{msg.dedupe_key}: {attempts} failed attempts")
+            audit.append("outbox.send_failed", {
+                "kind": msg.kind, "key": msg.dedupe_key,
+                "draft_id": failed.draft_id,
+                "attempt": attempts, "reason": str(e)[:500]})
+            return
         outbox.mark_sent(disposition.message, message_id)
         if msg.dedupe_key:
             known.add(msg.dedupe_key)

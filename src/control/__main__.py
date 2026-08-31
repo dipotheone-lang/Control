@@ -1253,7 +1253,13 @@ def cmd_cycle(args) -> int:
         # the usual cause is a sleeping machine, not a missing tenant.
         # Sending the reader to provision Graph, as this line did until
         # 31-Aug-2026, points at the one thing that is not the problem.
-        if str(getattr(report, "scope", "FULL")) == "STATUTORY_ONLY":
+        if result.send_failures:
+            # The transport gave a reason. Print it — a generic count
+            # sends the operator to reopen Outlook when the real cause
+            # may be an identity refusal that reopening never fixes.
+            for line in result.send_failures:
+                print(f"  SEND FAILED:    {line}")
+        elif str(getattr(report, "scope", "FULL")) == "STATUTORY_ONLY":
             print("                  Under D-58 Outlook carries these. "
                   "The usual cause is that")
             print("                  Outlook was closed or the laptop "
@@ -1335,6 +1341,62 @@ def _role(people: dict, tier: int, marker: str = "") -> str:
             continue
         return str(entry.get("email", "")).lower()
     return ""
+
+
+def cmd_transport_check(args) -> int:
+    """Prove the sending identity before a real send has to (§10).
+
+    Touches profile metadata only — which stores and accounts the
+    Outlook profile holds. No message is read, created, or sent, so it
+    is legal in every scope: under D-58 opening the transport to send
+    is not reading, and this opens less than a send does.
+    """
+    import yaml
+
+    control_root = Path(args.control_root)
+    cfgdir = control_root / "config"
+    try:
+        transport_cfg = yaml.safe_load(
+            (cfgdir / "transport.yaml").read_text(encoding="utf-8")) or {}
+    except OSError:
+        transport_cfg = {}
+    try:
+        mailbox_cfg = yaml.safe_load(
+            (cfgdir / "mailbox-scope.yaml").read_text(encoding="utf-8")) or {}
+    except OSError:
+        mailbox_cfg = {}
+    mailbox = str(mailbox_cfg.get("control_mailbox")
+                  or "control@ubcsis.com").lower()
+    route = str(transport_cfg.get("route") or "graph").lower()
+
+    print(f"route:   {route}")
+    print(f"mailbox: {mailbox}")
+    if route != "outlook_com":
+        print("\nNothing to check here: the Outlook identity only matters "
+              "on the outlook_com route.")
+        return 0
+
+    from .outlook import OutlookTransport
+
+    try:
+        transport = OutlookTransport(mailbox)
+    except Exception as e:                              # noqa: BLE001
+        print(f"\nFAIL — could not reach Outlook at all: {str(e)[:300]}")
+        print("Outlook must be running on this machine, with pywin32 "
+              "installed.")
+        return 1
+
+    ok, lines = transport.identity_check()
+    print()
+    for line in lines:
+        print(line)
+    if ok:
+        print("\nPASS — a send would go out as the control mailbox, and "
+              "anything else is refused.")
+        return 0
+    print("\nFAIL — until this is fixed, sends are written UNDELIVERED "
+          "and retried; nothing goes out under a different identity.")
+    return 1
 
 
 def _gap_request_messages(config: dict, today: date) -> tuple[list, list]:
@@ -3419,6 +3481,15 @@ def main(argv: list[str] | None = None) -> int:
                             help="check this machine can run Control")
     doctor.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     doctor.set_defaults(fn=cmd_doctor)
+
+    tcheck = sub.add_parser(
+        "transport-check",
+        help="verify the sending identity without sending anything — "
+             "the store and, above all, the account Outlook would send "
+             "as (the 31-Aug-2026 defect: sends went out as the profile "
+             "default, info@, when no account matched control@)")
+    tcheck.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
+    tcheck.set_defaults(fn=cmd_transport_check)
 
     # Arabic filenames and citations are normal here (§4), and the Windows
     # console defaults to cp1252, which cannot encode them: printing a

@@ -182,6 +182,136 @@ def test_send_blocked_by_default():
         t.send(["ahmed@ubcsis.com"], [], "s", "b")
 
 
+# ---- sending identity --------------------------------------------------
+#
+# Found live on 31-Aug-2026, on the first real send: the account guard
+# raised correctly when no Outlook account matched control@ — and a
+# `try/except: pass` swallowed the refusal and called Send() anyway, so
+# Outlook sent under the profile's DEFAULT account, info@ubcsis.com. A
+# statutory notice apparently from a person, replies going where Control
+# cannot see them. No test had ever exercised a successful send, which
+# is exactly how a swallowed guard survives.
+
+class FakeAccount:
+    def __init__(self, smtp):
+        self.SmtpAddress = smtp
+
+
+class FakeSession:
+    def __init__(self, accounts):
+        self.Accounts = accounts
+
+
+class FakeMailItem:
+    def __init__(self):
+        self.To = ""
+        self.CC = ""
+        self.Subject = ""
+        self.Body = ""
+        self.SendUsingAccount = None
+        self.sent = False
+
+    def Send(self):
+        self.sent = True
+
+
+class StubbornMailItem(FakeMailItem):
+    """Ignores the SendUsingAccount assignment — the real pywin32
+    failure mode this guard exists for: the property set silently
+    no-ops and the mail would go out as the profile default."""
+
+    def __setattr__(self, name, value):
+        if name == "SendUsingAccount" and value is not None:
+            return
+        super().__setattr__(name, value)
+
+
+class FakeApplication:
+    def __init__(self, accounts, item_factory=FakeMailItem):
+        self.Session = FakeSession(accounts)
+        self._factory = item_factory
+        self.created = []
+
+    def CreateItem(self, kind):
+        item = self._factory()
+        self.created.append(item)
+        return item
+
+
+def _sending_namespace(accounts, item_factory=FakeMailItem):
+    inbox = FakeFolder("Inbox", [])
+    return FakeNamespace([FakeStore(CONTROL, [inbox])],
+                         application=FakeApplication(accounts, item_factory))
+
+
+def test_send_goes_out_as_the_control_mailbox():
+    namespace = _sending_namespace(
+        [FakeAccount("info@ubcsis.com"), FakeAccount(CONTROL)])
+    t = OutlookTransport(CONTROL, namespace=namespace, allow_send=True)
+
+    message_id = t.send(["hr@ubcsis.com"], ["accounts@ubcsis.com"], "s", "b")
+
+    mail = namespace.Application.created[0]
+    assert mail.sent is True
+    assert mail.SendUsingAccount.SmtpAddress == CONTROL
+    assert CONTROL in message_id
+
+
+def test_no_matching_account_refuses_and_names_what_the_profile_holds():
+    """The refusal must reach the caller — nothing may swallow it and
+    send as whoever the profile defaults to."""
+    namespace = _sending_namespace([FakeAccount("info@ubcsis.com")])
+    t = OutlookTransport(CONTROL, namespace=namespace, allow_send=True)
+
+    with pytest.raises(HaltError) as e:
+        t.send(["hr@ubcsis.com"], [], "s", "b")
+
+    assert "info@ubcsis.com" in str(e.value)
+    assert "Add Account" in str(e.value)
+    assert namespace.Application.created == [], \
+        "no mail item may even exist when the identity is refused"
+
+
+def test_identity_check_passes_when_store_and_account_both_match():
+    namespace = _sending_namespace([FakeAccount(CONTROL)])
+    t = OutlookTransport(CONTROL, namespace=namespace)
+
+    ok, lines = t.identity_check()
+
+    assert ok is True
+    assert any(line.startswith("store:   OK") for line in lines)
+    assert any(line.startswith("account: OK") for line in lines)
+
+
+def test_identity_check_reports_a_missing_account_without_sending():
+    """The exact 31-Aug configuration: control@ present as a store,
+    absent as an account — the shape that sent as info@."""
+    namespace = _sending_namespace([FakeAccount("info@ubcsis.com")])
+    t = OutlookTransport(CONTROL, namespace=namespace)
+
+    ok, lines = t.identity_check()
+
+    assert ok is False
+    assert any(line.startswith("store:   OK") for line in lines)
+    assert any("account: FAIL" in line and "info@ubcsis.com" in line
+               for line in lines)
+    assert namespace.Application.created == []
+
+
+def test_a_pin_that_does_not_hold_refuses_rather_than_sending():
+    """Setting SendUsingAccount can silently no-op. The send verifies
+    the pin held and refuses when it did not — identity is verified,
+    never assumed."""
+    namespace = _sending_namespace(
+        [FakeAccount(CONTROL)], item_factory=StubbornMailItem)
+    t = OutlookTransport(CONTROL, namespace=namespace, allow_send=True)
+
+    with pytest.raises(HaltError, match="profile default"):
+        t.send(["hr@ubcsis.com"], [], "s", "b")
+
+    assert namespace.Application.created[0].sent is False
+
+
 def test_mark_processed_clears_unread():
     item = FakeItem(entry_id="E5", internet_id="<m5@x>", sender="d@ubcsis.com")
     namespace = _namespace([item])

@@ -308,25 +308,89 @@ class OutlookTransport(MailTransport):
                 f"is not {self.expected_mailbox!r}"
             )
         application = self.namespace.Application
+        # Identity first, and nothing may swallow it. An earlier version
+        # wrapped this in `try/except: pass` and then called Send()
+        # anyway — so when no account matched control@, Outlook sent
+        # under the profile's DEFAULT account, and on the operating
+        # machine that is info@ubcsis.com: a statutory notice apparently
+        # from a person, with replies going where Control cannot see
+        # them. Found live on 31-Aug-2026, on the first real send.
+        account = self._account_for(application)
         mail = application.CreateItem(0)      # olMailItem
         mail.To = "; ".join(recipients)
         mail.CC = "; ".join(cc)
         mail.Subject = subject
         mail.Body = body
-        try:
-            mail.SendUsingAccount = self._account_for(application)
-        except Exception:
-            pass
+        self._pin_account(mail, account)
+        pinned = self._pinned_address(mail)
+        if pinned != self.expected_mailbox:
+            raise HaltError(
+                "refusing to send: Outlook would send as "
+                f"{pinned or 'the profile default account'!r}, not "
+                f"{self.expected_mailbox!r}. The message identity is part "
+                "of the message — it is verified, never assumed."
+            )
         mail.Send()
         return f"<outlook-{datetime.now():%Y%m%d%H%M%S%f}@{self.expected_mailbox}>"
 
+    @staticmethod
+    def _pin_account(mail, account) -> None:
+        """Set SendUsingAccount by both known routes. The plain
+        assignment silently no-ops on some pywin32/Outlook builds, which
+        is why the COM Invoke (dispid 64209) follows it; either may
+        fail, because `_pinned_address` verifies the result and `send`
+        refuses when it did not hold."""
+        try:
+            mail.SendUsingAccount = account
+        except Exception:
+            pass
+        try:
+            mail._oleobj_.Invoke(64209, 0, 8, 0, account)  # noqa: SLF001
+        except Exception:
+            pass
+
+    def _pinned_address(self, mail) -> str:
+        try:
+            account = mail.SendUsingAccount
+        except Exception:
+            return ""
+        return str(getattr(account, "SmtpAddress", "") or "").lower()
+
+    def identity_check(self) -> tuple[bool, list[str]]:
+        """Verify the sending identity without creating or sending
+        anything: the store (for reading, where the scope permits it)
+        and the account (for sending — the thing that failed live on
+        31-Aug-2026). Profile metadata only; no message is touched."""
+        ok, lines = True, []
+        try:
+            resolved = self._resolve()
+            lines.append(f"store:   OK — {resolved.store_address} "
+                         f"(folder {self.folder_name!r} present)")
+        except HaltError as e:
+            ok = False
+            lines.append(f"store:   FAIL — {e}")
+        try:
+            account = self._account_for(self.namespace.Application)
+            lines.append("account: OK — sends as "
+                         f"{str(getattr(account, 'SmtpAddress', '?')).lower()}")
+        except HaltError as e:
+            ok = False
+            lines.append(f"account: FAIL — {e}")
+        return ok, lines
+
     def _account_for(self, application):
+        candidates = []
         for account in application.Session.Accounts:
-            if str(getattr(account, "SmtpAddress", "")).lower() == self.expected_mailbox:
+            address = str(getattr(account, "SmtpAddress", "")).lower()
+            candidates.append(address or "?")
+            if address == self.expected_mailbox:
                 return account
         raise HaltError(
-            f"no Outlook account matches {self.expected_mailbox}; refusing to "
-            "send under a different identity"
+            f"no Outlook account matches {self.expected_mailbox} — the "
+            f"profile's accounts are: {', '.join(candidates) or 'none'}. "
+            "Refusing to send under a different identity: add "
+            f"{self.expected_mailbox} as an account in Outlook "
+            "(File - Add Account), not only as a shared folder."
         )
 
     def mark_processed(self, message_id: str) -> None:

@@ -430,6 +430,38 @@ def test_an_undelivered_alert_is_retried_on_the_next_run(env):
     assert "3 failed attempts" in report.repeatedly_undelivered[0]
 
 
+def test_a_send_the_transport_refuses_is_undelivered_not_a_crash(env):
+    """The 31-Aug-2026 identity defect, from the cycle's side. The
+    transport now refuses to send under the wrong account — and that
+    refusal must become an UNDELIVERED record with the reason reported
+    and a retry next run, not an exception that kills the sweep or,
+    worse, a key marked sent."""
+    from control.transport import MailTransport
+
+    class RefusingTransport(MailTransport):
+        can_send = True
+
+        def fetch_unprocessed(self):
+            return []
+
+        def send(self, recipients, cc, subject, body):
+            raise HaltError("no Outlook account matches control@ubcsis.com")
+
+    startup, control_root = env
+    for expected_attempts in (1, 2):
+        report = run_cycle(startup, RefusingTransport(), control_root,
+                           specs={}, tracked_items=[_vat()],
+                           enforcer=_enforcer(),
+                           today=date(2026, 8, 13), ceo=CEO, cfo=CFO)
+        assert not report.sent
+        assert report.undelivered, "the refusal must leave a record"
+        assert not report.skipped_duplicates, "a failed send is not a duplicate"
+        assert any("no Outlook account" in line
+                   for line in report.send_failures)
+    assert report.repeatedly_undelivered, \
+        "a second identical failure must be reported as a repeat"
+
+
 def test_a_delivered_alert_is_still_not_sent_twice(env):
     """The relaxation is bounded. Idempotency (§1.10) still holds for a
     message that actually reached somebody."""
