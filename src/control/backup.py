@@ -488,3 +488,55 @@ def continuity_lines(config: dict, *, on_date: date,
         except ValueError:
             lines.append("CONTINUITY: restore_test.last_tested is unreadable.")
     return lines
+
+
+def record_restore_test(control_root: Path, *, on_date: date,
+                        passed: bool) -> str:
+    """Write the restore-test outcome into the live backup.yaml.
+
+    §13.3 wants backup age AND last successful restore, and until now
+    the command printed "record this in backup.yaml" and left a human to
+    do it. That is the friction this codebase has already watched lose
+    two decisions, and the test is meant to repeat every 30 days — so
+    the one step nobody would keep doing by hand is the one that decides
+    whether the control keeps working.
+
+    **Edited line by line rather than re-serialised.** `yaml.safe_dump`
+    drops every comment, and this file now carries the whole reasoning
+    for D-11, D-59 and D-60 — including why the destination is not what
+    D-11 asked for. Losing that to record a date would be a bad trade.
+
+    Recording a FAILURE matters as much as recording a pass: a stale
+    `last_tested` with no `last_result` reads as "never tried", and
+    those are different facts (§1.1).
+    """
+    path = Path(control_root) / "config" / "backup.yaml"
+    if not path.is_file():
+        raise HaltError(f"no backup.yaml at {path}")
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    section = None
+    written = []
+    for index, line in enumerate(lines):
+        if not line.startswith((" ", "\t")) and line.rstrip().endswith(":"):
+            section = line.split(":", 1)[0].strip()
+            continue
+        if section != "restore_test":
+            continue
+        stripped = line.strip()
+        if stripped.startswith("last_tested:"):
+            lines[index] = f"  last_tested: {on_date.isoformat()}"
+            written.append("last_tested")
+        elif stripped.startswith("last_result:"):
+            lines[index] = f"  last_result: {'PASS' if passed else 'FAIL'}"
+            written.append("last_result")
+
+    if len(written) != 2:
+        raise HaltError(
+            "backup.yaml has no restore_test.last_tested / last_result to "
+            f"write (found: {', '.join(written) or 'neither'}). Not guessing "
+            "where to put them.")
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return f"recorded in {path.name}: last_tested {on_date:%d-%b-%Y}, " \
+           f"last_result {'PASS' if passed else 'FAIL'}"

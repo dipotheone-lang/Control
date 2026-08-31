@@ -2803,9 +2803,16 @@ def cmd_backup(args) -> int:
         print(f"  database:       {outcome['db']}")
         print(f"  audit chain:    {outcome['chain']}")
         print(f"\n{'PASS' if outcome['ok'] else 'FAIL'}")
-        if outcome["ok"]:
-            print("\nRecord this in backup.yaml: restore_test.last_tested = "
-                  f"{today.isoformat()}")
+        if args.record:
+            from .backup import record_restore_test
+
+            print("\n" + record_restore_test(control_root, on_date=today,
+                                              passed=bool(outcome["ok"])))
+        else:
+            print("\nNot recorded. §13.3 wants backup age AND last "
+                  "successful restore, and an unrecorded test is one "
+                  "nobody can see happened:")
+            print("  python -m control backup --test --record")
         return 0 if outcome["ok"] else 1
 
     result: BackupResult = create_backup(control_root, config, on_date=today)
@@ -3208,6 +3215,10 @@ def main(argv: list[str] | None = None) -> int:
     backup.add_argument("--control-root", default=os.environ.get("CONTROL_ROOT"))
     backup.add_argument("--init-key", action="store_true",
                         help="create and store the encryption key (once)")
+    backup.add_argument("--record", action="store_true",
+                        help="write the restore-test outcome into "
+                             "backup.yaml (§13.3), line by line so the "
+                             "file's comments survive")
     backup.add_argument("--test", action="store_true",
                         help="§13.3 restore test: unpack the latest backup "
                              "and verify the database and audit chain")

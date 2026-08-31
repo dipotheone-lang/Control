@@ -424,3 +424,81 @@ def test_an_explicit_path_still_wins(tmp_path):
     config = {"destination": {"path": str(tmp_path), "auto_detect": "onedrive"}}
     assert resolve_destination(config, {"OneDrive": "/somewhere/else"}) == tmp_path
     assert "destination.path in backup.yaml" in describe_destination(config, {})
+
+
+# ---- recording the restore test ---------------------------------------
+
+def test_the_restore_test_records_itself(tmp_path):
+    """§13.3 wants backup age AND last successful restore. The command
+    used to print "record this in backup.yaml" and leave a human to do
+    it — and the test is meant to repeat every 30 days, so the one step
+    nobody keeps doing by hand decides whether the control keeps
+    working."""
+    from control.backup import record_restore_test
+
+    root = tmp_path / "CONTROL"
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "backup.yaml").write_text(
+        "restore_test:\n"
+        "  # a comment carrying the reasoning\n"
+        "  every_days: 30\n"
+        "  last_tested: null\n"
+        "  last_result: null\n", encoding="utf-8")
+
+    note = record_restore_test(root, on_date=date(2026, 8, 31), passed=True)
+    body = (root / "config" / "backup.yaml").read_text(encoding="utf-8")
+
+    assert "last_tested: 2026-08-31" in body
+    assert "last_result: PASS" in body
+    assert "every_days: 30" in body
+    # Edited line by line: safe_dump would have taken the comment, and
+    # this file carries the whole reasoning for D-11, D-59 and D-60.
+    assert "# a comment carrying the reasoning" in body
+    assert "31-Aug-2026" in note
+
+
+def test_a_failed_restore_is_recorded_too(tmp_path):
+    """A stale last_tested with no result reads as "never tried", and
+    those are different facts (§1.1)."""
+    from control.backup import record_restore_test
+
+    root = tmp_path / "CONTROL"
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "backup.yaml").write_text(
+        "restore_test:\n  last_tested: null\n  last_result: null\n",
+        encoding="utf-8")
+
+    record_restore_test(root, on_date=date(2026, 8, 31), passed=False)
+    body = (root / "config" / "backup.yaml").read_text(encoding="utf-8")
+    assert "last_result: FAIL" in body
+
+
+def test_it_refuses_rather_than_guessing_where_to_write(tmp_path):
+    from control.backup import record_restore_test
+
+    root = tmp_path / "CONTROL"
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "backup.yaml").write_text(
+        "schedule:\n  daily: true\n", encoding="utf-8")
+
+    with pytest.raises(HaltError) as caught:
+        record_restore_test(root, on_date=date(2026, 8, 31), passed=True)
+    assert "Not guessing" in str(caught.value)
+
+
+def test_a_last_tested_elsewhere_in_the_file_is_not_touched(tmp_path):
+    """Only the restore_test section. Another key of the same name under
+    a different heading is a different fact."""
+    from control.backup import record_restore_test
+
+    root = tmp_path / "CONTROL"
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "backup.yaml").write_text(
+        "other_section:\n  last_tested: 2020-01-01\n"
+        "restore_test:\n  last_tested: null\n  last_result: null\n",
+        encoding="utf-8")
+
+    record_restore_test(root, on_date=date(2026, 8, 31), passed=True)
+    body = (root / "config" / "backup.yaml").read_text(encoding="utf-8")
+    assert "last_tested: 2020-01-01" in body
+    assert "last_tested: 2026-08-31" in body
