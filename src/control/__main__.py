@@ -142,6 +142,18 @@ def cmd_outlook_scan(args) -> int:
     from .discovery.outlook_scan import run_outlook_scan, write_overview
     from .outlook import _dispatch_namespace
 
+    # The scope decides whether a mailbox may be opened at all, checked
+    # here rather than at the fetch. `scope_statutory` says a narrowing
+    # that lives only in a decision document is a narrowing until
+    # somebody runs the wrong command — and this was the wrong command,
+    # ungated, on 31-Aug-2026: it read 14 mailboxes under a scope whose
+    # entire basis for operating without the §12 pre-conditions is that
+    # none is read. `cycle` was gated; discovery was not.
+    from .scope_statutory import MAILBOX_READ, assert_scope_permits
+
+    assert_scope_permits(getattr(args, "scope", "FULL"), MAILBOX_READ)
+
+
     # §5.6 runs before the mailbox is touched — state, integrity, roots,
     # then mail. This command used to go straight to the namespace,
     # which is the one order the charter rules out.
@@ -933,6 +945,18 @@ def cmd_phase0(args) -> int:
         build_results, write_confidential_scope, write_discovery_report,
         write_paste_summary,
     )
+
+    # The scope decides whether a mailbox may be opened at all, checked
+    # here rather than at the fetch. `scope_statutory` says a narrowing
+    # that lives only in a decision document is a narrowing until
+    # somebody runs the wrong command — and this was the wrong command,
+    # ungated, on 31-Aug-2026: it read 14 mailboxes under a scope whose
+    # entire basis for operating without the §12 pre-conditions is that
+    # none is read. `cycle` was gated; discovery was not.
+    from .scope_statutory import MAILBOX_READ, assert_scope_permits
+
+    assert_scope_permits(getattr(args, "scope", "FULL"), MAILBOX_READ)
+
     from .discovery.outlook_scan import run_outlook_scan, write_overview
     from .outlook import _dispatch_namespace, safe_get
 

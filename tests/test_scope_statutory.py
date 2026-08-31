@@ -445,3 +445,68 @@ def test_a_delivered_alert_is_still_not_sent_twice(env):
 
     assert first.sent and not second.sent
     assert second.skipped_duplicates
+
+
+# ---- the commands that open a mailbox ---------------------------------
+#
+# `cycle` was gated from the start. Discovery was not, and on 31-Aug-2026
+# `phase0` read 14 mailboxes on the operating machine under a scope whose
+# entire basis for operating without the §12 pre-conditions is that none
+# is read — including a named individual's mailbox, a consumer Gmail
+# account, and four belonging to a different company.
+#
+# scope_statutory's own docstring says a narrowing that lives only in a
+# decision document is a narrowing until somebody runs the wrong command.
+# These assert that the wrong command now refuses.
+
+def _args(**over):
+    from types import SimpleNamespace
+
+    base = dict(scope=STATUTORY_ONLY, control_root=".", ub_root=".",
+                run_mode="SUPERVISED", learning_mode="OBSERVE", level=2,
+                today="", mailbox="", allow_send=False)
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def test_phase0_refuses_to_open_a_mailbox_under_the_narrowed_scope():
+    from control.__main__ import cmd_phase0
+
+    with pytest.raises(HaltError) as caught:
+        cmd_phase0(_args())
+    message = str(caught.value)
+    assert "does not permit mailbox_read" in message
+    assert "no PDPL lawful basis is documented" in message
+
+
+def test_the_historical_scan_refuses_too():
+    from control.__main__ import cmd_outlook_scan
+
+    with pytest.raises(HaltError):
+        cmd_outlook_scan(_args())
+
+
+def test_the_refusal_comes_before_anything_is_opened(monkeypatch):
+    """Not "reads nothing" — does not connect. Opening the mailbox is
+    the processing §12.2 governs; what is read afterwards is a second
+    act, and the scan writes its output either way."""
+    import control.outlook as outlook
+    from control.__main__ import cmd_phase0
+
+    def explode():
+        raise AssertionError("the Outlook namespace was opened")
+
+    monkeypatch.setattr(outlook, "_dispatch_namespace", explode)
+    with pytest.raises(HaltError):
+        cmd_phase0(_args())
+
+
+def test_the_full_scope_is_not_blocked():
+    """The gate is the scope, not a ban. Under FULL these commands run
+    as before — they fail here for want of Outlook, not for want of
+    permission."""
+    from control.__main__ import cmd_phase0
+
+    with pytest.raises(Exception) as caught:
+        cmd_phase0(_args(scope="FULL"))
+    assert "does not permit mailbox_read" not in str(caught.value)
