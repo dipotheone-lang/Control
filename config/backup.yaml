@@ -33,13 +33,25 @@ destination:
   #   anybody remembering anything. The "backs up nothing on the days
   #   E: is unplugged" risk recorded in D-59 does not exist.
   #
-  #   Worse, and unresolved: a fixed volume may be a second physical
-  #   disk or a partition of the same one. If it is a partition, the
-  #   backup does not survive the disk failure or the theft it exists
-  #   to survive — and D-59's claim that it "survives the laptop" is
-  #   then false. `Get-Partition | Select DiskNumber, DriveLetter`
-  #   settles it, and until it does this destination is UNPROVEN rather
-  #   than adequate.
+  #   Worse, and now MEASURED rather than suspected: C: and E: are both
+  #   partitions of DiskNumber 0. One physical disk. The backup does not
+  #   survive disk failure, theft, or loss of the laptop — the three
+  #   events D-11 exists for — and D-59's stated reasoning, that it
+  #   "survives the laptop, which a folder in the user profile would
+  #   not", is false. A partition on the same disk survives the laptop
+  #   no better than the user profile does.
+  #
+  # So this destination protects against ONE thing: accidental deletion
+  # of CONTROL_ROOT. That is real and worth having, and it is not what
+  # D-11 asked for. It is left in place because a backup on the same
+  # disk beats no backup at all, and marked here as INADEQUATE against
+  # D-11 so nobody reads a green backup line as continuity.
+  #
+  # The decision belongs to the CEO. The honest options are a USB drive
+  # (which then really does have the "nothing on the days it is out"
+  # risk), a network share reachable by UNC — a scheduled task may not
+  # see a mapped letter — or the OneDrive tenant D-11 named and D-59
+  # recorded as never provisioned.
   #
   # It does NOT survive a fire in the office either way. §13.3's
   # backup-age line and the restore test are the controls that matter
