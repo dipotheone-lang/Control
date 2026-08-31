@@ -321,38 +321,37 @@ def test_repo_config_records_the_decision():
     assert data["schedule"]["before_first_write"] is True
     assert data["restore_test"]["last_tested"] is None
 
-    # The path was null on purpose — "set on the machine that runs, not
-    # guessed in a repository". The CEO set it on 30-Aug-2026 (D-59) to
-    # the company drive, after the OneDrive tenant was never provisioned
-    # and the audit chain sat unprotected on one laptop for weeks.
+    # Null again, and for the original reason: a path here bakes in one
+    # machine's user name, and this file is version controlled.
     #
-    # The original principle is set aside knowingly and only because
-    # there is one machine, and on it CONTROL_ROOT *is* this repository —
-    # so this file is that machine's config, not a guess about someone
-    # else's. A second machine makes it wrong again.
-    assert data["destination"]["path"] == r"E:\UBCSIS Co Date Jan 2026\Control-Backup"
+    # It was briefly set to E: under D-59, then measured: C: and E: are
+    # partitions of the same physical disk, so that backup survived none
+    # of the events D-11 exists for. D-60 moved it to OneDrive, which
+    # auto_detect resolves per machine.
+    assert data["destination"]["path"] is None
+    assert data["destination"]["auto_detect"] == "onedrive"
 
 
 def test_repo_config_reports_itself_as_unprotected_here():
-    """On a machine without that drive, the honest answer is still 'not
-    backed up' — and it names the folder it looked in, so the reader can
-    tell an unplugged drive from a misconfigured path."""
+    """On a machine with no OneDrive, the honest answer is still 'not
+    backed up' — and it names what it looked for, so the reader can tell
+    an absent account from a misconfigured path."""
     data = yaml.safe_load((REPO_CONFIG / "backup.yaml").read_text(encoding="utf-8"))
     lines = continuity_lines(data, on_date=date(2026, 8, 16), env={})
-    assert any("CONTROL_ROOT is not protected" in line for line in lines)
-    assert any("Control-Backup" in line for line in lines)
+    assert any("NOT CONFIGURED" in line for line in lines)
 
 
-def test_a_configured_destination_that_cannot_be_written_is_not_silent():
-    """The cost of choosing the company drive: it backs up nothing on
-    the days E: is unplugged. That must read as a finding, never as a
-    quiet success (§1.1)."""
+def test_a_destination_that_cannot_be_written_is_not_silent(tmp_path):
+    """A backup that did not happen must read as a finding, never as a
+    quiet success (§1.1) — and must not stop a run whose only output is
+    class 1 alerts."""
     from control.backup import ensure_daily_backup
 
     data = yaml.safe_load((REPO_CONFIG / "backup.yaml").read_text(encoding="utf-8"))
-    result = ensure_daily_backup(REPO_CONFIG.parent, data,
-                                 on_date=date(2026, 8, 16), env={},
-                                 must_succeed=False)
+    result = ensure_daily_backup(
+        REPO_CONFIG.parent, data, on_date=date(2026, 8, 16),
+        # A destination that resolves but has no key behind it.
+        env={"OneDrive": str(tmp_path)}, must_succeed=False)
     assert not result.written
     assert result.gaps and "BACKUP DID NOT RUN" in result.gaps[0]
 

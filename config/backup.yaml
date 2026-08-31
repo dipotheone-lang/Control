@@ -13,55 +13,43 @@
 # the laptop.
 
 destination:
-  # Absolute path to the synced folder. Left null so it is set on the
-  # machine that will actually run, rather than guessed here.
+  # OneDrive, chosen by the CEO on 31-Aug-2026 (D-60), replacing the E:
+  # drive D-59 set the day before.
   #
-  # auto_detect resolves it from the Windows OneDrive environment
-  # variables when path is null: OneDriveCommercial first, then
-  # OneDrive. If neither resolves, backup reports NOT CONFIGURED and
-  # says so — it never silently writes nowhere.
-  # Set by the CEO on 30-Aug-2026 (D-59). The company drive, not
-  # OneDrive: the tenant was never provisioned and waiting for it left
-  # the audit chain existing only on the laptop.
+  # WHY E: WAS WRONG, measured rather than assumed: C: and E: are both
+  # partitions of DiskNumber 0. One physical disk. A backup there does
+  # not survive disk failure, theft, or loss of the laptop — the three
+  # events D-11 exists for — so D-59's reasoning that it "survives the
+  # laptop, which a folder in the user profile would not" was false. It
+  # protected against accidental deletion of CONTROL_ROOT and nothing
+  # else.
   #
-  # WHAT THIS BUYS — corrected 31-Aug-2026, having actually looked.
+  # WHAT THIS IS NOT: the company Microsoft 365 tenant D-11 named. This
+  # machine carries a PERSONAL OneDrive — the folder is plain "OneDrive"
+  # and OneDriveCommercial is unset, which is how Windows distinguishes
+  # them. D-11 chose the company tenant precisely because the mail
+  # already lives there, so it adds no new processor under §12.2 and no
+  # new NDA exposure. A personal account adds both.
   #
-  # E: is a FIXED volume with 26.4 GB free, not the removable drive the
-  # decision was written assuming. Two consequences, opposite in sign:
+  # WHAT MAKES IT ACCEPTABLE MEANWHILE: the archive is encrypted with
+  # Fernet BEFORE it is written, and the key lives in Windows Credential
+  # Manager, never in the file and never in this repository. What syncs
+  # is ciphertext. A personal account holding an encrypted blob is a far
+  # smaller exposure than one holding readable company records — and it
+  # is off the machine, which E: never was.
   #
-  #   Better: it is always attached, so the daily backup runs without
-  #   anybody remembering anything. The "backs up nothing on the days
-  #   E: is unplugged" risk recorded in D-59 does not exist.
+  # THE CONDITION THAT MAKES IT A BACKUP AT ALL: the key is on the
+  # laptop. If the laptop dies and the key was never written down
+  # elsewhere, the synced archives are unrecoverable by anyone,
+  # including the CEO. Escrow is not a nicety here; it is the half of
+  # the mechanism that survives.
   #
-  #   Worse, and now MEASURED rather than suspected: C: and E: are both
-  #   partitions of DiskNumber 0. One physical disk. The backup does not
-  #   survive disk failure, theft, or loss of the laptop — the three
-  #   events D-11 exists for — and D-59's stated reasoning, that it
-  #   "survives the laptop, which a folder in the user profile would
-  #   not", is false. A partition on the same disk survives the laptop
-  #   no better than the user profile does.
-  #
-  # So this destination protects against ONE thing: accidental deletion
-  # of CONTROL_ROOT. That is real and worth having, and it is not what
-  # D-11 asked for. It is left in place because a backup on the same
-  # disk beats no backup at all, and marked here as INADEQUATE against
-  # D-11 so nobody reads a green backup line as continuity.
-  #
-  # The decision belongs to the CEO. The honest options are a USB drive
-  # (which then really does have the "nothing on the days it is out"
-  # risk), a network share reachable by UNC — a scheduled task may not
-  # see a mapped letter — or the OneDrive tenant D-11 named and D-59
-  # recorded as never provisioned.
-  #
-  # It does NOT survive a fire in the office either way. §13.3's
-  # backup-age line and the restore test are the controls that matter
-  # here, not the destination: a backup nobody checks the age of is a
-  # hope, and one nobody has restored is a guess.
-  #
-  # Windows path on purpose: this file is read on the laptop that runs.
-  path: E:\UBCSIS Co Date Jan 2026\Control-Backup
+  # Path stays null and auto_detect does the work: hardcoding a path
+  # bakes in one machine's user name, and this file is version
+  # controlled.
+  path: null
   auto_detect: onedrive
-  subfolder: null
+  subfolder: UBCSIS-Control-Backup
 
 encryption:
   # Non-negotiable. An unencrypted backup of this data in a synced
